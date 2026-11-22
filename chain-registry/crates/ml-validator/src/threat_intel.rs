@@ -295,6 +295,40 @@ pub fn check(tarball_bytes: &[u8], files: &[(String, String)]) -> ThreatIntelRes
     ThreatIntelResult { matches }
 }
 
+/// Checks a pre-unpacked archive against the threat-intelligence database using
+/// precomputed raw-byte SHA-256 hashes (zero per-scan disk or full re-hashing, `VNA-12`).
+pub fn check_unpacked(archive: &creg_unpack::UnpackedArchive) -> ThreatIntelResult {
+    let db = get_db();
+    let mut matches = Vec::new();
+
+    if let Some(entry) = db.entries.get(&archive.tarball_sha256) {
+        debug!(
+            "Threat intel: tarball hash {} matches '{}'",
+            &archive.tarball_sha256[..archive.tarball_sha256.len().min(16)],
+            entry.label
+        );
+        matches.push((archive.tarball_sha256.clone(), entry.clone()));
+    }
+
+    let mut seen = HashSet::with_capacity(archive.files.len());
+    for file in &archive.files {
+        if !seen.insert(&file.sha256) {
+            continue;
+        }
+        if let Some(entry) = db.entries.get(&file.sha256) {
+            debug!(
+                "Threat intel: file '{}' hash {} matches '{}'",
+                file.path,
+                &file.sha256[..file.sha256.len().min(16)],
+                entry.label
+            );
+            matches.push((file.sha256.clone(), entry.clone()));
+        }
+    }
+
+    ThreatIntelResult { matches }
+}
+
 /// Add a new entry to the on-disk database.
 ///
 /// Called when the network reaches consensus that a package is malicious.

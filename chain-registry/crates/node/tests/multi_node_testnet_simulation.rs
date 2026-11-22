@@ -10,8 +10,7 @@ use common::{
     PackageManifest, PublishRequest, Transaction, TrustVerdict, VerdictStatus,
 };
 use consensus::{
-    bls_aggregate::{aggregate_signatures, BlsKeypair, BlsSignature},
-    pbft::{pbft_signature_message, PbftEngine},
+    pbft::{pbft_signature_message, verify_pbft_phase_signature, PbftEngine},
     validator_set::{ValidatorInfo, ValidatorSet},
     vrf::{select_proposer_deterministic, VrfValidator},
 };
@@ -27,7 +26,6 @@ use node::{
     p2p_peer_score::{PeerAction, PeerScoreTracker},
     p2p_subnet_filter::SubnetConnectionFilter,
 };
-use rand::rngs::OsRng;
 use resolver::attestation_verifier::SignedPackageAttestation;
 use std::time::Instant;
 use tempfile::TempDir;
@@ -36,7 +34,6 @@ struct TestValidatorNode {
     id: String,
     peer_id: PeerId,
     ed25519_key: SigningKey,
-    bls_keypair: BlsKeypair,
     _store: ChainStore,
     _temp_dir: TempDir,
 }
@@ -47,13 +44,11 @@ impl TestValidatorNode {
         let store = ChainStore::open(temp_dir.path()).expect("open chain store");
         let peer_id = PeerId::random();
         let ed25519_key = SigningKey::from_bytes(&[seed; 32]);
-        let bls_keypair = BlsKeypair::generate(&mut OsRng);
 
         Self {
             id: id.to_string(),
             peer_id,
             ed25519_key,
-            bls_keypair,
             _store: store,
             _temp_dir: temp_dir,
         }
@@ -151,9 +146,9 @@ fn test_multi_node_testnet_cluster_full_simulation() {
     let block_hash = sha256_hex(format!("block-{}-{}", block_height, content_hash).as_bytes());
 
     for node in &nodes {
-        // Sign vote using BLS keypair
+        // Sign vote using Ed25519 key
         let vote_bytes = format!("{}:{}:{}", block_height, block_hash, node.id);
-        let sig = node.bls_keypair.sign(vote_bytes.as_bytes());
+        let sig = hex::encode(node.ed25519_key.sign(vote_bytes.as_bytes()).to_bytes());
 
         votes.push((node.id.clone(), sig));
     }
@@ -161,7 +156,7 @@ fn test_multi_node_testnet_cluster_full_simulation() {
         "  ✓ 4/4 nodes completed sandbox analysis in {:?}",
         start_analysis.elapsed()
     );
-    println!("  ✓ 4 independent BLS signatures produced for PBFT Prepare/Commit");
+    println!("  ✓ 4 independent Ed25519 signatures produced for PBFT Prepare/Commit");
 
     // ─────────────────────────────────────────────────────────────────────────────
     // 5. PBFT Consensus & BLS Multi-Signature Aggregation
@@ -240,21 +235,21 @@ fn test_multi_node_testnet_cluster_full_simulation() {
         }
     }
 
-    let finalised_block = pbft.get_finalised_block(&b_hash);
-    assert!(finalised_block.is_some());
-
-    // Aggregate the 4 BLS signatures into 1 compressed aggregate signature
-    let sigs: Vec<BlsSignature> = votes.iter().map(|(_, s)| s.clone()).collect();
-    let indices = vec![0, 1, 2, 3];
-    let agg_sig = aggregate_signatures(&sigs, &indices, 4).expect("BLS aggregation");
+    let finalised_block = pbft.get_finalised_block(&b_hash).expect("finalised block");
+    for sig in &finalised_block.pbft_signatures {
+        verify_pbft_phase_signature("commit", &b_hash, &sig.pubkey, &sig.signature)
+            .expect("valid PBFT commit signature");
+    }
 
     println!(
         "  ✓ PBFT Proposer '{}' selected deterministically",
         selected_proposer
     );
     println!("  ✓ PBFT Finalized at Height 1 (Quorum: 4/4 >= 2f+1)");
-    println!("  ✓ 4 BLS signatures compressed into single Aggregate Signature");
-    println!("  ✓ Participant count: {}", agg_sig.participant_count);
+    println!(
+        "  ✓ {} Ed25519 commit signatures verified",
+        finalised_block.pbft_signatures.len()
+    );
 
     // ─────────────────────────────────────────────────────────────────────────────
     // 6. Cross-Chain Merkle Anchoring & State Root Proofs
@@ -278,8 +273,8 @@ fn test_multi_node_testnet_cluster_full_simulation() {
             state_root: root_hash.clone(),
             transparency_root: root_hash.clone(),
             package_count: 1,
-            bls_aggregate_signature: Some(agg_sig.aggregate_sig_hex.clone()),
-            participant_bitmask: Some(agg_sig.participant_bitmask.clone()),
+            bls_aggregate_signature: None,
+            participant_bitmask: None,
             timestamp: 1724760000,
         })
         .expect("enqueue checkpoint");
@@ -295,13 +290,18 @@ fn test_multi_node_testnet_cluster_full_simulation() {
     // 7. Developer Gateway Proxy Interception & Client Gating
     // ─────────────────────────────────────────────────────────────────────────────
     println!("\n[Stage 7/7] Verifying Developer Client Gateway Proxy Interception...");
+    let commit_sigs: Vec<String> = finalised_block
+        .pbft_signatures
+        .iter()
+        .map(|s| s.signature.clone())
+        .collect();
     let attestation = SignedPackageAttestation {
         canonical: package_id.canonical(),
         content_hash: content_hash.clone(),
         publisher: "0x1234567890abcdef1234567890abcdef12345678".into(),
         risk_score: 96,
         block_height: 1,
-        validator_signatures: vec![agg_sig.aggregate_sig_hex.clone()],
+        validator_signatures: commit_sigs,
         merkle_root: root_hash.clone(),
         merkle_proof: Some(proof.audit_path.clone()),
         timestamp: 1724760000,

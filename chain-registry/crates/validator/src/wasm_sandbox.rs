@@ -4,25 +4,21 @@ use common::{Finding, FindingSeverity, PackageManifest};
 use std::time::Instant;
 
 fn extract_wasm_files(tarball_path: &std::path::Path) -> Result<Vec<(String, Vec<u8>)>> {
-    use flate2::read::GzDecoder;
-    use std::io::Read;
-
     let tarball_bytes = std::fs::read(tarball_path)
         .with_context(|| format!("Failed to read tarball at {:?}", tarball_path))?;
 
-    let gz = GzDecoder::new(&tarball_bytes[..]);
-    let mut archive = tar::Archive::new(gz);
-    let mut wasm_files = Vec::new();
+    let unpacked = creg_unpack::unpack_tarball(&tarball_bytes)
+        .map_err(|e| anyhow::anyhow!("Bounded archive extraction failed: {e}"))?;
 
-    for entry in archive.entries()? {
-        let mut entry = entry?;
-        let path = entry.path()?.to_string_lossy().to_string();
-        if path.ends_with(".wasm") {
-            let mut buf = Vec::new();
-            entry.read_to_end(&mut buf)?;
-            wasm_files.push((path, buf));
-        }
-    }
+    let wasm_files = unpacked
+        .files
+        .into_iter()
+        .filter(|file| {
+            file.path.to_ascii_lowercase().ends_with(".wasm")
+                || file.raw_bytes.starts_with(b"\x00asm")
+        })
+        .map(|file| (file.path, file.raw_bytes.to_vec()))
+        .collect();
     Ok(wasm_files)
 }
 

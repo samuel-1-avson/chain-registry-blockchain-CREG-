@@ -10,6 +10,7 @@ use std::{
 };
 
 use alloy::primitives::{Address, U256};
+pub use arc_swap::ArcSwap;
 use chrono::{DateTime, Utc};
 use serde::Serialize;
 use tokio::sync::RwLock;
@@ -200,6 +201,45 @@ fn package_round_vote_key(signature: &common::ValidatorSignature) -> String {
 
 // ─── NodeState ─────────────────────────────────────────────────────────────────
 
+/// Maximum number of tracked live package rounds in memory (VNA-28).
+pub const MAX_PACKAGE_ROUNDS: usize = 4_096;
+/// Maximum cached publisher stake balances in memory (VNA-28).
+pub const MAX_PUBLISHER_STAKE_CACHE: usize = 10_000;
+/// Maximum cached VRF proofs per epoch in memory.
+pub const MAX_VRF_PROOFS_PER_EPOCH: usize = 2_048;
+
+/// Background-refreshed health snapshot served lock-free by `GET /v1/health` (VNA-28).
+#[derive(Serialize, Clone)]
+pub struct NodeHealthSnapshot {
+    pub node_id: String,
+    pub is_validator: bool,
+    pub version: String,
+    pub validator_set_sync: ValidatorSetSyncStatus,
+    pub sync_lag_blocks: u64,
+    pub sync_max_peer_tip: u64,
+    pub sandbox: validator::sandbox::SandboxStatus,
+}
+
+impl Default for NodeHealthSnapshot {
+    fn default() -> Self {
+        Self {
+            node_id: String::new(),
+            is_validator: false,
+            version: env!("CARGO_PKG_VERSION").to_string(),
+            validator_set_sync: ValidatorSetSyncStatus::default(),
+            sync_lag_blocks: 0,
+            sync_max_peer_tip: 0,
+            sandbox: validator::sandbox::SandboxStatus {
+                engine: "initializing".into(),
+                isolated: false,
+                dev_bypass: false,
+                degraded: false,
+                note: "Initializing sandbox probe".into(),
+            },
+        }
+    }
+}
+
 /// Shared mutable state passed to every subsystem via `Arc<RwLock<_>>`.
 pub struct NodeState {
     pub chain: ChainStore,
@@ -207,6 +247,8 @@ pub struct NodeState {
     pub publisher_index: PublisherIndex,
     pub validator_set_bootstrap: common::ValidatorSet,
     pub validator_set: common::ValidatorSet,
+    /// Wait-free read snapshot of the active validator set for hot paths (P2P / verifiers).
+    pub validator_set_snapshot: Arc<ArcSwap<common::ValidatorSet>>,
     /// Live package-consensus rounds keyed by the current consensus subject.
     pub package_rounds: HashMap<String, PackageRound>,
 
@@ -265,6 +307,18 @@ pub struct NodeState {
 pub const PUBLISHER_STAKE_CACHE_TTL: Duration = Duration::from_secs(300);
 
 impl NodeState {
+    /// Publish the current `validator_set` into the wait-free `ArcSwap` snapshot.
+    pub fn sync_validator_set_snapshot(&self) {
+        self.validator_set_snapshot
+            .store(Arc::new(self.validator_set.clone()));
+    }
+
+    /// Replace `validator_set` and immediately publish the lock-free snapshot.
+    pub fn set_validator_set(&mut self, next: common::ValidatorSet) {
+        self.validator_set = next;
+        self.sync_validator_set_snapshot();
+    }
+
     /// Retrieve cached publisher stake if present and unexpired.
     pub fn get_cached_publisher_stake(&self, publisher: &Address) -> Option<U256> {
         let (staked, cached_at) = self.publisher_stake_cache.get(publisher)?;
@@ -277,6 +331,22 @@ impl NodeState {
 
     /// Insert or update publisher stake balance in the in-memory cache.
     pub fn set_cached_publisher_stake(&mut self, publisher: Address, staked: U256) {
+        if !self.publisher_stake_cache.contains_key(&publisher)
+            && self.publisher_stake_cache.len() >= MAX_PUBLISHER_STAKE_CACHE
+        {
+            self.publisher_stake_cache
+                .retain(|_, (_, ts)| ts.elapsed() <= PUBLISHER_STAKE_CACHE_TTL);
+            if self.publisher_stake_cache.len() >= MAX_PUBLISHER_STAKE_CACHE {
+                if let Some(oldest_key) = self
+                    .publisher_stake_cache
+                    .iter()
+                    .min_by_key(|(_, (_, ts))| *ts)
+                    .map(|(k, _)| *k)
+                {
+                    self.publisher_stake_cache.remove(&oldest_key);
+                }
+            }
+        }
         self.publisher_stake_cache
             .insert(publisher, (staked, Instant::now()));
     }
@@ -327,11 +397,25 @@ impl NodeState {
             &subject,
             matches!(&vote.vote, common::ValidatorVote::Approve),
         );
-        match self.package_rounds.entry(subject.clone()) {
-            Entry::Occupied(mut entry) => entry.get_mut().record_vote(vote),
-            Entry::Vacant(entry) => {
-                entry.insert(PackageRound::from_vote(subject, vote));
+        if let Some(round) = self.package_rounds.get_mut(&subject) {
+            round.record_vote(vote);
+        } else {
+            while self.package_rounds.len() >= MAX_PACKAGE_ROUNDS {
+                let oldest = self
+                    .package_rounds
+                    .iter()
+                    .min_by_key(|(_, r)| r.first_vote_at)
+                    .map(|(k, _)| k.clone());
+                match oldest {
+                    Some(k) => {
+                        self.package_rounds.remove(&k);
+                        self.package_committees.remove(&k);
+                    }
+                    None => break,
+                }
             }
+            self.package_rounds
+                .insert(subject.clone(), PackageRound::from_vote(subject, vote));
         }
         if !repeated {
             self.chain.emit_registry_event(event);
@@ -453,6 +537,25 @@ impl NodeState {
         }
         if let Err(error) = self.reconcile_committed_pbft_rounds() {
             tracing::error!(error = %error, "[PBFT] canonical round reconciliation failed; retained evidence unchanged");
+        }
+        let mut updated_validator_scores = false;
+        let committed_secs = block.header.timestamp.timestamp().max(0) as u64;
+        for tx in &block.transactions {
+            if let Some(record) = tx.published_record() {
+                if let Some(committee) = record.analysis_committee.as_ref() {
+                    crate::package_admission::update_performance_scores(
+                        &mut self.validator_set,
+                        &record.validator_signatures,
+                        committee,
+                        true,
+                        committed_secs,
+                    );
+                    updated_validator_scores = true;
+                }
+            }
+        }
+        if updated_validator_scores {
+            self.sync_validator_set_snapshot();
         }
         let hashes = common::block_transaction_hashes(block);
         self.forced_inclusion_tracker.mark_included(&hashes);

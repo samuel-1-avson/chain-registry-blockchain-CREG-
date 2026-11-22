@@ -23,13 +23,16 @@ mod gossip;
 mod governance_api;
 mod grpc;
 mod intelligence;
+mod ipfs_fetch;
 mod json_rpc;
 mod l1_quorum;
 mod metrics;
 mod namespace_consensus;
 mod openapi;
 mod p2p;
+mod p2p_peer_score;
 mod p2p_rate_limit;
+mod p2p_subnet_filter;
 mod package_admission;
 mod pbft_safety;
 mod pending_pool;
@@ -528,34 +531,24 @@ async fn main() -> Result<()> {
         validate_l1_chain_id(&config.eth_rpc_url, None).await?;
     }
 
-    // â”€â”€ Validate configuration early â€” fail fast with clear messages â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    // ── Validate configuration early — fail fast with clear messages ──────────
     let config_errors = config.validate();
     if !config_errors.is_empty() {
-        tracing::warn!("Configuration warnings/errors:");
-        for err in &config_errors {
-            tracing::warn!("  âœ— {}", err);
+        let (warnings, hard_errors) = partition_config_errors(&config_errors, config.is_validator);
+        if !warnings.is_empty() {
+            tracing::warn!("Configuration notices (non-fatal for optional L1 integrations):");
+            for warn in &warnings {
+                tracing::warn!("  ! {}", warn);
+            }
         }
-        let hard_errors: Vec<_> = config_errors
-            .iter()
-            .filter(|e| {
-                e.contains("CREG_VALIDATOR_KEY")
-                    || e.contains("CREG_BRIDGE_KEY")
-                    || e.contains("CREG_VALIDATOR_SET entry")
-                    || e.contains("CREG_NAMESPACE_AUTHORITY")
-                    || e.contains("Authoritative namespace")
-                    || e.contains("CREG_STAKING_ADDR is invalid")
-                    || e.contains(
-                        "CREG_IS_VALIDATOR=true requires a non-zero parseable CREG_STAKING_ADDR",
-                    )
-                    || e.contains("CREG_ETH_RPC is invalid")
-                    || e.contains("CREG_PRODUCTION=true but ZK package key files are missing")
-                    || e.contains("CREG_IS_VALIDATOR=true requires at least one dialable P2P seed")
-                    || e.contains("does not match the signed chain spec")
-            })
-            .collect();
         if !hard_errors.is_empty() {
+            tracing::error!("Fatal configuration errors:");
+            for err in &hard_errors {
+                tracing::error!("  x {}", err);
+            }
             anyhow::bail!(
-                "Cannot start node due to configuration errors. Fix the above and restart."
+                "Cannot start node due to {} configuration error(s). Fix the above and restart.",
+                hard_errors.len()
             );
         }
     }
@@ -608,11 +601,7 @@ async fn main() -> Result<()> {
     // keeps zk_validation false, so this is a no-op there. Production never
     // mints ephemeral keys.
     if config.zk_validation {
-        zk_validator::ZkValidator::new().context(
-            "zk_validation is enabled but ZK package keys could not be loaded. \
-             Set CREG_ZK_KEYS_DIR to proving_key_package_v2.bin and verifying_key_package_v2.bin. \
-             CREG_PRODUCTION refuses ephemeral keys. Do not enable zk_validation without a ceremony.",
-        )?;
+        anyhow::bail!("zk_validation is retired (ADR-018 / VNA-22); unset CREG_ZK_VALIDATION");
     }
 
     // The signed-spec path already verified its canonical genesis hash above.
@@ -808,17 +797,8 @@ async fn main() -> Result<()> {
     }
 
     // â”€â”€ Rebuild publisher index from chain history â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-    let mut publisher_index = PublisherIndex::new();
-    {
-        let mut blocks = Vec::new();
-        for h in 0..=tip {
-            if let Ok(Some(b)) = chain.get_block_by_height(h) {
-                blocks.push(b);
-            }
-        }
-        publisher_index.rebuild_from_chain(blocks.iter());
-        tracing::info!("  publishers:  {}", publisher_index.publisher_count());
-    }
+    let publisher_index = chain.load_or_sync_publisher_index()?;
+    tracing::info!("  publishers:  {}", publisher_index.publisher_count());
     let mut forced_inclusion_tracker = crate::state::ForcedInclusionTracker::new();
     for (transaction, submitted_at_height) in chain.finalized_work_for_tracker(tip)? {
         forced_inclusion_tracker.submit(transaction, submitted_at_height);
@@ -871,6 +851,9 @@ async fn main() -> Result<()> {
         pending_pool: pending_pool::PendingPool::open(&config.data_dir),
         publisher_index,
         validator_set_bootstrap: config.validator_set.clone(),
+        validator_set_snapshot: Arc::new(crate::state::ArcSwap::from_pointee(
+            config.validator_set.clone(),
+        )),
         validator_set: config.validator_set.clone(),
         package_rounds: std::collections::HashMap::new(),
         package_committees: std::collections::HashMap::new(),
@@ -1142,35 +1125,121 @@ async fn main() -> Result<()> {
         tracing::info!("Incentives status refresher started (60s interval)");
     }
 
-    // â”€â”€ Start gRPC Server (Industrial Speed) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-    let grpc_state = Arc::clone(&state);
-    let watcher_bus = Arc::clone(&event_bus);
-    tokio::spawn(async move {
-        let addr = "0.0.0.0:50051"
+    // ── Start gRPC Server (disabled by default; loopback 127.0.0.1:50051 when enabled; VNA-04) ──
+    if config.grpc_enabled {
+        let grpc_addr: std::net::SocketAddr = config
+            .grpc_listen_addr
             .parse()
-            .expect("gRPC bind address must be valid");
-        let registry = grpc::MyRegistry::new(Arc::clone(&grpc_state));
-        let watcher = grpc::MyWatcher::new(watcher_bus);
-        let explorer = grpc::MyExplorer::new(Arc::clone(&grpc_state));
+            .with_context(|| format!("invalid CREG_GRPC_LISTEN: {}", config.grpc_listen_addr))?;
+        let grpc_state = Arc::clone(&state);
+        let watcher_bus = Arc::clone(&event_bus);
+        tokio::spawn(async move {
+            let registry = grpc::MyRegistry::new(Arc::clone(&grpc_state));
+            let watcher = grpc::MyWatcher::new(watcher_bus);
+            let explorer = grpc::MyExplorer::new(Arc::clone(&grpc_state));
 
-        tracing::info!("gRPC API listening on {}", addr);
+            tracing::info!("gRPC API listening on {}", grpc_addr);
 
-        tonic::transport::Server::builder()
-            .add_service(
-                common::proto::registry_service_server::RegistryServiceServer::new(registry),
-            )
-            .add_service(common::proto::watch_service_server::WatchServiceServer::new(watcher))
-            .add_service(
-                common::proto::explorer_service_server::ExplorerServiceServer::new(explorer),
-            )
-            .serve(addr)
-            .await
-            .expect("gRPC server failed");
+            if let Err(err) = tonic::transport::Server::builder()
+                .concurrency_limit_per_connection(32)
+                .tcp_nodelay(true)
+                .add_service(
+                    common::proto::registry_service_server::RegistryServiceServer::new(registry),
+                )
+                .add_service(common::proto::watch_service_server::WatchServiceServer::new(watcher))
+                .add_service(
+                    common::proto::explorer_service_server::ExplorerServiceServer::new(explorer),
+                )
+                .serve(grpc_addr)
+                .await
+            {
+                tracing::error!("gRPC server exited with error: {err}");
+            }
+        });
+    } else {
+        tracing::info!("gRPC server disabled (set CREG_GRPC_ENABLED=true to enable)");
+    }
+
+    // ── Start REST API + SSE + Metrics ────────────────────────────────────────
+    let (health_tx, health_rx) = tokio::sync::watch::channel(crate::state::NodeHealthSnapshot {
+        node_id: config.node_id.clone(),
+        is_validator: config.is_validator,
+        ..Default::default()
     });
+    {
+        let health_state = Arc::clone(&state);
+        tokio::spawn(async move {
+            let mut ticker = interval(Duration::from_secs(2));
+            loop {
+                ticker.tick().await;
+                let (
+                    node_id,
+                    is_validator,
+                    peers,
+                    validator_set_sync,
+                    sync_lag_blocks,
+                    sync_max_peer_tip,
+                ) = {
+                    let s = health_state.read().await;
+                    (
+                        s.config.node_id.clone(),
+                        s.config.is_validator,
+                        s.config.peers.clone(),
+                        s.validator_set_sync.clone(),
+                        s.sync_lag_blocks,
+                        s.sync_max_peer_tip,
+                    )
+                };
+                let mut sandbox = validator::sandbox::engine_status().await;
+                if !is_validator && sandbox.engine == "none" {
+                    if let Some(peer_sandbox) =
+                        validator::sandbox::fleet_sandbox_from_peers(&peers).await
+                    {
+                        sandbox = peer_sandbox;
+                    }
+                }
+                let _ = health_tx.send(crate::state::NodeHealthSnapshot {
+                    node_id,
+                    is_validator,
+                    version: env!("CARGO_PKG_VERSION").to_string(),
+                    validator_set_sync,
+                    sync_lag_blocks,
+                    sync_max_peer_tip,
+                    sandbox,
+                });
+            }
+        });
+    }
 
-    // â”€â”€ Start REST API + SSE + Metrics â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
     let limiter = rate_limit::RateLimiter::new(Default::default());
     rate_limit::spawn_purge_task(limiter.clone());
+
+    if let Some(ref admin_addr) = config.admin_listen_addr {
+        let admin_app = api::admin_router(
+            Arc::clone(&state),
+            Arc::clone(&event_bus),
+            limiter.clone(),
+            Arc::clone(&admission_store),
+            config.cors.clone(),
+            tx_sender.clone(),
+            p2p_handle.clone(),
+        )
+        .layer(axum::extract::Extension(health_rx.clone()));
+        let admin_listener = tokio::net::TcpListener::bind(admin_addr).await?;
+        let admin_addr_log = admin_addr.clone();
+        tracing::info!("Admin / Metrics API listening on http://{}", admin_addr_log);
+        tokio::spawn(async move {
+            if let Err(err) = axum::serve(
+                admin_listener,
+                admin_app.into_make_service_with_connect_info::<std::net::SocketAddr>(),
+            )
+            .with_graceful_shutdown(shutdown_signal())
+            .await
+            {
+                tracing::error!("Admin listener {admin_addr_log} exited with error: {err}");
+            }
+        });
+    }
 
     let app = api::router(
         Arc::clone(&state),
@@ -1180,7 +1249,8 @@ async fn main() -> Result<()> {
         config.cors.clone(),
         tx_sender.clone(),
         p2p_handle,
-    );
+    )
+    .layer(axum::extract::Extension(health_rx.clone()));
 
     // â”€â”€ Optional TLS termination â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
     // Set CREG_TLS_CERT and CREG_TLS_KEY environment variables to enable HTTPS.
@@ -1346,6 +1416,41 @@ async fn shutdown_signal() {
     tokio::select! {
         _ = ctrl_c    => { tracing::info!("Received Ctrl-C â€” shutting down..."); }
         _ = terminate => { tracing::info!("Received SIGTERM â€” shutting down..."); }
+    }
+}
+fn partition_config_errors(errors: &[String], is_validator: bool) -> (Vec<String>, Vec<String>) {
+    let mut warnings = Vec::new();
+    let mut hard_errors = Vec::new();
+    for err in errors {
+        let is_optional_l1_notice = err.starts_with("CREG_REGISTRY_ADDR is the zero address")
+            || err.starts_with("CREG_GOVERNANCE_ADDR is the zero address")
+            || err.starts_with("CREG_TOKEN_ADDR is not set")
+            || (!is_validator && err.starts_with("CREG_STAKING_ADDR is not set"));
+        if is_optional_l1_notice {
+            warnings.push(err.clone());
+        } else {
+            hard_errors.push(err.clone());
+        }
+    }
+    (warnings, hard_errors)
+}
+
+#[cfg(test)]
+mod config_partition_tests {
+    use super::partition_config_errors;
+
+    #[test]
+    fn cors_interval_ipfs_and_secrets_errors_are_always_fatal() {
+        let sample = vec![
+            "CREG_TOKEN_ADDR is not set. Wallet balances...".to_string(),
+            "CREG_CORS_ALLOW_CREDENTIALS=true cannot be used with wildcard".to_string(),
+            "CREG_BLOCK_INTERVAL must be > 0 seconds".to_string(),
+            "CREG_IPFS_URL is empty.".to_string(),
+            "CREG_VALIDATOR_KEY must not be set when CREG_SECRETS_BACKEND=vault".to_string(),
+        ];
+        let (warnings, hard) = partition_config_errors(&sample, false);
+        assert_eq!(warnings.len(), 1);
+        assert_eq!(hard.len(), 4);
     }
 }
 // explorer and rate_limit are declared here so they're available to api.rs

@@ -30,6 +30,8 @@ use std::collections::HashMap;
 /// Domain-separation tag for the canonical consensus vote message. Must be
 /// kept in sync with `node/src/gossip.rs::VOTE_MESSAGE_DOMAIN`.
 pub const VOTE_MESSAGE_DOMAIN: &str = "creg-vote-v2";
+/// Domain-separation tag for publisher-authorized consensus votes.
+pub const AUTHORIZED_VOTE_MESSAGE_DOMAIN: &str = "creg-vote-v3";
 
 /// Returns true when a vote carries enough deterministic scanner/evidence
 /// metadata to count toward quorum.
@@ -65,6 +67,46 @@ pub fn canonical_vote_message(
         scanner_profile_digest,
         evidence_digest
     )
+}
+
+/// Post-activation vote message committing to the publisher authorization
+/// digest and deterministic vote metadata.
+#[allow(clippy::too_many_arguments)]
+pub fn canonical_authorized_vote_message(
+    canonical: &str,
+    content_hash: &str,
+    approved: bool,
+    validator_pubkey: &str,
+    scanner_profile_digest: &str,
+    evidence_digest: &str,
+    publisher_authorization_digest: &str,
+    vote_metadata_digest: &str,
+) -> String {
+    format!(
+        "{}|{}|{}|{}|{}|{}|{}|{}|{}",
+        AUTHORIZED_VOTE_MESSAGE_DOMAIN,
+        canonical,
+        content_hash,
+        approved,
+        validator_pubkey,
+        scanner_profile_digest,
+        evidence_digest,
+        publisher_authorization_digest,
+        vote_metadata_digest
+    )
+}
+
+pub fn vote_metadata_digest(
+    is_mandatory: bool,
+    deterministic_risk: &common::DeterministicRiskSummary,
+    reject_reason: Option<&str>,
+) -> String {
+    let payload = serde_json::json!({
+        "is_mandatory": is_mandatory,
+        "deterministic_risk": deterministic_risk,
+        "reject_reason": reject_reason.unwrap_or(""),
+    });
+    common::sha256_hex(&serde_json::to_vec(&payload).expect("vote metadata is JSON serializable"))
 }
 
 /// All votes received for a single package's PBFT round.

@@ -204,6 +204,61 @@ pub fn validate_namespace_prefix(prefix: &str) -> Result<(), &'static str> {
     Ok(())
 }
 
+/// Validates an IPFS CID before passing it to Kubo API queries (`?arg=<cid>`).
+/// Rejects path traversal, query-string separators (`?`, `&`, `#`), whitespace,
+/// and non-CID prefixes while remaining compatible with deterministic unit-test CIDs.
+pub fn validate_ipfs_cid(cid: &str) -> Result<(), &'static str> {
+    if cid.is_empty() || cid != cid.trim() || cid.len() < 4 || cid.len() > 128 {
+        return Err("IPFS CID must be trimmed and 4..=128 characters long");
+    }
+    if !cid.bytes().all(|byte| byte.is_ascii_alphanumeric()) {
+        return Err("IPFS CID must contain only ASCII alphanumeric characters");
+    }
+    if !(cid.starts_with("Qm")
+        || cid.starts_with('b')
+        || cid.starts_with('z')
+        || cid.starts_with('f')
+        || cid.starts_with('m'))
+    {
+        return Err("IPFS CID must begin with a valid CIDv0/CIDv1 multibase prefix");
+    }
+    Ok(())
+}
+
+fn is_base58btc_char(byte: u8) -> bool {
+    byte.is_ascii_alphanumeric() && !matches!(byte, b'0' | b'O' | b'I' | b'l')
+}
+
+/// Strict production validator for real CIDv0 (`Qm...`) and CIDv1 (`b...`/`z...`) identifiers.
+pub fn validate_ipfs_cid_strict(cid: &str) -> Result<(), &'static str> {
+    validate_ipfs_cid(cid)?;
+    if let Some(rest) = cid.strip_prefix("Qm") {
+        if rest.len() == 44 && cid.bytes().all(is_base58btc_char) {
+            return Ok(());
+        }
+        return Err("CIDv0 must be 46 Base58btc characters starting with 'Qm'");
+    }
+    if let Some(rest) = cid.strip_prefix('b') {
+        if rest.len() >= 49
+            && rest
+                .bytes()
+                .all(|byte| matches!(byte, b'a'..=b'z' | b'2'..=b'7'))
+        {
+            return Ok(());
+        }
+        return Err(
+            "CIDv1 base32lower must be >= 50 lowercase base32 characters starting with 'b'",
+        );
+    }
+    if let Some(rest) = cid.strip_prefix('z') {
+        if rest.len() >= 47 && rest.bytes().all(is_base58btc_char) {
+            return Ok(());
+        }
+        return Err("CIDv1 base58btc must be >= 48 Base58btc characters starting with 'z'");
+    }
+    Err("production IPFS CID must use CIDv0 ('Qm...') or canonical CIDv1 ('b...' / 'z...')")
+}
+
 /// Domain-separated authorization payload for a namespace-scoped publisher key
 /// rotation. Both keys sign this exact payload, preventing signatures from one
 /// namespace, nonce, or CREG deployment from being replayed for another.
@@ -1578,5 +1633,37 @@ mod committee_assignment_tests {
         assert!(committee.assignment_proof_is_valid("npm:pkg@1.0.0", "f"));
         committee.members.swap(0, 1);
         assert!(!committee.assignment_proof_is_valid("npm:pkg@1.0.0", "f"));
+    }
+
+    #[test]
+    fn ipfs_cid_validation_blocks_query_injection_and_accepts_canonical_cids() {
+        let valid_v0 = "QmYjtig7VJQ6XsnUjqqJvj7QaMcCAwtrgNdahSiFofrE7o";
+        let valid_v1 = "bafybeigdyrzt5sfp7udm7hu76uh7y26nf3efuylqabf3oclgtqy55fbzdi";
+        assert!(validate_ipfs_cid(valid_v0).is_ok());
+        assert!(validate_ipfs_cid_strict(valid_v0).is_ok());
+        assert!(validate_ipfs_cid(valid_v1).is_ok());
+        assert!(validate_ipfs_cid_strict(valid_v1).is_ok());
+        assert!(validate_ipfs_cid("bafy").is_ok());
+
+        for bad in [
+            "",
+            " bafybeigdyrzt5sfp7udm7hu76uh7y26nf3efuylqabf3oclgtqy55fbzdi",
+            "bafyfoo&offline=true",
+            "bafyfoo?arg=other",
+            "bafyfoo#fragment",
+            "../secret",
+            "http://127.0.0.1:5001",
+            "notacid",
+        ] {
+            assert!(
+                validate_ipfs_cid(bad).is_err(),
+                "expected error for {bad:?}"
+            );
+            assert!(
+                validate_ipfs_cid_strict(bad).is_err(),
+                "expected strict error for {bad:?}"
+            );
+        }
+        assert!(validate_ipfs_cid_strict("bafytest").is_err());
     }
 }

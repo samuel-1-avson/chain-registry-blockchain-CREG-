@@ -44,80 +44,10 @@ impl Default for GossipConfig {
     }
 }
 
-/// Domain-separation tag for the canonical consensus vote message format.
-/// Bumping the version invalidates any cached signatures from older validators.
-pub const VOTE_MESSAGE_DOMAIN: &str = "creg-vote-v2";
-pub const AUTHORIZED_VOTE_MESSAGE_DOMAIN: &str = "creg-vote-v3";
-
-/// Canonical message that a validator signs when casting a PBFT vote.
-///
-/// Binds the package canonical, the exact tarball content hash, the verdict,
-/// the validator's Ed25519 public key, the scanner profile digest, and the
-/// deterministic evidence digest so that:
-///   (a) signatures cannot be replayed across package versions,
-///   (b) signatures cannot be replayed across approve/reject flips,
-///   (c) a signature cannot be relabelled to come from a different validator,
-///   (d) a vote cannot be stripped of the scanner/evidence profile it used.
-pub fn canonical_vote_message(
-    canonical: &str,
-    content_hash: &str,
-    approved: bool,
-    validator_pubkey: &str,
-    scanner_profile_digest: &str,
-    evidence_digest: &str,
-) -> String {
-    format!(
-        "{}|{}|{}|{}|{}|{}|{}",
-        VOTE_MESSAGE_DOMAIN,
-        canonical,
-        content_hash,
-        approved,
-        validator_pubkey,
-        scanner_profile_digest,
-        evidence_digest
-    )
-}
-
-/// Post-activation vote message. The publisher authorization digest commits
-/// to the genesis-bound controller, EVM proof, nonce, package retrieval data,
-/// and multisig policy retained in `PublishAuthorizedV1`.
-#[allow(clippy::too_many_arguments)]
-pub fn canonical_authorized_vote_message(
-    canonical: &str,
-    content_hash: &str,
-    approved: bool,
-    validator_pubkey: &str,
-    scanner_profile_digest: &str,
-    evidence_digest: &str,
-    publisher_authorization_digest: &str,
-    vote_metadata_digest: &str,
-) -> String {
-    format!(
-        "{}|{}|{}|{}|{}|{}|{}|{}|{}",
-        AUTHORIZED_VOTE_MESSAGE_DOMAIN,
-        canonical,
-        content_hash,
-        approved,
-        validator_pubkey,
-        scanner_profile_digest,
-        evidence_digest,
-        publisher_authorization_digest,
-        vote_metadata_digest
-    )
-}
-
-pub fn vote_metadata_digest(
-    is_mandatory: bool,
-    deterministic_risk: &common::DeterministicRiskSummary,
-    reject_reason: Option<&str>,
-) -> String {
-    let payload = serde_json::json!({
-        "is_mandatory": is_mandatory,
-        "deterministic_risk": deterministic_risk,
-        "reject_reason": reject_reason.unwrap_or(""),
-    });
-    common::sha256_hex(&serde_json::to_vec(&payload).expect("vote metadata is JSON serializable"))
-}
+pub use consensus::vote_accumulator::{
+    canonical_authorized_vote_message, canonical_vote_message, vote_metadata_digest,
+    AUTHORIZED_VOTE_MESSAGE_DOMAIN, VOTE_MESSAGE_DOMAIN,
+};
 
 /// Message sent to peers when we produce a PBFT vote.
 #[derive(Debug, Clone, Serialize, Deserialize)]

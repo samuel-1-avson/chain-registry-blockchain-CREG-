@@ -29,6 +29,14 @@ const DEFAULT_STALE_ROUND_TTL_SECS: u64 = 120;
 /// bootstrap opt-in only.
 const DEFAULT_ALLOW_SMALL_CLUSTER_QUORUM: bool = false;
 
+/// Maximum nested proof recursion depth for view-change certificates.
+const MAX_VIEW_CHANGE_PROOF_DEPTH: usize = 16;
+/// Memory caps for tracked PBFT engine collections (VNA-23).
+pub const MAX_TRACKED_ROUNDS: usize = 256;
+pub const MAX_VIEW_CHANGE_BUCKETS: usize = 256;
+pub const MAX_CERTIFIED_VIEWS: usize = 256;
+pub const MAX_EQUIVOCATED_VIEW_VOTERS: usize = 4_096;
+
 const PBFT_SIGNATURE_DOMAIN: &str = "creg-pbft-v1";
 
 /// Canonical message signed by validators during PBFT block consensus.
@@ -558,6 +566,25 @@ pub fn verify_prepared_certificate(
     validator_set: &ValidatorSet,
     allow_small_cluster_quorum: bool,
 ) -> Result<()> {
+    verify_prepared_certificate_with_depth(
+        vote,
+        certificate,
+        validator_set,
+        allow_small_cluster_quorum,
+        0,
+    )
+}
+
+fn verify_prepared_certificate_with_depth(
+    vote: &ViewChangeVote,
+    certificate: &PreparedCertificate,
+    validator_set: &ValidatorSet,
+    allow_small_cluster_quorum: bool,
+    depth: usize,
+) -> Result<()> {
+    if depth >= MAX_VIEW_CHANGE_PROOF_DEPTH {
+        bail!("prepared certificate recursion depth exceeded");
+    }
     let header = &certificate.header;
     if header.height != vote.height || header.prev_hash != vote.prev_hash {
         bail!("prepared certificate is for a different height or parent");
@@ -574,10 +601,11 @@ pub fn verify_prepared_certificate(
     if original.hash() != block_hash {
         bail!("prepared certificate does not reconstruct its original block");
     }
-    let original_prepared = verify_view_change_certificate(
+    let original_prepared = verify_view_change_certificate_with_depth(
         &original.header,
         validator_set,
         allow_small_cluster_quorum,
+        depth + 1,
     )?;
     if original_prepared
         .as_ref()
@@ -597,7 +625,13 @@ pub fn verify_prepared_certificate(
         if proof.target_view != certificate.prepared_view {
             bail!("reproposal proof targets a different prepared view");
         }
-        verify_reproposal_proof(&original, proof, validator_set, allow_small_cluster_quorum)?;
+        verify_reproposal_proof_with_depth(
+            &original,
+            proof,
+            validator_set,
+            allow_small_cluster_quorum,
+            depth + 1,
+        )?;
     } else if certificate.reproposal_proof.is_some() {
         bail!("original-view prepared certificate has an unexpected reproposal proof");
     }
@@ -641,6 +675,18 @@ pub fn verify_view_change_vote(
     validator_set: &ValidatorSet,
     allow_small_cluster_quorum: bool,
 ) -> Result<()> {
+    verify_view_change_vote_with_depth(vote, validator_set, allow_small_cluster_quorum, 0)
+}
+
+fn verify_view_change_vote_with_depth(
+    vote: &ViewChangeVote,
+    validator_set: &ValidatorSet,
+    allow_small_cluster_quorum: bool,
+    depth: usize,
+) -> Result<()> {
+    if depth >= MAX_VIEW_CHANGE_PROOF_DEPTH {
+        bail!("view-change vote recursion depth exceeded");
+    }
     if vote.new_view == 0 || vote.prev_hash.is_empty() || vote.height == 0 {
         bail!("view-change vote has an invalid height, parent, or view");
     }
@@ -652,7 +698,13 @@ pub fn verify_view_change_vote(
     verify_message_signature(&validator.pubkey, &vote.signing_message(), &vote.signature)
         .map_err(|error| anyhow::anyhow!("invalid view-change signature: {error}"))?;
     if let Some(prepared) = &vote.prepared {
-        verify_prepared_certificate(vote, prepared, validator_set, allow_small_cluster_quorum)?;
+        verify_prepared_certificate_with_depth(
+            vote,
+            prepared,
+            validator_set,
+            allow_small_cluster_quorum,
+            depth + 1,
+        )?;
     }
     Ok(())
 }
@@ -664,6 +716,18 @@ pub fn verify_view_change_certificate(
     validator_set: &ValidatorSet,
     allow_small_cluster_quorum: bool,
 ) -> Result<Option<PreparedCertificate>> {
+    verify_view_change_certificate_with_depth(header, validator_set, allow_small_cluster_quorum, 0)
+}
+
+fn verify_view_change_certificate_with_depth(
+    header: &common::BlockHeader,
+    validator_set: &ValidatorSet,
+    allow_small_cluster_quorum: bool,
+    depth: usize,
+) -> Result<Option<PreparedCertificate>> {
+    if depth >= MAX_VIEW_CHANGE_PROOF_DEPTH {
+        bail!("view-change certificate recursion depth exceeded");
+    }
     if header.view_number == 0 {
         if !header.view_change_certificate.is_empty() {
             bail!("view zero must not carry a view-change certificate");
@@ -685,10 +749,14 @@ pub fn verify_view_change_certificate(
         if !seen.insert(vote.validator_id.clone()) {
             bail!("view-change certificate contains a duplicate validator identity");
         }
-        verify_view_change_vote(vote, validator_set, allow_small_cluster_quorum)?;
+        verify_view_change_vote_with_depth(
+            vote,
+            validator_set,
+            allow_small_cluster_quorum,
+            depth + 1,
+        )?;
 
         if let Some(prepared) = &vote.prepared {
-            verify_prepared_certificate(vote, prepared, validator_set, allow_small_cluster_quorum)?;
             let prepared_hash = prepared_block_hash(&prepared.header)?;
             match highest.as_ref() {
                 None => {
@@ -724,15 +792,32 @@ pub fn verify_reproposal_proof(
     validator_set: &ValidatorSet,
     allow_small_cluster_quorum: bool,
 ) -> Result<()> {
+    verify_reproposal_proof_with_depth(block, proof, validator_set, allow_small_cluster_quorum, 0)
+}
+
+fn verify_reproposal_proof_with_depth(
+    block: &Block,
+    proof: &ReproposalProof,
+    validator_set: &ValidatorSet,
+    allow_small_cluster_quorum: bool,
+    depth: usize,
+) -> Result<()> {
+    if depth >= MAX_VIEW_CHANGE_PROOF_DEPTH {
+        bail!("reproposal proof recursion depth exceeded");
+    }
     if proof.target_view <= block.header.view_number {
         bail!("reproposal proof does not advance the original block view");
     }
     let mut check_header = block.header.clone();
     check_header.view_number = proof.target_view;
     check_header.view_change_certificate = proof.view_change_certificate.clone();
-    let highest =
-        verify_view_change_certificate(&check_header, validator_set, allow_small_cluster_quorum)?
-            .ok_or_else(|| anyhow::anyhow!("reproposal proof has no prepared value"))?;
+    let highest = verify_view_change_certificate_with_depth(
+        &check_header,
+        validator_set,
+        allow_small_cluster_quorum,
+        depth + 1,
+    )?
+    .ok_or_else(|| anyhow::anyhow!("reproposal proof has no prepared value"))?;
     let hash = block.hash();
     if highest.block().hash() != hash {
         bail!("reproposal proof changed the highest prepared block hash");
@@ -762,6 +847,67 @@ pub fn verify_reproposal_proof(
 impl PbftEngine {
     pub fn allow_small_cluster_quorum(&self) -> bool {
         self.config.allow_small_cluster_quorum
+    }
+
+    fn evict_rounds_if_needed(&mut self) {
+        while self.rounds.len() >= MAX_TRACKED_ROUNDS {
+            let candidate = self
+                .rounds
+                .iter()
+                .filter(|(_, r)| r.is_terminal())
+                .min_by_key(|(_, r)| (r.block.header.height, r.created_at))
+                .map(|(h, _)| h.clone())
+                .or_else(|| {
+                    self.rounds
+                        .iter()
+                        .min_by_key(|(_, r)| (r.block.header.height, r.created_at))
+                        .map(|(h, _)| h.clone())
+                });
+            let Some(evict_hash) = candidate else {
+                break;
+            };
+            self.rounds.remove(&evict_hash);
+        }
+    }
+
+    fn evict_view_change_state_if_needed(&mut self) {
+        while self.view_change_votes.len() >= MAX_VIEW_CHANGE_BUCKETS {
+            let Some(lowest_key) = self
+                .view_change_votes
+                .keys()
+                .min_by_key(|(h, _, v)| (*h, *v))
+                .cloned()
+            else {
+                break;
+            };
+            self.view_change_votes.remove(&lowest_key);
+        }
+        while self.certified_views.len() >= MAX_CERTIFIED_VIEWS {
+            let Some(lowest_ctx) = self.certified_views.keys().min_by_key(|(h, _)| *h).cloned()
+            else {
+                break;
+            };
+            self.certified_views.remove(&lowest_ctx);
+        }
+        while self.equivocated_view_change_voters.len() >= MAX_EQUIVOCATED_VIEW_VOTERS {
+            let Some(lowest_voter) = self
+                .equivocated_view_change_voters
+                .iter()
+                .min_by_key(|(h, _, v, _)| (*h, *v))
+                .cloned()
+            else {
+                break;
+            };
+            self.equivocated_view_change_voters.remove(&lowest_voter);
+        }
+    }
+
+    fn prune_view_change_below(&mut self, floor_height: u64) {
+        self.view_change_votes
+            .retain(|(h, _, _), _| *h >= floor_height);
+        self.certified_views.retain(|(h, _), _| *h >= floor_height);
+        self.equivocated_view_change_voters
+            .retain(|(h, _, _, _)| *h >= floor_height);
     }
 
     /// Capture the full quorum proof before a local COMMIT can be signed.
@@ -908,9 +1054,11 @@ impl PbftEngine {
                 .and_then(|votes| votes.first().map(|vote| vote.new_view))
                 .unwrap_or(0);
             if proposal_view > current_view {
+                self.evict_view_change_state_if_needed();
                 self.certified_views.insert(context, proposal_certificate);
             }
         }
+        self.evict_rounds_if_needed();
         self.rounds.insert(hash.clone(), round);
         Ok(hash)
     }
@@ -1002,8 +1150,10 @@ impl PbftEngine {
                     .prepare_sigs
                     .insert(signature.validator_id.clone(), signature.clone());
             }
+            self.evict_rounds_if_needed();
             self.rounds.insert(hash.clone(), candidate);
         }
+        self.evict_view_change_state_if_needed();
         self.certified_views.insert(context, certificate);
         Ok(hash)
     }
@@ -1111,6 +1261,7 @@ impl PbftEngine {
         round.block.pbft_signatures = block.pbft_signatures.clone();
         round.phase = PbftPhase::Finalised;
         round.phase_entered_at = Instant::now();
+        self.prune_view_change_below(block.header.height.saturating_sub(64));
         tracing::info!(height = block.header.height, block_hash = %hash,
             "[PBFT] reconciled round with certified canonical finality");
         Ok(true)
@@ -1294,10 +1445,12 @@ impl PbftEngine {
         if self.equivocated_view_change_voters.contains(&voter_key) {
             bail!("validator already equivocated in this view-change round");
         }
+        self.evict_view_change_state_if_needed();
         let votes = self.view_change_votes.entry(key.clone()).or_default();
         if let Some(existing) = votes.get(&vote.validator_id) {
             if existing.signing_message() != vote.signing_message() {
                 votes.remove(&vote.validator_id);
+                self.evict_view_change_state_if_needed();
                 self.equivocated_view_change_voters.insert(voter_key);
                 bail!("validator equivocated in this view-change round");
             }
@@ -1415,6 +1568,9 @@ impl PbftEngine {
         if count > 0 {
             tracing::info!("[PBFT] Cleaned up {} stale rounds", count);
         }
+        if let Some(highest_finalized) = finalised_contexts.iter().map(|(h, _)| *h).max() {
+            self.prune_view_change_below(highest_finalized.saturating_sub(64));
+        }
         count
     }
 
@@ -1522,6 +1678,7 @@ fn transaction_package_canonical(tx: &common::Transaction) -> Option<String> {
         common::Transaction::Revoke {
             package_canonical, ..
         } => Some(package_canonical.clone()),
+        common::Transaction::RevokeV2 { request, .. } => Some(request.package_canonical.clone()),
         _ => None,
     }
 }
@@ -2108,5 +2265,43 @@ mod tests {
         let commit2 = signed_block_vote("node-2", &k1, "commit", &block_hash);
         assert!(engine.commit(&block_hash, "node-2", commit2).unwrap());
         assert!(engine.own_votes_for_rebroadcast("node-1").is_empty());
+    }
+
+    #[test]
+    fn pbft_engine_bounds_tracked_collections() {
+        use super::{PbftEngine, MAX_CERTIFIED_VIEWS, MAX_TRACKED_ROUNDS, MAX_VIEW_CHANGE_BUCKETS};
+
+        let (vs, keys) = two_validator_set();
+        let mut engine = PbftEngine::new();
+        for height in 1..=(MAX_TRACKED_ROUNDS as u64 + 25) {
+            let prev_hash = format!("{height:064x}");
+            let proposer = selected_proposer(&vs, &prev_hash);
+            let mut block = test_block(&proposer);
+            block.header.height = height;
+            block.header.prev_hash = prev_hash;
+            engine.start_round(block, vs.clone()).unwrap();
+            assert!(engine.active_round_count() <= MAX_TRACKED_ROUNDS);
+        }
+        assert_eq!(engine.active_round_count(), MAX_TRACKED_ROUNDS);
+
+        for height in 1..=(MAX_VIEW_CHANGE_BUCKETS as u64 + 16) {
+            let prev_hash = format!("{height:064x}");
+            for (index, key) in keys.iter().enumerate() {
+                let vote = signed_view_change_vote(
+                    common::ViewChangeVote {
+                        height,
+                        prev_hash: prev_hash.clone(),
+                        new_view: 1,
+                        validator_id: format!("v{index}"),
+                        prepared: None,
+                        signature: String::new(),
+                    },
+                    key,
+                );
+                let _ = engine.receive_view_change(vote, &vs).unwrap();
+            }
+            assert!(engine.view_change_votes.len() <= MAX_VIEW_CHANGE_BUCKETS);
+            assert!(engine.certified_views.len() <= MAX_CERTIFIED_VIEWS);
+        }
     }
 }

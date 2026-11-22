@@ -6,7 +6,9 @@
 use anyhow::Result;
 use common::{Finding, FindingSeverity, PackageManifest};
 use serde_json;
-use std::sync::OnceLock;
+use std::sync::{Arc, OnceLock};
+
+static DEEP_SCAN_SEMAPHORE: tokio::sync::Semaphore = tokio::sync::Semaphore::const_new(8);
 
 /// Shannon entropy threshold for flagging obfuscated lines.
 /// Configurable via the `CREG_ENTROPY_THRESHOLD` environment variable.
@@ -44,6 +46,10 @@ pub struct StaticAnalysisResult {
     pub ensemble_score: f64,
     /// Scanner version actually used for the deep scan (may be `degraded-*`).
     pub ml_model_version: String,
+    /// Multi-language AST & taint-graph index (ADR-018 Increment 2).
+    pub ast_index: Option<ml_validator::ast_index::PackageAstIndexV1>,
+    /// Native ELF / Mach-O / PE / WASM binary inspection summary (ADR-018 Increment 2).
+    pub binary_report: Option<ml_validator::binary_inspect::BinaryInspectionReport>,
 }
 
 /// A single static-analysis pattern used for substring matching in source text.
@@ -279,42 +285,93 @@ fn patterns() -> &'static Vec<Pattern> {
 }
 
 pub async fn run(tarball_bytes: &[u8], manifest: &PackageManifest) -> Result<StaticAnalysisResult> {
+    run_for_package(None, tarball_bytes, manifest).await
+}
+
+/// Runs deterministic static, manifest, AST, binary, and lock-free YARA-X
+/// analysis binding ecosystem identity authoritatively to `pkg_id` when supplied.
+pub async fn run_for_package(
+    pkg_id: Option<&common::PackageId>,
+    tarball_bytes: &[u8],
+    manifest: &PackageManifest,
+) -> Result<StaticAnalysisResult> {
     let mut deterministic_findings = Vec::new();
     let mut snippet_llm_findings = Vec::new();
     let mut rule_ml_findings = Vec::new();
 
-    // Extract files from the tarball (tar.gz).
-    // Oversized files are not scanned but produce an SA013 finding so the
-    // limitation is visible in the report and consensus logs.
-    let (files, oversized_paths) = extract_text_files(tarball_bytes)?;
-    for path in oversized_paths {
-        deterministic_findings.push(Finding {
-            id: "SA013".into(),
-            title: "File too large for static analysis".into(),
-            severity: FindingSeverity::Medium,
-            description: format!(
-                "'{}' exceeds the static analysis file size limit ({:.0} MiB). \
-                 The file was not pattern-scanned or entropy-checked. \
-                 Increase CREG_STATIC_MAX_FILE_BYTES or investigate manually.",
-                path,
-                max_file_bytes() as f64 / (1024.0 * 1024.0)
-            ),
-            file: path.clone(),
-            line: None,
-        });
-    }
+    // Extract archive once through canonical bounded raw-byte extractor (VNA-09, VNA-11).
+    let archive = match creg_unpack::unpack_tarball(tarball_bytes) {
+        Ok(unpacked) => Arc::new(unpacked),
+        Err(unpack_err) => {
+            let finding = Finding {
+                id: unpack_err.violation_code().to_string(),
+                title: "Archive security violation".to_string(),
+                severity: FindingSeverity::Critical,
+                description: unpack_err.to_string(),
+                file: "<archive>".to_string(),
+                line: None,
+            };
+            let group = build_evidence_group(
+                "archive-security",
+                "Bounded archive security checks",
+                EvidenceDeterminism::Deterministic,
+                vec![finding.clone()],
+            );
+            let evidence_groups: Vec<EvidenceGroup> = group.into_iter().collect();
+            return Ok(StaticAnalysisResult {
+                evidence_groups,
+                findings: vec![finding],
+                deterministic_score: 100.0,
+                advisory_score: 0.0,
+                ensemble_score: 100.0,
+                ml_model_version: "degraded-extraction".to_string(),
+                ast_index: None,
+                binary_report: None,
+            });
+        }
+    };
 
-    // Determine identity and ecosystem once for pattern filtering, typosquat,
-    // and OSV lookups. Falls back to empty strings when no manifest is found
-    // (patterns with `ecosystem: None` still apply; ecosystem-specific patterns
-    // are skipped).
-    let (pkg_name, pkg_version, ecosystem) = extract_package_identity(&files);
+    // Authoritative ecosystem identity & manifest hook audit (VNA-10).
+    let manifest_audit = crate::manifest_audit::audit(&archive, pkg_id, manifest);
+    let pkg_name = manifest_audit.pkg_name;
+    let pkg_version = manifest_audit.pkg_version;
+    let ecosystem = manifest_audit.ecosystem;
+    let hook_files = manifest_audit.hook_files;
+    let manifest_findings = manifest_audit.findings;
 
-    for (path, content) in &files {
-        // Only analyse source files; skip binaries, images, lock files, etc.
-        if !is_source_file(path) {
+    let mut all_code = String::new();
+    for file in &archive.files {
+        if (file.is_declared_source || file.is_declared_config) && !file.is_valid_utf8 {
+            let raw_entropy = creg_unpack::shannon_entropy_bytes(&file.raw_bytes);
+            deterministic_findings.push(Finding {
+                id: "ST-NONUTF8-IN-SOURCE".into(),
+                title: "Invalid UTF-8 byte sequence in source or config file".into(),
+                severity: if raw_entropy >= 5.5 {
+                    FindingSeverity::Critical
+                } else {
+                    FindingSeverity::High
+                },
+                description: format!(
+                    "File '{}' contains non-UTF-8 byte sequence at offset {} (entropy {:.2} bits/byte); scanning raw bytes and lossy projection.",
+                    file.path,
+                    file.non_utf8_offset.unwrap_or(0),
+                    raw_entropy
+                ),
+                file: file.path.clone(),
+                line: None,
+            });
+        }
+
+        // Only analyse declared source files for pattern/entropy/ML passes.
+        if !file.is_declared_source {
             continue;
         }
+
+        let content = file.text_lossy();
+        if !all_code.is_empty() {
+            all_code.push('\n');
+        }
+        all_code.push_str(&content);
 
         for pat in patterns() {
             // Skip patterns scoped to a different ecosystem.
@@ -335,8 +392,8 @@ pub async fn run(tarball_bytes: &[u8], manifest: &PackageManifest) -> Result<Sta
                     title: pat.description.to_string(),
                     severity: pat.severity,
                     description: pat.description.to_string(),
-                    file: path.clone(),
-                    line: find_line_number(content, &pat.needle),
+                    file: file.path.clone(),
+                    line: find_line_number(&content, &pat.needle),
                 });
             }
         }
@@ -352,7 +409,7 @@ pub async fn run(tarball_bytes: &[u8], manifest: &PackageManifest) -> Result<Sta
                     title: "High-entropy string detected".into(),
                     severity: FindingSeverity::High,
                     description: "High-entropy string — possible obfuscated payload".into(),
-                    file: path.clone(),
+                    file: file.path.clone(),
                     line: Some(line_num + 1),
                 });
                 break; // Flag once per file and pass whole file to LLM
@@ -362,13 +419,13 @@ pub async fn run(tarball_bytes: &[u8], manifest: &PackageManifest) -> Result<Sta
         // Character escape density check (SA014)
         for (line_num, line) in content.lines().enumerate() {
             if let Some((_count, escape_bytes)) = check_escape_density(line) {
-                if line.len() > 0 && (escape_bytes as f64) / (line.len() as f64) >= 0.15 {
+                if !line.is_empty() && (escape_bytes as f64) / (line.len() as f64) >= 0.15 {
                     deterministic_findings.push(Finding {
                         id: "SA014".into(),
                         title: "High character escape density".into(),
                         severity: FindingSeverity::High,
                         description: "Line contains high density of hex, unicode, or octal escape sequences, indicating possible code obfuscation.".into(),
-                        file: path.clone(),
+                        file: file.path.clone(),
                         line: Some(line_num + 1),
                     });
                     break; // Flag once per file
@@ -384,7 +441,7 @@ pub async fn run(tarball_bytes: &[u8], manifest: &PackageManifest) -> Result<Sta
                         title: "AI-Verified Malicious Intent".into(),
                         severity: FindingSeverity::Critical,
                         description: format!("LLM semantic analysis indicates high probability (score: {}) of malicious intent in obfuscated logic.", score),
-                        file: path.clone(),
+                        file: file.path.clone(),
                         line: None,
                     });
                 }
@@ -394,7 +451,7 @@ pub async fn run(tarball_bytes: &[u8], manifest: &PackageManifest) -> Result<Sta
                         title: "AI-Suspicious Obfuscation".into(),
                         severity: FindingSeverity::Medium,
                         description: format!("LLM analysis flagged suspicious but inconclusive obfuscated logic (score: {}).", score),
-                        file: path.clone(),
+                        file: file.path.clone(),
                         line: None,
                     });
                 }
@@ -402,26 +459,16 @@ pub async fn run(tarball_bytes: &[u8], manifest: &PackageManifest) -> Result<Sta
                     // Score below 50 — LLM ran and considered it benign; no finding.
                 }
                 Ok(None) => {
-                    // LLM unavailable — emit a visible degraded-mode finding so
-                    // consensus can see that obfuscated code was NOT semantically
-                    // verified. Treated as High (not Critical) because static
-                    // analysis still flagged SA009 on the same file.
                     snippet_llm_findings.push(Finding {
                         id: "SA012".into(),
                         title: "LLM unavailable for obfuscated code".into(),
                         severity: FindingSeverity::High,
                         description: "High-entropy code was flagged but the LLM semantic analyser was unavailable. Treating as unverified.".into(),
-                        file: path.clone(),
+                        file: file.path.clone(),
                         line: None,
                     });
                 }
                 Err(e) => {
-                    // Treat LLM errors the same as unavailability: emit a
-                    // degraded-mode finding so consensus can see that this
-                    // high-entropy file was NOT semantically verified.
-                    // Silently scoring it 0 (benign) here would allow
-                    // obfuscated malware to pass whenever the LLM endpoint
-                    // is slow, rate-limited, or misconfigured.
                     tracing::warn!(error = %e, "LLM predict_intent failed — treating high-entropy file as unverified");
                     snippet_llm_findings.push(Finding {
                         id: "SA012".into(),
@@ -432,7 +479,7 @@ pub async fn run(tarball_bytes: &[u8], manifest: &PackageManifest) -> Result<Sta
                              Treating as unverified.",
                             e
                         ),
-                        file: path.clone(),
+                        file: file.path.clone(),
                         line: None,
                     });
                 }
@@ -441,7 +488,6 @@ pub async fn run(tarball_bytes: &[u8], manifest: &PackageManifest) -> Result<Sta
     }
 
     // Check for typosquatting using Levenshtein distance against all popular packages.
-    // pkg_name / pkg_version / ecosystem were extracted at the top of run().
     if !pkg_name.is_empty() {
         if let Some(finding) = check_typosquatting_real(&pkg_name, &ecosystem) {
             deterministic_findings.push(finding);
@@ -452,22 +498,13 @@ pub async fn run(tarball_bytes: &[u8], manifest: &PackageManifest) -> Result<Sta
     let osv_pinned_findings = pinned_osv_findings(&pkg_name, &pkg_version, &ecosystem);
 
     // ── Rule-Based ML Scoring (Phase 2a) ────────────────────────────────────
-    // Extract AST features from source files and run rule-based threat scoring.
-    // This provides immediate ML-style detection independent of the ONNX model.
-    let ecosystem_str = &ecosystem;
-    let all_code: String = files
-        .iter()
-        .filter(|(p, _)| is_source_file(p))
-        .map(|(_, c)| c.as_str())
-        .collect::<Vec<_>>()
-        .join("\n");
-
     if !all_code.is_empty() {
-        let extract_ecosystem = if ecosystem_str == "npm" || ecosystem_str.is_empty() {
-            "npm"
-        } else {
-            ecosystem_str
-        };
+        let extract_ecosystem =
+            if ecosystem == "npm" || ecosystem.is_empty() || ecosystem == "unknown" {
+                "npm"
+            } else {
+                ecosystem.as_str()
+            };
         match ml_validator::FeatureExtractor::extract(extract_ecosystem, &all_code) {
             Ok(features) => {
                 let prediction = ml_validator::MlValidator::new().predict(&features);
@@ -507,27 +544,59 @@ pub async fn run(tarball_bytes: &[u8], manifest: &PackageManifest) -> Result<Sta
         }
     }
 
-    // ── Deterministic Malware Scan (YARA + Threat Intel) ───────────────────
-    // Consensus validation must not depend on live external services. OSV.dev
-    // lookups remain available to off-chain/advisory tooling, but validators
-    // pass `None` here so package votes depend only on local, pinned scanner
-    // artifacts captured in `analysis_bundles`.
-    let pkg_info = None;
-
-    let deep_scan_result = {
-        let tarball_bytes = tarball_bytes.to_vec();
-        let pkg_info = pkg_info.clone();
-        let eco = ecosystem.clone();
-        tokio::task::spawn_blocking(move || ml_validator::deep_scan(&tarball_bytes, pkg_info, &eco))
+    // ── AST, Binary/WASM, and Lock-Free YARA+ThreatIntel Deep Scan ──────────
+    let scan_archive = Arc::clone(&archive);
+    let scan_eco = ecosystem.clone();
+    let scan_hooks = hook_files;
+    let blocking_outcome = {
+        let _permit = DEEP_SCAN_SEMAPHORE
+            .acquire()
             .await
+            .map_err(|e| anyhow::anyhow!("deep scan semaphore closed: {e}"))?;
+        tokio::task::spawn_blocking(move || {
+            let ast_idx =
+                ml_validator::ast_index::analyze_archive(&scan_archive, &scan_eco, &scan_hooks);
+            let bin_rep = ml_validator::binary_inspect::inspect_archive(&scan_archive);
+            let deep = ml_validator::deep_scan_unpacked(&scan_archive, None, &scan_eco);
+            (ast_idx, bin_rep, deep)
+        })
+        .await
     };
 
-    let (deep_scan_findings, ml_model_version) = match deep_scan_result {
-        Ok(inner) => apply_deep_scan_outcome(inner),
+    let (ast_index, binary_report, deep_scan_findings, ml_model_version) = match blocking_outcome {
+        Ok((ast_idx, bin_rep, deep_res)) => {
+            if let Ok(ref deep) = deep_res {
+                let hit_paths: std::collections::HashSet<&str> = deep
+                    .suspicious_files
+                    .iter()
+                    .map(|sf| sf.path.as_str())
+                    .collect();
+                for finding in &mut deterministic_findings {
+                    if finding.id == "ST-NONUTF8-IN-SOURCE"
+                        && hit_paths.contains(finding.file.as_str())
+                    {
+                        finding.severity = FindingSeverity::Critical;
+                    }
+                }
+            }
+            let (ds_findings, version) = apply_deep_scan_outcome(deep_res);
+            (Some(ast_idx), Some(bin_rep), ds_findings, version)
+        }
         Err(e) => {
-            apply_deep_scan_outcome(Err(ml_validator::MlError::InferenceError(e.to_string())))
+            let (ds_findings, version) =
+                apply_deep_scan_outcome(Err(ml_validator::MlError::InferenceError(e.to_string())));
+            (None, None, ds_findings, version)
         }
     };
+
+    let ast_findings = ast_index
+        .as_ref()
+        .map(|idx| idx.to_findings(manifest))
+        .unwrap_or_default();
+    let binary_findings = binary_report
+        .as_ref()
+        .map(ml_validator::binary_inspect::BinaryInspectionReport::to_findings)
+        .unwrap_or_default();
 
     let evidence_groups = [
         build_evidence_group(
@@ -535,6 +604,24 @@ pub async fn run(tarball_bytes: &[u8], manifest: &PackageManifest) -> Result<Sta
             "Static pattern and manifest evidence",
             EvidenceDeterminism::Deterministic,
             deterministic_findings,
+        ),
+        build_evidence_group(
+            "manifest-audit",
+            "Authoritative manifest and lifecycle hook audit",
+            EvidenceDeterminism::Deterministic,
+            manifest_findings,
+        ),
+        build_evidence_group(
+            "ast-analysis",
+            "Multi-language tree-sitter AST & taint analysis",
+            EvidenceDeterminism::Deterministic,
+            ast_findings,
+        ),
+        build_evidence_group(
+            "binary-inspection",
+            "Native ELF/Mach-O/PE & WebAssembly structural inspection",
+            EvidenceDeterminism::Deterministic,
+            binary_findings,
         ),
         build_evidence_group(
             "snippet-llm",
@@ -580,6 +667,8 @@ pub async fn run(tarball_bytes: &[u8], manifest: &PackageManifest) -> Result<Sta
         advisory_score,
         ensemble_score,
         ml_model_version,
+        ast_index,
+        binary_report,
     })
 }
 
@@ -736,6 +825,10 @@ fn group_score(id: &str, findings: &[Finding]) -> f64 {
             .filter(|finding| finding.id != "SA011" && finding.id != "SA012")
             .map(|finding| severity_score(finding.severity))
             .fold(0.0, f64::max),
+        "archive-security" | "manifest-audit" | "ast-analysis" | "binary-inspection" => findings
+            .iter()
+            .map(|finding| severity_score(finding.severity))
+            .fold(0.0, f64::max),
         "rule-ml" => {
             if findings.iter().any(|finding| finding.id == "ML002") {
                 85.0
@@ -789,7 +882,16 @@ fn group_score(id: &str, findings: &[Finding]) -> f64 {
 }
 
 fn compute_deterministic_score(groups: &[EvidenceGroup]) -> f64 {
-    let static_score = score_for_group(groups, "static-patterns");
+    let static_score = [
+        "archive-security",
+        "static-patterns",
+        "manifest-audit",
+        "ast-analysis",
+        "binary-inspection",
+    ]
+    .into_iter()
+    .map(|id| score_for_group(groups, id))
+    .fold(0.0, f64::max);
     let rule_ml_score = score_for_group(groups, "rule-ml");
     let deep_score = score_for_group(groups, "deep-scan");
 
@@ -983,40 +1085,6 @@ fn check_escape_density(line: &str) -> Option<(usize, usize)> {
     }
 }
 
-fn is_source_file(path: &str) -> bool {
-    let ext = std::path::Path::new(path)
-        .extension()
-        .and_then(|e| e.to_str())
-        .unwrap_or("");
-    matches!(
-        ext,
-        // JavaScript / TypeScript
-        "js" | "ts" | "mjs" | "cjs" | "jsx" | "tsx"
-        // Python
-        | "py" | "pyw"
-        // Ruby
-        | "rb"
-        // Rust
-        | "rs"
-        // JVM
-        | "java" | "kt" | "groovy" | "scala"
-        // Shell scripts — critical: postinstall hooks are often .sh
-        | "sh" | "bash" | "zsh" | "fish" | "ksh"
-        // Web / server-side
-        | "php" | "php5" | "phtml"
-        // Go
-        | "go"
-        // C / C++ — native add-ons common in npm packages
-        | "c" | "cpp" | "cc" | "cxx" | "h" | "hpp"
-        // Swift / Objective-C
-        | "swift" | "m"
-        // Lua
-        | "lua"
-        // PowerShell — relevant for Windows packages
-        | "ps1" | "psm1"
-    )
-}
-
 fn find_line_number(content: &str, needle: &str) -> Option<usize> {
     content.lines().enumerate().find_map(|(i, l)| {
         if l.contains(needle) {
@@ -1027,135 +1095,7 @@ fn find_line_number(content: &str, needle: &str) -> Option<usize> {
     })
 }
 
-/// Maximum bytes read from a single source file.
-/// Configurable via `CREG_STATIC_MAX_FILE_BYTES` (default: 5 MiB).
-/// Files exceeding this limit are skipped with an SA013 finding so the
-/// limitation is visible in the report — silently dropping them would let
-/// attackers hide malicious code past the size threshold.
-fn max_file_bytes() -> u64 {
-    std::env::var("CREG_STATIC_MAX_FILE_BYTES")
-        .ok()
-        .and_then(|v| v.parse().ok())
-        .unwrap_or(5 * 1024 * 1024) // 5 MiB
-}
-
-/// Returns `(readable_files, oversized_paths)`.
-/// `oversized_paths` are paths whose size exceeds `max_file_bytes()`.
-/// Callers emit SA013 findings for each oversized path.
-fn extract_text_files(tarball: &[u8]) -> Result<(Vec<(String, String)>, Vec<String>)> {
-    use std::io::Read;
-    let limit = max_file_bytes();
-    let gz = flate2::read::GzDecoder::new(tarball);
-    let mut archive = tar::Archive::new(gz);
-    let mut files = Vec::new();
-    let mut oversized = Vec::new();
-    for entry in archive.entries()? {
-        let entry = entry?;
-        let path = entry.path()?.to_string_lossy().to_string();
-        // Check declared size from tar header before reading. A malicious
-        // tarball may lie about size, so we also enforce the limit during read.
-        let declared_size = entry.header().size().unwrap_or(0);
-        if declared_size > limit {
-            oversized.push(path);
-            continue;
-        }
-        // Read with a hard byte cap to guard against tarballs that under-report size.
-        let mut content = String::new();
-        let mut limited = entry.take(limit + 1);
-        if limited.read_to_string(&mut content).is_ok() && !content.is_empty() {
-            if content.len() as u64 > limit {
-                oversized.push(path);
-            } else {
-                files.push((path, content));
-            }
-        }
-    }
-    Ok((files, oversized))
-}
-
 use crate::typosquat;
-
-/// Extract the package name, version, and ecosystem from the tarball's manifest files.
-fn extract_package_identity(files: &[(String, String)]) -> (String, String, String) {
-    for (path, content) in files {
-        if path.ends_with("package.json") {
-            if let Ok(v) = serde_json::from_str::<serde_json::Value>(content) {
-                if let Some(name) = v["name"].as_str() {
-                    let version = v["version"].as_str().unwrap_or("0.0.0").to_string();
-                    return (name.to_string(), version, "npm".to_string());
-                }
-            }
-        }
-        if path.ends_with("Cargo.toml") {
-            let mut name = String::new();
-            let mut version = String::new();
-            for line in content.lines() {
-                if let Some(rest) = line.strip_prefix("name") {
-                    let n = rest
-                        .trim_start_matches([' ', '=', '"'])
-                        .trim_end_matches('"')
-                        .trim();
-                    if !n.is_empty() {
-                        name = n.to_string();
-                    }
-                }
-                if let Some(rest) = line.strip_prefix("version") {
-                    let v = rest
-                        .trim_start_matches([' ', '=', '"'])
-                        .trim_end_matches('"')
-                        .trim();
-                    if !v.is_empty() && version.is_empty() {
-                        version = v.to_string();
-                    }
-                }
-            }
-            if !name.is_empty() {
-                if version.is_empty() {
-                    version = "0.0.0".to_string();
-                }
-                return (name, version, "cargo".to_string());
-            }
-        }
-        if path.ends_with("setup.py")
-            || path.ends_with("setup.cfg")
-            || path.ends_with("pyproject.toml")
-        {
-            let mut name = String::new();
-            let mut version = String::new();
-            for line in content.lines() {
-                if line.trim_start().starts_with("name") {
-                    let n = line
-                        .splitn(2, '=')
-                        .nth(1)
-                        .unwrap_or("")
-                        .trim()
-                        .trim_matches(['"', '\'', ' ']);
-                    if !n.is_empty() {
-                        name = n.to_string();
-                    }
-                }
-                if line.trim_start().starts_with("version") {
-                    let v = line
-                        .splitn(2, '=')
-                        .nth(1)
-                        .unwrap_or("")
-                        .trim()
-                        .trim_matches(['"', '\'', ' ']);
-                    if !v.is_empty() && version.is_empty() {
-                        version = v.to_string();
-                    }
-                }
-            }
-            if !name.is_empty() {
-                if version.is_empty() {
-                    version = "0.0.0".to_string();
-                }
-                return (name, version, "pypi".to_string());
-            }
-        }
-    }
-    (String::new(), String::new(), String::new())
-}
 
 /// Levenshtein-distance based typosquat check against all known popular packages.
 pub fn check_typosquatting_real(package_name: &str, ecosystem: &str) -> Option<Finding> {

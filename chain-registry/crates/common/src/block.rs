@@ -2,7 +2,7 @@
 
 use crate::{
     sha256_hex, ChainRecord, NamespaceLifecycleEvent, NamespaceLifecycleEventV2,
-    PublisherAuthorizationV1,
+    PublisherAuthorizationV1, SignedRevocationRequest,
 };
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
@@ -253,6 +253,12 @@ pub enum Transaction {
         revoked_by: String,
         evidence_hash: String,
     },
+    /// Cryptographically authenticated package revocation carrying the full
+    /// signed revocation proof for deterministic consensus replay (ADR-018 / VNA-30).
+    RevokeV2 {
+        request: SignedRevocationRequest,
+        evidence_hash: String,
+    },
     /// A validator's stake was slashed for bad behaviour.
     Slash {
         validator_id: String,
@@ -314,6 +320,30 @@ impl Transaction {
     pub fn namespace_lifecycle_v2(&self) -> Option<&NamespaceLifecycleEventV2> {
         match self {
             Self::NamespaceLifecycleV2(event) => Some(event),
+            _ => None,
+        }
+    }
+
+    /// Package revocation fields shared across historical `Revoke` and
+    /// cryptographically authenticated `RevokeV2` transactions:
+    /// `(package_canonical, reason, revoked_by, evidence_hash)`.
+    pub fn revocation_target(&self) -> Option<(&str, &str, &str, &str)> {
+        match self {
+            Self::Revoke {
+                package_canonical,
+                reason,
+                revoked_by,
+                evidence_hash,
+            } => Some((package_canonical, reason, revoked_by, evidence_hash)),
+            Self::RevokeV2 {
+                request,
+                evidence_hash,
+            } => Some((
+                &request.package_canonical,
+                &request.reason,
+                &request.revoker_pubkey,
+                evidence_hash,
+            )),
             _ => None,
         }
     }

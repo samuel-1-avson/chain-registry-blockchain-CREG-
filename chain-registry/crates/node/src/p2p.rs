@@ -4,17 +4,21 @@
 use anyhow::{Context, Result};
 use futures::StreamExt;
 use libp2p::{
-    gossipsub, identify, identity, kad,
+    connection_limits, gossipsub, identify, identity, kad,
     multiaddr::Protocol,
     noise,
     swarm::{NetworkBehaviour, SwarmEvent},
     tcp, yamux, Multiaddr, PeerId, Swarm,
 };
+use std::collections::HashMap;
 use std::path::Path;
+use std::sync::Arc;
 use std::time::Duration;
 use tokio::sync::mpsc;
 
+use crate::p2p_peer_score::{PeerAction, PeerScoreTracker};
 use crate::p2p_rate_limit::{P2PRateLimitConfig, P2PRateLimiter};
+use crate::p2p_subnet_filter::{SubnetConnectionFilter, DEFAULT_MAX_PEERS_PER_SUBNET};
 
 pub const VIEW_CHANGE_TOPIC: &str = "creg/v1/view-change";
 
@@ -458,10 +462,30 @@ fn report_validation_result(
     }
 }
 
-fn requires_payload_validation_before_acceptance(topic: &str) -> bool {
-    topic.contains("votes")
-        || topic.contains("validator-set-transitions")
-        || topic.contains("view-change")
+pub(crate) fn gossipsub_message_id(topic: &str, data: &[u8]) -> gossipsub::MessageId {
+    let mut preimage = Vec::with_capacity(topic.len() + 1 + data.len());
+    preimage.extend_from_slice(topic.as_bytes());
+    preimage.push(0u8);
+    preimage.extend_from_slice(data);
+    gossipsub::MessageId::from(common::sha256(&preimage).to_vec())
+}
+
+fn is_loopback_multiaddr(addr: &Multiaddr) -> bool {
+    addr.iter().any(|proto| match proto {
+        Protocol::Ip4(ip) => ip.is_loopback(),
+        Protocol::Ip6(ip) => ip.is_loopback(),
+        _ => false,
+    })
+}
+
+fn handle_peer_action(swarm: &mut Swarm<Behaviour>, peer_id: PeerId, action: PeerAction) {
+    if action == PeerAction::Blacklist {
+        let _ = swarm.disconnect_peer_id(peer_id);
+    }
+}
+
+fn requires_payload_validation_before_acceptance(_topic: &str) -> bool {
+    true
 }
 
 fn transition_persistence_failure_acceptance(
@@ -563,6 +587,7 @@ pub struct Behaviour {
     pub gossipsub: gossipsub::Behaviour,
     pub kademlia: kad::Behaviour<kad::store::MemoryStore>,
     pub identify: identify::Behaviour,
+    pub connection_limits: connection_limits::Behaviour,
 }
 
 pub struct P2PNode {
@@ -605,15 +630,14 @@ impl P2PNode {
             .with_behaviour(|key| {
                 // ── Gossipsub ────────────────────────────────────────────────
                 let message_id_fn = |message: &gossipsub::Message| {
-                    let mut s = std::collections::hash_map::DefaultHasher::new();
-                    std::hash::Hash::hash(&message.data, &mut s);
-                    gossipsub::MessageId::from(std::hash::Hasher::finish(&s).to_string())
+                    gossipsub_message_id(message.topic.as_str(), &message.data)
                 };
 
                 let gossipsub_config = gossipsub::ConfigBuilder::default()
                     .heartbeat_interval(gossipsub_heartbeat_interval())
                     .validate_messages()
                     .validation_mode(gossipsub::ValidationMode::Strict)
+                    .max_transmit_size(4 * 1024 * 1024)
                     .message_id_fn(message_id_fn)
                     .build()
                     .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))?;
@@ -635,10 +659,20 @@ impl P2PNode {
                     key.public(),
                 ));
 
+                let connection_limits = connection_limits::Behaviour::new(
+                    connection_limits::ConnectionLimits::default()
+                        .with_max_pending_incoming(Some(64))
+                        .with_max_pending_outgoing(Some(64))
+                        .with_max_established_incoming(Some(128))
+                        .with_max_established_outgoing(Some(128))
+                        .with_max_established_per_peer(Some(2)),
+                );
+
                 Ok(Behaviour {
                     gossipsub,
                     kademlia,
                     identify,
+                    connection_limits,
                 })
             })?
             .with_swarm_config(|c| c.with_idle_connection_timeout(Duration::from_secs(60)))
@@ -675,8 +709,17 @@ impl P2PNode {
     pub async fn run(
         mut self,
         state: crate::SharedState,
-        event_bus: crate::events::EventBus,
+        _event_bus: crate::events::EventBus,
     ) -> Result<()> {
+        crate::p2p_rate_limit::spawn_purge_task(self.rate_limiter.clone());
+        let validator_set_snapshot = state.read().await.validator_set_snapshot.clone();
+        let mut peer_scores = PeerScoreTracker::default();
+        let mut peer_validators: HashMap<PeerId, String> = HashMap::new();
+        let max_per_subnet = std::env::var("CREG_P2P_MAX_PEERS_PER_SUBNET")
+            .ok()
+            .and_then(|v| v.parse().ok())
+            .unwrap_or(DEFAULT_MAX_PEERS_PER_SUBNET);
+        let mut subnet_filter = SubnetConnectionFilter::new(max_per_subnet);
         let mut status_ticker = tokio::time::interval(Duration::from_secs(5));
         let votes_topic = gossipsub::IdentTopic::new("creg/v1/votes");
         let blocks_topic = gossipsub::IdentTopic::new("creg/v1/blocks");
@@ -723,6 +766,54 @@ impl P2PNode {
             .gossipsub
             .subscribe(&gossipsub::IdentTopic::new(crate::revocation_gossip::TOPIC))?;
 
+        // Offload heavy IPFS download & YARA scanning for prechecked P2P submissions
+        // off the single-threaded libp2p Swarm event loop (VNA-03).
+        const MAX_P2P_SUBMISSION_QUEUE: usize = 64;
+        const MAX_CONCURRENT_P2P_ADMISSIONS: usize = 4;
+        let (sub_tx, mut sub_rx) =
+            tokio::sync::mpsc::channel::<common::PublishRequest>(MAX_P2P_SUBMISSION_QUEUE);
+        {
+            let adm_state = Arc::clone(&state);
+            let adm_sem = Arc::new(tokio::sync::Semaphore::new(MAX_CONCURRENT_P2P_ADMISSIONS));
+            tokio::spawn(async move {
+                while let Some(req) = sub_rx.recv().await {
+                    let Ok(permit) = Arc::clone(&adm_sem).acquire_owned().await else {
+                        break;
+                    };
+                    let st = Arc::clone(&adm_state);
+                    tokio::spawn(async move {
+                        let _permit = permit;
+                        let canonical = req.id.canonical();
+                        match crate::package_admission::admit_publish_request(
+                            &st,
+                            req,
+                            crate::package_admission::AdmissionOptions {
+                                surface: crate::package_admission::AdmissionSurface::P2p,
+                                verify_publisher_auth: true,
+                            },
+                        )
+                        .await
+                        {
+                            Ok(_) => {
+                                tracing::info!("P2P submission {} admitted to mempool", canonical)
+                            }
+                            Err(crate::package_admission::AdmissionError::AlreadyPending(_))
+                            | Err(crate::package_admission::AdmissionError::AlreadyVerified(_)) => {
+                                tracing::debug!("P2P submission {} already known", canonical);
+                            }
+                            Err(err) => {
+                                tracing::warn!(
+                                    "P2P submission {} rejected at admission: {}",
+                                    canonical,
+                                    err
+                                );
+                            }
+                        }
+                    });
+                }
+            });
+        }
+
         loop {
             tokio::select! {
                 event = self.swarm.select_next_some() => match event {
@@ -753,28 +844,47 @@ impl P2PNode {
                     })) => {
                         tracing::debug!("Got Gossipsub message {} from {}", id, peer_id);
 
+                        if !peer_scores.is_allowed(&peer_id) {
+                            report_validation_result(
+                                &mut self.swarm,
+                                &id,
+                                &peer_id,
+                                gossipsub::MessageAcceptance::Ignore,
+                            );
+                            continue;
+                        }
+
                         // Parse topic and check rate limits
                         let topic_str = message.topic.as_str();
 
-                        // Retrieve active validators and their stakes
-                        let active_validators: Vec<(String, u64)> = {
-                            if let Ok(s) = state.try_read() {
-                                s.validator_set.validators
-                                    .iter()
-                                    .map(|v| (v.id.clone(), v.stake))
-                                    .collect()
-                            } else {
-                                vec![]
-                            }
-                        };
+                        // Retrieve active validators and their stakes lock-free
+                        let vs_snapshot = validator_set_snapshot.load();
+                        let active_validators: Vec<(String, u64)> = vs_snapshot
+                            .validators
+                            .iter()
+                            .map(|v| (v.id.clone(), v.stake))
+                            .collect();
 
-                        // Apply rate limiting based on message type
+                        // Apply rate limiting based on message type & authenticated identity
+                        let validator_hint = peer_validators.get(&peer_id).map(String::as_str);
                         let allowed = if topic_str.contains("votes") {
-                            self.rate_limiter.check_vote(peer_id, &active_validators)
+                            self.rate_limiter.check_vote_for_validator(
+                                peer_id,
+                                validator_hint,
+                                &active_validators,
+                            )
                         } else if topic_str.contains("blocks") {
-                            self.rate_limiter.check_block(peer_id, &active_validators)
+                            self.rate_limiter.check_block_for_validator(
+                                peer_id,
+                                validator_hint,
+                                &active_validators,
+                            )
                         } else {
-                            self.rate_limiter.check_general(peer_id, &active_validators)
+                            self.rate_limiter.check_general_for_validator(
+                                peer_id,
+                                validator_hint,
+                                &active_validators,
+                            )
                         };
 
                         if !allowed {
@@ -784,6 +894,8 @@ impl P2PNode {
                                 &peer_id,
                                 gossipsub::MessageAcceptance::Ignore,
                             );
+                            let action = peer_scores.record_rate_limit_violation(&peer_id);
+                            handle_peer_action(&mut self.swarm, peer_id, action);
                             tracing::warn!(
                                 "P2P Rate limit: Dropping message {} from {} on topic {}",
                                 id, peer_id, topic_str
@@ -791,12 +903,13 @@ impl P2PNode {
                             continue;
                         }
 
-                        // Reject oversized messages before deserializing to prevent
-                        // OOM attacks: rate limiting is per-message-count, not per-byte,
-                        // so without this a single 100 MB gossip message passes the
-                        // rate limiter but exhausts the node's heap during JSON parsing.
-                        const MAX_MESSAGE_BYTES: usize = 1024 * 1024; // 1 MiB
-                        if message.data.len() > MAX_MESSAGE_BYTES {
+                        let max_message_bytes: usize =
+                            if topic_str.contains("blocks") || topic_str.contains("view-change") {
+                                4 * 1024 * 1024
+                            } else {
+                                1024 * 1024
+                            };
+                        if message.data.len() > max_message_bytes {
                             report_validation_result(
                                 &mut self.swarm,
                                 &id,
@@ -805,119 +918,158 @@ impl P2PNode {
                             );
                             tracing::warn!(
                                 "P2P: Dropping oversized message {} from {} ({} bytes > {} limit)",
-                                id, peer_id, message.data.len(), MAX_MESSAGE_BYTES
+                                id, peer_id, message.data.len(), max_message_bytes
                             );
                             continue;
                         }
-
-                        let defer_pre_prepare_validation = topic_str.contains("blocks")
-                            && matches!(
-                                serde_json::from_slice::<common::GossipMessage>(&message.data),
-                                Ok(common::GossipMessage::PbftPrePrepare { .. })
-                                    | Ok(common::GossipMessage::PbftRepropose { .. })
-                            );
-                        if !requires_payload_validation_before_acceptance(topic_str)
-                            && !defer_pre_prepare_validation
-                        {
-                            report_validation_result(
-                                &mut self.swarm,
-                                &id,
-                                &peer_id,
-                                gossipsub::MessageAcceptance::Accept,
-                            );
-                        }
+                        let _ = requires_payload_validation_before_acceptance(topic_str);
 
                         // Forward message to the node's internal event bus
                         if topic_str.contains("submissions") {
-                            if let Ok(common::GossipMessage::PublishRequest(req)) = serde_json::from_slice(&message.data) {
-                                let canonical = req.id.canonical();
-                                let ipfs_url = {
-                                    let s = state.read().await;
-                                    s.config.ipfs_url.clone()
-                                };
-                                match crate::admission_scan::run_pre_mempool_yara_gate(&req, &ipfs_url).await {
-                                    Ok(()) => {
-                                        let mut s = state.write().await;
-                                        if !s.pending_pool.contains(&canonical) {
-                                            if !s.pending_pool.insert(req.clone()) {
-                                                continue;
-                                            }
-                                            // Wire committee at "admission" for gossip path too
-                                            let tip = s.chain.tip_hash().unwrap_or_default();
-                                            let recent_vrf = s.chain.get_block_by_hash(&tip)
-                                                .ok()
-                                                .flatten()
-                                                .and_then(|b| b.header.vrf_output.clone());
-                                            let selection_randomness = recent_vrf.clone().unwrap_or_else(|| tip.clone());
-                                            let next_height = s.chain.tip_height().unwrap_or(0).saturating_add(1);
-                                            let certified = crate::validator_set_history::committee_authority_at(
-                                                &s.config.data_dir,
-                                                next_height,
-                                                &s.validator_set_bootstrap,
-                                            ).ok().flatten().filter(|snapshot| {
-                                                snapshot.validator_set_hash
-                                                    == common::canonical_validator_set_hash(&s.validator_set)
-                                            });
-                                            let committee = match certified {
-                                                Some(snapshot) => crate::package_admission::compute_analysis_committee_for_authenticated_snapshot(
-                                                    &snapshot,
-                                                    &canonical,
-                                                    &req.content_hash,
-                                                    selection_randomness,
-                                                ),
-                                                None => crate::package_admission::compute_analysis_committee_at_admission(
-                                                    &s.validator_set,
-                                                    &canonical,
-                                                    &req.content_hash,
-                                                    tip,
-                                                    recent_vrf,
-                                                ),
+                            match serde_json::from_slice::<common::GossipMessage>(&message.data) {
+                                Ok(common::GossipMessage::PublishRequest(req)) => {
+                                    let canonical = req.id.canonical();
+                                    match crate::package_admission::precheck_p2p_submission(&state, &req).await {
+                                        crate::package_admission::P2pSubmissionPrecheck::Valid => {
+                                            let acceptance = match sub_tx.try_send(req) {
+                                                Ok(()) => {
+                                                    peer_scores.record_valid_message(&peer_id);
+                                                    gossipsub::MessageAcceptance::Accept
+                                                }
+                                                Err(_) => {
+                                                    tracing::warn!("P2P: admission queue full, ignoring {}", canonical);
+                                                    gossipsub::MessageAcceptance::Ignore
+                                                }
                                             };
-                                            if crate::validator_set_history::certified_committees_required()
-                                                && committee.validator_snapshot_certificate_hash.is_empty()
-                                            {
-                                                s.pending_pool.remove(&canonical);
-                                                tracing::warn!("P2P: dropping {} because certified committee authority is required", canonical);
-                                                continue;
-                                            }
-                                            if let Err(error) = s.pending_pool.set_analysis_committee_durable(&canonical, committee) {
-                                                s.pending_pool.remove(&canonical);
-                                                tracing::warn!(%error, "P2P: could not persist committee for {}", canonical);
-                                                continue;
-                                            }
-                                            crate::events::emit(&event_bus, crate::events::RegistryEvent::package_submitted(
-                                                &canonical, &req.publisher_pubkey,
-                                            ));
-                                            tracing::info!("Received {} via gossip", canonical);
+                                            report_validation_result(&mut self.swarm, &id, &peer_id, acceptance);
+                                        }
+                                        crate::package_admission::P2pSubmissionPrecheck::DuplicateIgnore => {
+                                            report_validation_result(
+                                                &mut self.swarm,
+                                                &id,
+                                                &peer_id,
+                                                gossipsub::MessageAcceptance::Ignore,
+                                            );
+                                        }
+                                        crate::package_admission::P2pSubmissionPrecheck::Reject(reason) => {
+                                            tracing::warn!(peer = %peer_id, canonical = %canonical, reason = %reason, "P2P: rejecting invalid submission before acceptance");
+                                            report_validation_result(
+                                                &mut self.swarm,
+                                                &id,
+                                                &peer_id,
+                                                gossipsub::MessageAcceptance::Reject,
+                                            );
+                                            let action = peer_scores.record_corrupted_payload(&peer_id);
+                                            handle_peer_action(&mut self.swarm, peer_id, action);
                                         }
                                     }
-                                    Err(e) => {
-                                        tracing::warn!(
-                                            "P2P: dropping submission {} before mempool: {}",
-                                            canonical,
-                                            e
-                                        );
-                                    }
+                                }
+                                _ => {
+                                    report_validation_result(
+                                        &mut self.swarm,
+                                        &id,
+                                        &peer_id,
+                                        gossipsub::MessageAcceptance::Reject,
+                                    );
+                                    let action = peer_scores.record_corrupted_payload(&peer_id);
+                                    handle_peer_action(&mut self.swarm, peer_id, action);
                                 }
                             }
                             continue;
                         }
 
                         if topic_str.contains("vrf-proofs") {
-                            if let Ok(common::GossipMessage::VrfProof { validator_id, pubkey, epoch_seed, output, proof }) = serde_json::from_slice(&message.data) {
-                                let mut s = state.write().await;
-                                let current_seed = match s.chain.tip_hash() {
-                                    Ok(h) => h,
-                                    Err(_) => continue,
-                                };
-                                // Only accept proofs for the current epoch seed
-                                if epoch_seed == current_seed {
-                                    if let Err(e) = consensus::vrf::verify(epoch_seed.as_bytes(), &pubkey, &output, &proof) {
+                            match serde_json::from_slice::<common::GossipMessage>(&message.data) {
+                                Ok(common::GossipMessage::VrfProof {
+                                    validator_id,
+                                    pubkey,
+                                    epoch_seed,
+                                    output,
+                                    proof,
+                                }) => {
+                                    let member_matches = vs_snapshot.validators.iter().any(|v| {
+                                        v.id == validator_id
+                                            && common::validator_status_is_active(&v.status)
+                                            && v.pubkey.eq_ignore_ascii_case(&pubkey)
+                                    });
+                                    if !member_matches {
+                                        report_validation_result(
+                                            &mut self.swarm,
+                                            &id,
+                                            &peer_id,
+                                            gossipsub::MessageAcceptance::Reject,
+                                        );
+                                        let action = peer_scores.record_invalid_signature(&peer_id);
+                                        handle_peer_action(&mut self.swarm, peer_id, action);
+                                        continue;
+                                    }
+                                    let mut s = state.write().await;
+                                    let current_seed = match s.chain.tip_hash() {
+                                        Ok(h) => h,
+                                        Err(_) => {
+                                            report_validation_result(
+                                                &mut self.swarm,
+                                                &id,
+                                                &peer_id,
+                                                gossipsub::MessageAcceptance::Ignore,
+                                            );
+                                            continue;
+                                        }
+                                    };
+                                    if epoch_seed != current_seed {
+                                        report_validation_result(
+                                            &mut self.swarm,
+                                            &id,
+                                            &peer_id,
+                                            gossipsub::MessageAcceptance::Ignore,
+                                        );
+                                        continue;
+                                    }
+                                    if let Err(e) = consensus::vrf::verify(
+                                        epoch_seed.as_bytes(),
+                                        &pubkey,
+                                        &output,
+                                        &proof,
+                                    ) {
+                                        report_validation_result(
+                                            &mut self.swarm,
+                                            &id,
+                                            &peer_id,
+                                            gossipsub::MessageAcceptance::Reject,
+                                        );
+                                        let action = peer_scores.record_invalid_signature(&peer_id);
+                                        handle_peer_action(&mut self.swarm, peer_id, action);
                                         tracing::debug!("Dropped invalid VRF proof from {}: {}", validator_id, e);
                                     } else {
-                                        s.vrf_proofs.insert(validator_id.clone(), (output.clone(), proof.clone()));
+                                        if s.vrf_proofs.contains_key(&validator_id)
+                                            || s.vrf_proofs.len()
+                                                < crate::state::MAX_VRF_PROOFS_PER_EPOCH
+                                        {
+                                            s.vrf_proofs
+                                                .insert(validator_id.clone(), (output.clone(), proof.clone()));
+                                        }
+                                        if let Some(src) = message.source {
+                                            peer_validators.insert(src, validator_id.clone());
+                                        }
+                                        peer_scores.record_valid_message(&peer_id);
+                                        report_validation_result(
+                                            &mut self.swarm,
+                                            &id,
+                                            &peer_id,
+                                            gossipsub::MessageAcceptance::Accept,
+                                        );
                                         tracing::debug!("Accepted VRF proof from {} for epoch {}", validator_id, &epoch_seed[..epoch_seed.len().min(12)]);
                                     }
+                                }
+                                _ => {
+                                    report_validation_result(
+                                        &mut self.swarm,
+                                        &id,
+                                        &peer_id,
+                                        gossipsub::MessageAcceptance::Reject,
+                                    );
+                                    let action = peer_scores.record_corrupted_payload(&peer_id);
+                                    handle_peer_action(&mut self.swarm, peer_id, action);
                                 }
                             }
                             continue;
@@ -929,23 +1081,71 @@ impl P2PNode {
                         // proofs locally before applying — never trust the sender
                         // — and persist so a restart keeps the binding.
                         if topic_str.contains("validators") {
-                            if let Ok(common::GossipMessage::ValidatorRegistration {
-                                evm_address, node_id, ed25519_pubkey, alias, nonce, evm_signature, ed25519_signature,
-                            }) = serde_json::from_slice(&message.data) {
-                                let proof = crate::validator_registry_gossip::RegistrationProof {
-                                    evm_address, node_id, ed25519_pubkey, alias, nonce, evm_signature, ed25519_signature,
-                                };
-                                match crate::api::apply_validator_registration(&state, &proof).await {
-                                    Ok(status) => {
-                                        let data_dir = { let s = state.read().await; s.config.data_dir.clone() };
-                                        if let Err(e) = crate::validator_registry_gossip::persist(&data_dir, &proof) {
-                                            tracing::warn!("Failed to persist gossiped validator registration: {}", e);
+                            match serde_json::from_slice::<common::GossipMessage>(&message.data) {
+                                Ok(common::GossipMessage::ValidatorRegistration {
+                                    evm_address,
+                                    node_id,
+                                    ed25519_pubkey,
+                                    alias,
+                                    nonce,
+                                    evm_signature,
+                                    ed25519_signature,
+                                }) => {
+                                    let proof = crate::validator_registry_gossip::RegistrationProof {
+                                        evm_address,
+                                        node_id,
+                                        ed25519_pubkey,
+                                        alias,
+                                        nonce,
+                                        evm_signature,
+                                        ed25519_signature,
+                                    };
+                                    match crate::api::apply_validator_registration(&state, &proof).await {
+                                        Ok(status) => {
+                                            let data_dir = { let s = state.read().await; s.config.data_dir.clone() };
+                                            if let Err(e) = crate::validator_registry_gossip::persist(&data_dir, &proof) {
+                                                tracing::warn!("Failed to persist gossiped validator registration: {}", e);
+                                            }
+                                            peer_scores.record_valid_message(&peer_id);
+                                            report_validation_result(
+                                                &mut self.swarm,
+                                                &id,
+                                                &peer_id,
+                                                gossipsub::MessageAcceptance::Accept,
+                                            );
+                                            tracing::info!("Applied gossiped validator registration for {} ({})", proof.node_id, status.status);
                                         }
-                                        tracing::info!("Applied gossiped validator registration for {} ({})", proof.node_id, status.status);
+                                        Err((status, e)) => {
+                                            if status.is_client_error() {
+                                                report_validation_result(
+                                                    &mut self.swarm,
+                                                    &id,
+                                                    &peer_id,
+                                                    gossipsub::MessageAcceptance::Reject,
+                                                );
+                                                let action = peer_scores.record_invalid_signature(&peer_id);
+                                                handle_peer_action(&mut self.swarm, peer_id, action);
+                                            } else {
+                                                report_validation_result(
+                                                    &mut self.swarm,
+                                                    &id,
+                                                    &peer_id,
+                                                    gossipsub::MessageAcceptance::Ignore,
+                                                );
+                                            }
+                                            tracing::debug!("Dropped gossiped validator registration for {}: {}", proof.node_id, e);
+                                        }
                                     }
-                                    Err((_, e)) => {
-                                        tracing::debug!("Dropped gossiped validator registration for {}: {}", proof.node_id, e);
-                                    }
+                                }
+                                _ => {
+                                    report_validation_result(
+                                        &mut self.swarm,
+                                        &id,
+                                        &peer_id,
+                                        gossipsub::MessageAcceptance::Reject,
+                                    );
+                                    let action = peer_scores.record_corrupted_payload(&peer_id);
+                                    handle_peer_action(&mut self.swarm, peer_id, action);
                                 }
                             }
                             continue;
@@ -1010,6 +1210,9 @@ impl P2PNode {
                             };
                             match persistence {
                                 Ok(acceptance) => {
+                                    if matches!(acceptance, gossipsub::MessageAcceptance::Accept) {
+                                        peer_scores.record_valid_message(&peer_id);
+                                    }
                                     report_validation_result(
                                         &mut self.swarm,
                                         &id,
@@ -1020,12 +1223,18 @@ impl P2PNode {
                                 Err(error) => {
                                     let acceptance =
                                         transition_persistence_failure_acceptance(&error);
+                                    let is_reject =
+                                        matches!(acceptance, gossipsub::MessageAcceptance::Reject);
                                     report_validation_result(
                                         &mut self.swarm,
                                         &id,
                                         &peer_id,
                                         acceptance,
                                     );
+                                    if is_reject {
+                                        let action = peer_scores.record_corrupted_payload(&peer_id);
+                                        handle_peer_action(&mut self.swarm, peer_id, action);
+                                    }
                                     tracing::debug!("Dropped validator-set transition gossip: {error}");
                                 }
                             }
@@ -1033,15 +1242,54 @@ impl P2PNode {
                         }
 
                         if topic_str == crate::revocation_gossip::TOPIC {
-                            let result = match serde_json::from_slice::<common::GossipMessage>(&message.data) {
+                            match serde_json::from_slice::<common::GossipMessage>(&message.data) {
                                 Ok(common::GossipMessage::RevocationRequest { request, delivery_id })
-                                    if delivery_id.len() <= 128 => crate::revocation_gossip::admit(&state, &request).await,
-                                _ => Err(anyhow::anyhow!("invalid revocation gossip envelope")),
-                            };
-                            let acceptance = if result.is_ok() { gossipsub::MessageAcceptance::Accept }
-                                else { gossipsub::MessageAcceptance::Ignore };
-                            if let Err(error) = result { tracing::debug!(%error, "Revocation proof not admitted; sender will retry"); }
-                            report_validation_result(&mut self.swarm, &id, &peer_id, acceptance);
+                                    if delivery_id.len() <= 128 =>
+                                {
+                                    if let Err(error) = request.verify_signature() {
+                                        tracing::warn!(peer = %peer_id, %error, "P2P: rejected revocation with invalid signature");
+                                        report_validation_result(
+                                            &mut self.swarm,
+                                            &id,
+                                            &peer_id,
+                                            gossipsub::MessageAcceptance::Reject,
+                                        );
+                                        let action = peer_scores.record_invalid_signature(&peer_id);
+                                        handle_peer_action(&mut self.swarm, peer_id, action);
+                                    } else {
+                                        match crate::revocation_gossip::admit(&state, &request).await {
+                                            Ok(_) => {
+                                                peer_scores.record_valid_message(&peer_id);
+                                                report_validation_result(
+                                                    &mut self.swarm,
+                                                    &id,
+                                                    &peer_id,
+                                                    gossipsub::MessageAcceptance::Accept,
+                                                );
+                                            }
+                                            Err(error) => {
+                                                tracing::debug!(%error, "Revocation proof not admitted; sender will retry");
+                                                report_validation_result(
+                                                    &mut self.swarm,
+                                                    &id,
+                                                    &peer_id,
+                                                    gossipsub::MessageAcceptance::Ignore,
+                                                );
+                                            }
+                                        }
+                                    }
+                                }
+                                _ => {
+                                    report_validation_result(
+                                        &mut self.swarm,
+                                        &id,
+                                        &peer_id,
+                                        gossipsub::MessageAcceptance::Reject,
+                                    );
+                                    let action = peer_scores.record_corrupted_payload(&peer_id);
+                                    handle_peer_action(&mut self.swarm, peer_id, action);
+                                }
+                            }
                             continue;
                         }
 
@@ -1110,6 +1358,10 @@ impl P2PNode {
                                     };
                                     match result {
                                         Ok(certificate) => {
+                                            if let Some(src) = message.source {
+                                                peer_validators.insert(src, validator_id.clone());
+                                            }
+                                            peer_scores.record_valid_message(&peer_id);
                                             report_validation_result(
                                                 &mut self.swarm,
                                                 &id,
@@ -1140,6 +1392,8 @@ impl P2PNode {
                                                 &peer_id,
                                                 gossipsub::MessageAcceptance::Reject,
                                             );
+                                            let action = peer_scores.record_invalid_signature(&peer_id);
+                                            handle_peer_action(&mut self.swarm, peer_id, action);
                                         }
                                     }
                                 }
@@ -1150,6 +1404,8 @@ impl P2PNode {
                                         &peer_id,
                                         gossipsub::MessageAcceptance::Reject,
                                     );
+                                    let action = peer_scores.record_corrupted_payload(&peer_id);
+                                    handle_peer_action(&mut self.swarm, peer_id, action);
                                 }
                             }
                             continue;
@@ -1160,13 +1416,15 @@ impl P2PNode {
                         // vote authenticity depends on the validator-set identity and
                         // Ed25519 signature inside the payload.
                         if topic_str.contains("votes") {
-                            let validation = {
-                                let s = state.read().await;
-                                validate_vote_gossip_message(&message.data, &s.validator_set)
-                            };
+                            let validation =
+                                validate_vote_gossip_message(&message.data, &vs_snapshot);
 
                             match validation {
                                 Ok(vote) => {
+                                    if let Some(src) = message.source {
+                                        peer_validators.insert(src, vote.validator_id.clone());
+                                    }
+                                    peer_scores.record_valid_message(&peer_id);
                                     report_validation_result(
                                         &mut self.swarm,
                                         &id,
@@ -1175,7 +1433,6 @@ impl P2PNode {
                                     );
 
                                     record_validated_vote_gossip(&state, &vote).await;
-
                                 }
                                 Err(error) => {
                                     report_validation_result(
@@ -1184,6 +1441,8 @@ impl P2PNode {
                                         &peer_id,
                                         gossipsub::MessageAcceptance::Reject,
                                     );
+                                    let action = peer_scores.record_invalid_signature(&peer_id);
+                                    handle_peer_action(&mut self.swarm, peer_id, action);
                                     {
                                         let mut s = state.write().await;
                                         s.p2p_status.gossip_votes_rejected_total =
@@ -1390,6 +1649,7 @@ impl P2PNode {
                                                 .as_ref()
                                                 .is_none_or(|(target_view, _, _, _)| *target_view <= active_view)
                                             {
+                                                peer_scores.record_valid_message(&peer_id);
                                                 report_validation_result(
                                                     &mut self.swarm,
                                                     &id,
@@ -1449,7 +1709,10 @@ impl P2PNode {
                                                 &peer_id,
                                                 gossipsub::MessageAcceptance::Reject,
                                             );
+                                            let action = peer_scores.record_corrupted_payload(&peer_id);
+                                            handle_peer_action(&mut self.swarm, peer_id, action);
                                         } else {
+                                            peer_scores.record_valid_message(&peer_id);
                                             report_validation_result(
                                                 &mut self.swarm,
                                                 &id,
@@ -1520,31 +1783,48 @@ impl P2PNode {
                                         }
                                     }
                                     common::GossipMessage::PbftPrepare { block_hash, validator_id, signature } => {
-                                        let sig = {
-                                            let s = state.read().await;
-                                            match validate_pbft_phase_message(
-                                                &s.validator_set,
-                                                "prepare",
-                                                &block_hash,
-                                                &validator_id,
-                                                &signature,
-                                            ) {
-                                                Ok(sig) => sig,
-                                                Err(error) => {
-                                                    report_pbft_validation_failure(
-                                                        "prepare",
-                                                        &validator_id,
-                                                        &block_hash,
-                                                        error,
-                                                    );
-                                                    {
-                                                        let mut s = state.write().await;
-                                                        s.p2p_status.gossip_pbft_rejected_total =
-                                                            s.p2p_status.gossip_pbft_rejected_total
-                                                                .saturating_add(1);
-                                                    }
-                                                    continue;
+                                        let sig = match validate_pbft_phase_message(
+                                            &vs_snapshot,
+                                            "prepare",
+                                            &block_hash,
+                                            &validator_id,
+                                            &signature,
+                                        ) {
+                                            Ok(sig) => {
+                                                if let Some(src) = message.source {
+                                                    peer_validators.insert(src, validator_id.clone());
                                                 }
+                                                peer_scores.record_valid_message(&peer_id);
+                                                report_validation_result(
+                                                    &mut self.swarm,
+                                                    &id,
+                                                    &peer_id,
+                                                    gossipsub::MessageAcceptance::Accept,
+                                                );
+                                                sig
+                                            }
+                                            Err(error) => {
+                                                report_pbft_validation_failure(
+                                                    "prepare",
+                                                    &validator_id,
+                                                    &block_hash,
+                                                    error,
+                                                );
+                                                report_validation_result(
+                                                    &mut self.swarm,
+                                                    &id,
+                                                    &peer_id,
+                                                    gossipsub::MessageAcceptance::Reject,
+                                                );
+                                                let action = peer_scores.record_invalid_signature(&peer_id);
+                                                handle_peer_action(&mut self.swarm, peer_id, action);
+                                                {
+                                                    let mut s = state.write().await;
+                                                    s.p2p_status.gossip_pbft_rejected_total =
+                                                        s.p2p_status.gossip_pbft_rejected_total
+                                                            .saturating_add(1);
+                                                }
+                                                continue;
                                             }
                                         };
                                         let mut s = state.write().await;
@@ -1580,31 +1860,48 @@ impl P2PNode {
                                         }
                                     }
                                     common::GossipMessage::PbftCommit { block_hash, validator_id, signature } => {
-                                        let sig = {
-                                            let s = state.read().await;
-                                            match validate_pbft_phase_message(
-                                                &s.validator_set,
-                                                "commit",
-                                                &block_hash,
-                                                &validator_id,
-                                                &signature,
-                                            ) {
-                                                Ok(sig) => sig,
-                                                Err(error) => {
-                                                    report_pbft_validation_failure(
-                                                        "commit",
-                                                        &validator_id,
-                                                        &block_hash,
-                                                        error,
-                                                    );
-                                                    {
-                                                        let mut s = state.write().await;
-                                                        s.p2p_status.gossip_pbft_rejected_total =
-                                                            s.p2p_status.gossip_pbft_rejected_total
-                                                                .saturating_add(1);
-                                                    }
-                                                    continue;
+                                        let sig = match validate_pbft_phase_message(
+                                            &vs_snapshot,
+                                            "commit",
+                                            &block_hash,
+                                            &validator_id,
+                                            &signature,
+                                        ) {
+                                            Ok(sig) => {
+                                                if let Some(src) = message.source {
+                                                    peer_validators.insert(src, validator_id.clone());
                                                 }
+                                                peer_scores.record_valid_message(&peer_id);
+                                                report_validation_result(
+                                                    &mut self.swarm,
+                                                    &id,
+                                                    &peer_id,
+                                                    gossipsub::MessageAcceptance::Accept,
+                                                );
+                                                sig
+                                            }
+                                            Err(error) => {
+                                                report_pbft_validation_failure(
+                                                    "commit",
+                                                    &validator_id,
+                                                    &block_hash,
+                                                    error,
+                                                );
+                                                report_validation_result(
+                                                    &mut self.swarm,
+                                                    &id,
+                                                    &peer_id,
+                                                    gossipsub::MessageAcceptance::Reject,
+                                                );
+                                                let action = peer_scores.record_invalid_signature(&peer_id);
+                                                handle_peer_action(&mut self.swarm, peer_id, action);
+                                                {
+                                                    let mut s = state.write().await;
+                                                    s.p2p_status.gossip_pbft_rejected_total =
+                                                        s.p2p_status.gossip_pbft_rejected_total
+                                                            .saturating_add(1);
+                                                }
+                                                continue;
                                             }
                                         };
                                         let mut s = state.write().await;
@@ -1650,22 +1947,64 @@ impl P2PNode {
                                             }
                                         }
                                     }
-                                    _ => {}
+                                    _ => {
+                                        report_validation_result(
+                                            &mut self.swarm,
+                                            &id,
+                                            &peer_id,
+                                            gossipsub::MessageAcceptance::Reject,
+                                        );
+                                        let action = peer_scores.record_corrupted_payload(&peer_id);
+                                        handle_peer_action(&mut self.swarm, peer_id, action);
+                                    }
                                 }
+                            } else {
+                                report_validation_result(
+                                    &mut self.swarm,
+                                    &id,
+                                    &peer_id,
+                                    gossipsub::MessageAcceptance::Reject,
+                                );
+                                let action = peer_scores.record_corrupted_payload(&peer_id);
+                                handle_peer_action(&mut self.swarm, peer_id, action);
                             }
+                            continue;
                         }
+
+                        report_validation_result(
+                            &mut self.swarm,
+                            &id,
+                            &peer_id,
+                            gossipsub::MessageAcceptance::Ignore,
+                        );
                     }
                     SwarmEvent::NewListenAddr { address, .. } => {
                         tracing::info!("P2P node listening on {}", address);
                     }
                     SwarmEvent::ConnectionEstablished { peer_id, endpoint, .. } => {
-                        tracing::info!("P2P Connection established with {} at {:?}", peer_id, endpoint);
-                        ingest_kademlia_address(
-                            &mut self.swarm,
-                            peer_id,
-                            endpoint.get_remote_address().clone(),
-                            kad_bootstrapped,
-                        );
+                        let remote_addr = endpoint.get_remote_address();
+                        if !is_loopback_multiaddr(remote_addr)
+                            && !subnet_filter.allow_and_record(
+                                &peer_id,
+                                remote_addr,
+                                peer_validators.contains_key(&peer_id),
+                            )
+                        {
+                            tracing::warn!(%peer_id, ?remote_addr, "P2P subnet cap exceeded; disconnecting peer");
+                            let _ = self.swarm.disconnect_peer_id(peer_id);
+                        } else {
+                            tracing::info!("P2P Connection established with {} at {:?}", peer_id, endpoint);
+                            ingest_kademlia_address(
+                                &mut self.swarm,
+                                peer_id,
+                                remote_addr.clone(),
+                                kad_bootstrapped,
+                            );
+                        }
+                    }
+                    SwarmEvent::ConnectionClosed { peer_id, num_established: 0, .. } => {
+                        subnet_filter.record_disconnect(&peer_id);
+                        peer_validators.remove(&peer_id);
                     }
                     SwarmEvent::OutgoingConnectionError { peer_id, error, .. } => {
                         tracing::error!("P2P Outgoing connection error to {:?}: {}", peer_id, error);
@@ -1675,6 +2014,7 @@ impl P2PNode {
 
                 // ── Periodically update SharedState with peer list ────────────
                 _ = status_ticker.tick() => {
+                    peer_scores.prune_stale_peers(Duration::from_secs(3600));
                     let peers: Vec<String> = self.swarm.connected_peers()
                         .map(|p| p.to_string())
                         .collect();
@@ -1867,6 +2207,9 @@ mod tests {
             pending_pool: crate::pending_pool::PendingPool::new(),
             publisher_index: crate::publisher_index::PublisherIndex::new(),
             validator_set_bootstrap: validator_set.clone(),
+            validator_set_snapshot: Arc::new(crate::state::ArcSwap::from_pointee(
+                validator_set.clone(),
+            )),
             validator_set,
             package_rounds: HashMap::new(),
             package_committees: HashMap::new(),
@@ -1908,10 +2251,16 @@ mod tests {
             "creg/v1/votes"
         ));
         assert!(requires_payload_validation_before_acceptance(
+            "creg/v1/submissions"
+        ));
+        assert!(requires_payload_validation_before_acceptance(
             VIEW_CHANGE_TOPIC
         ));
-        assert!(!requires_payload_validation_before_acceptance(
+        assert!(requires_payload_validation_before_acceptance(
             "creg/v1/blocks"
+        ));
+        assert!(requires_payload_validation_before_acceptance(
+            "creg/v1/vrf-proofs"
         ));
     }
 
@@ -2654,5 +3003,34 @@ mod tests {
         let _ = task_b.await;
 
         Ok(())
+    }
+
+    #[test]
+    fn gossipsub_message_id_separates_topics_and_is_collision_resistant() {
+        let id_votes = gossipsub_message_id("creg/v1/votes", b"payload");
+        let id_blocks = gossipsub_message_id("creg/v1/blocks", b"payload");
+        let id_other = gossipsub_message_id("creg/v1/votes", b"payload-2");
+        assert_ne!(id_votes, id_blocks);
+        assert_ne!(id_votes, id_other);
+        assert_eq!(id_votes.0.len(), 32);
+    }
+
+    #[test]
+    fn rate_limiter_grants_authenticated_validator_multiplier() {
+        let cfg = P2PRateLimitConfig {
+            vote_limit: 1,
+            ..Default::default()
+        };
+        let limiter = P2PRateLimiter::new(cfg);
+        let validators = vec![("val-1".to_string(), 100)];
+        let anon_peer = PeerId::random();
+        assert!(limiter.check_vote_for_validator(anon_peer, None, &validators));
+        assert!(!limiter.check_vote_for_validator(anon_peer, None, &validators));
+
+        let val_peer = PeerId::random();
+        for _ in 0..5 {
+            assert!(limiter.check_vote_for_validator(val_peer, Some("val-1"), &validators));
+        }
+        assert!(!limiter.check_vote_for_validator(val_peer, Some("val-1"), &validators));
     }
 }

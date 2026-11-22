@@ -172,6 +172,9 @@ impl AdmissionAttestation {
 
 // ─── Store ────────────────────────────────────────────────────────────────────
 
+const MAX_ATTESTATION_KEYS: usize = 256;
+const MAX_SIGNERS_PER_KEY: usize = 256;
+
 #[derive(Default)]
 pub struct AttestationStore {
     /// (applicant, nonce) → signer → attestation.
@@ -185,8 +188,26 @@ impl AttestationStore {
 
     pub async fn insert(&self, att: AdmissionAttestation) -> bool {
         let mut g = self.inner.lock().await;
+        let key = att.key();
+        if !g.contains_key(&key) && g.len() >= MAX_ATTESTATION_KEYS {
+            let evict_key = g
+                .keys()
+                .min_by(|a, b| {
+                    a.validator_set_epoch
+                        .cmp(&b.validator_set_epoch)
+                        .then_with(|| a.nonce.cmp(&b.nonce))
+                        .then_with(|| a.applicant.cmp(&b.applicant))
+                })
+                .cloned();
+            if let Some(evict) = evict_key {
+                g.remove(&evict);
+            }
+        }
         let signer = att.signer.to_ascii_lowercase();
-        let by_signer = g.entry(att.key()).or_default();
+        let by_signer = g.entry(key).or_default();
+        if !by_signer.contains_key(&signer) && by_signer.len() >= MAX_SIGNERS_PER_KEY {
+            return false;
+        }
         by_signer.insert(signer, att).is_none()
     }
 
@@ -316,7 +337,7 @@ pub async fn run(state: SharedState, store: Arc<AttestationStore>) {
 struct TickCtx {
     rpc_url: String,
     staking_addr: Address,
-    bridge_priv: Option<String>,
+    bridge_priv: Option<chain_registry_secrets::SecretString>,
     peer_urls: Vec<String>,
     pending_applicants: Vec<String>,
 }
@@ -627,15 +648,24 @@ async fn broadcast_to_peers(peer_urls: &[String], att: &AdmissionAttestation) {
         .timeout(Duration::from_secs(3))
         .build()
         .unwrap_or_else(|_| reqwest::Client::new());
+    let operator_key = std::env::var("CREG_OPERATOR_API_KEY")
+        .ok()
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty());
     for url in peer_urls {
         let endpoint = format!(
-            "{}/v1/consensus/admission-attestation",
+            "{}/v1/internal/consensus/admission-attestation",
             url.trim_end_matches('/')
         );
         let body = att.clone();
         let client = client.clone();
+        let operator_key = operator_key.clone();
         tokio::spawn(async move {
-            let _ = client.post(&endpoint).json(&body).send().await;
+            let mut req = client.post(&endpoint).json(&body);
+            if let Some(key) = operator_key.as_deref() {
+                req = req.header("X-Operator-Key", key);
+            }
+            let _ = req.send().await;
         });
     }
 }
@@ -812,5 +842,47 @@ mod tests {
         assert!(store.insert(epoch_8.clone()).await);
         assert_eq!(store.snapshot(&epoch_7.key()).await.len(), 1);
         assert_eq!(store.snapshot(&epoch_8.key()).await.len(), 1);
+    }
+
+    #[tokio::test]
+    async fn store_caps_keys_and_signers_per_key() {
+        let store = AttestationStore::new();
+        for i in 0..(MAX_ATTESTATION_KEYS + 10) {
+            let att = AdmissionAttestation {
+                signer: format!("0x{:040x}", i + 1),
+                applicant: format!("0x{:040x}", i + 1),
+                stake: "0x1".into(),
+                nonce: format!("0x{:x}", i + 1),
+                rule_set_version: "0x1".into(),
+                validator_set_epoch: "0x1".into(),
+                signature: "00".repeat(65),
+            };
+            assert!(store.insert(att).await);
+        }
+        assert_eq!(store.inner.lock().await.len(), MAX_ATTESTATION_KEYS);
+
+        let shared_store = AttestationStore::new();
+        for i in 0..MAX_SIGNERS_PER_KEY {
+            let att = AdmissionAttestation {
+                signer: format!("0x{:040x}", i + 1),
+                applicant: "0x00000000000000000000000000000000000cafee".into(),
+                stake: "0x1".into(),
+                nonce: "0x1".into(),
+                rule_set_version: "0x1".into(),
+                validator_set_epoch: "0x1".into(),
+                signature: "00".repeat(65),
+            };
+            assert!(shared_store.insert(att).await);
+        }
+        let extra = AdmissionAttestation {
+            signer: format!("0x{:040x}", MAX_SIGNERS_PER_KEY + 1),
+            applicant: "0x00000000000000000000000000000000000cafee".into(),
+            stake: "0x1".into(),
+            nonce: "0x1".into(),
+            rule_set_version: "0x1".into(),
+            validator_set_epoch: "0x1".into(),
+            signature: "00".repeat(65),
+        };
+        assert!(!shared_store.insert(extra).await);
     }
 }

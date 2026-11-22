@@ -35,6 +35,8 @@ pub const EVIDENCE_VERSION: u8 = 1;
 const EVIDENCE_DOMAIN: &str = "creg-equivocation-v1";
 /// Upper bound on remembered first-votes before the lowest heights are evicted.
 pub const DEFAULT_MAX_SLOTS: usize = 50_000;
+/// Upper bound on retained equivocation proofs to prevent memory DoS.
+pub const DEFAULT_MAX_EVIDENCE: usize = 4_096;
 
 /// PBFT phase a vote was cast in. Only these two phases carry a signed vote.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
@@ -268,6 +270,7 @@ pub struct EquivocationDetector {
     seen: HashMap<Slot, (SignedVote, BlockHeader)>,
     evidence: BTreeMap<String, EquivocationEvidence>,
     max_slots: usize,
+    max_evidence: usize,
 }
 
 impl Default for EquivocationDetector {
@@ -278,14 +281,19 @@ impl Default for EquivocationDetector {
 
 impl EquivocationDetector {
     pub fn new() -> Self {
-        Self::with_capacity(DEFAULT_MAX_SLOTS)
+        Self::with_capacities(DEFAULT_MAX_SLOTS, DEFAULT_MAX_EVIDENCE)
     }
 
     pub fn with_capacity(max_slots: usize) -> Self {
+        Self::with_capacities(max_slots, DEFAULT_MAX_EVIDENCE)
+    }
+
+    pub fn with_capacities(max_slots: usize, max_evidence: usize) -> Self {
         Self {
             seen: HashMap::new(),
             evidence: BTreeMap::new(),
             max_slots: max_slots.max(1),
+            max_evidence: max_evidence.max(1),
         }
     }
 
@@ -333,6 +341,7 @@ impl EquivocationDetector {
             evidence_id = %evidence.evidence_id,
             "[SlashingRelay] equivocation detected"
         );
+        self.make_room_for_evidence();
         self.evidence
             .insert(evidence.evidence_id.clone(), evidence.clone());
         Ok(Some(evidence))
@@ -342,6 +351,10 @@ impl EquivocationDetector {
     /// fully verified first. Returns whether it was new.
     pub fn import_evidence(&mut self, evidence: EquivocationEvidence) -> Result<bool> {
         evidence.verify()?;
+        if self.evidence.contains_key(&evidence.evidence_id) {
+            return Ok(false);
+        }
+        self.make_room_for_evidence();
         Ok(self
             .evidence
             .insert(evidence.evidence_id.clone(), evidence)
@@ -380,6 +393,22 @@ impl EquivocationDetector {
                 break;
             };
             self.seen.retain(|slot, _| slot.height > lowest);
+        }
+    }
+
+    fn make_room_for_evidence(&mut self) {
+        while self.evidence.len() >= self.max_evidence {
+            let Some(evict_id) = self
+                .evidence
+                .iter()
+                .min_by(|(id_a, ev_a), (id_b, ev_b)| {
+                    ev_a.height.cmp(&ev_b.height).then_with(|| id_a.cmp(id_b))
+                })
+                .map(|(id, _)| id.clone())
+            else {
+                break;
+            };
+            self.evidence.remove(&evict_id);
         }
     }
 }
@@ -838,5 +867,23 @@ mod tests {
             evidence.slash_reason(),
             format!("equivocation:v1:commit:{}", evidence.evidence_id)
         );
+    }
+
+    #[test]
+    fn evidence_capacity_evicts_lowest_height_proofs() {
+        let key = key(7);
+        let mut detector = EquivocationDetector::with_capacities(100, 3);
+        for height in [50u64, 10, 40, 20, 30] {
+            let a = header(height, 1, 0, &format!("a-{height}"));
+            let b = header(height, 1, 0, &format!("b-{height}"));
+            assert!(detect(&mut detector, &key, VotePhase::Prepare, &a).is_none());
+            assert!(detect(&mut detector, &key, VotePhase::Prepare, &b).is_some());
+            assert!(detector.evidence_count() <= 3);
+        }
+        assert_eq!(detector.evidence_count(), 3);
+        let retained_heights: Vec<u64> = detector.evidence().map(|e| e.height).collect();
+        assert!(!retained_heights.contains(&10));
+        assert!(!retained_heights.contains(&20));
+        assert!(retained_heights.contains(&50));
     }
 }

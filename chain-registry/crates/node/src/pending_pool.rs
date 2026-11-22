@@ -31,6 +31,9 @@ struct PersistedEntry {
     analysis_committee: Option<common::AnalysisCommittee>,
 }
 
+/// Maximum number of queued packages retained in `PendingPool` (VNA-28).
+pub const MAX_PENDING_ENTRIES: usize = 2_048;
+
 pub struct PendingPool {
     entries: HashMap<String, PendingEntry>,
     path: Option<PathBuf>,
@@ -178,6 +181,8 @@ impl PendingPool {
                 "[PendingPool] Replacing pending entry for {} (new content hash)",
                 key
             );
+        } else if self.entries.len() >= MAX_PENDING_ENTRIES {
+            anyhow::bail!("pending pool is at capacity ({})", MAX_PENDING_ENTRIES);
         }
 
         tracing::info!("[PendingPool] Inserting package: {}", key);
@@ -237,6 +242,17 @@ impl PendingPool {
             return Err(error);
         }
         Ok(())
+    }
+
+    pub fn update_effective_committee_size(&mut self, canonical: &str, new_effective_size: u32) {
+        if let Some(entry) = self.entries.get_mut(canonical) {
+            if let Some(committee) = entry.analysis_committee.as_mut() {
+                if committee.effective_size != new_effective_size {
+                    committee.effective_size = new_effective_size;
+                    self.persist();
+                }
+            }
+        }
     }
 
     pub fn get_committee(&self, canonical: &str) -> Option<&common::AnalysisCommittee> {

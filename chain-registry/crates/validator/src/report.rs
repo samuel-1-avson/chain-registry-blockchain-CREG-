@@ -226,7 +226,8 @@ impl ValidationReport {
 
     /// Concise summary of all critical/high findings for the rejection reason.
     pub fn critical_finding_summary(&self) -> String {
-        self.findings
+        let mut critical: Vec<&Finding> = self
+            .findings
             .iter()
             .filter(|f| {
                 matches!(
@@ -234,6 +235,22 @@ impl ValidationReport {
                     FindingSeverity::Critical | FindingSeverity::High
                 )
             })
+            .collect();
+        critical.sort_by(|a, b| {
+            let rank = |s: FindingSeverity| match s {
+                FindingSeverity::Critical => 4,
+                FindingSeverity::High => 3,
+                FindingSeverity::Medium => 2,
+                FindingSeverity::Low => 1,
+            };
+            rank(b.severity)
+                .cmp(&rank(a.severity))
+                .then_with(|| a.id.cmp(&b.id))
+                .then_with(|| a.file.cmp(&b.file))
+                .then_with(|| a.line.cmp(&b.line))
+        });
+        critical
+            .into_iter()
             .map(|f| format!("[{}] {}", f.id, f.description))
             .collect::<Vec<_>>()
             .join("; ")
@@ -244,7 +261,11 @@ fn max_deterministic_finding_score(findings: &[Finding]) -> f64 {
     findings
         .iter()
         .filter(|finding| {
-            !finding.id.starts_with("LLM") && !matches!(finding.id.as_str(), "SA011" | "SA012")
+            !finding.id.starts_with("LLM")
+                && !matches!(
+                    finding.id.as_str(),
+                    "SA011" | "SA012" | "SB010" | "SB012" | "SB013" | "DF005" | "DF006" | "DF007"
+                )
         })
         .map(|finding| match finding.severity {
             FindingSeverity::Critical => 100.0,

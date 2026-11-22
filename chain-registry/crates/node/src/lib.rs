@@ -18,6 +18,7 @@ pub mod events;
 pub mod finalized_tx;
 pub mod gossip;
 pub mod intelligence;
+pub mod ipfs_fetch;
 pub mod json_rpc;
 pub mod l1_quorum;
 pub mod namespace_consensus;

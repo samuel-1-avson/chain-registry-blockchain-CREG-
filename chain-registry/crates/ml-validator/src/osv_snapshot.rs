@@ -357,23 +357,17 @@ pub fn lookup_advisory(info: &PackageInfo) -> OsvResult {
 }
 
 fn env_truthy(key: &str) -> bool {
-    std::env::var(key)
-        .map(|value| value == "1" || value.eq_ignore_ascii_case("true"))
-        .unwrap_or(false)
+    common::parse_env_bool(key)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use std::io::Write;
-    use std::sync::{Mutex, MutexGuard};
-
-    static ENV_TEST_LOCK: Mutex<()> = Mutex::new(());
+    use std::sync::MutexGuard;
 
     fn env_test_lock() -> MutexGuard<'static, ()> {
-        ENV_TEST_LOCK
-            .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner())
+        crate::env_test_lock()
     }
 
     fn sample_info() -> PackageInfo {

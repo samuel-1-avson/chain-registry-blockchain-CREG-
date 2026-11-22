@@ -27,6 +27,15 @@ pub struct PublisherStats {
     pub first_seen_days: u32,
 }
 
+impl PublisherStats {
+    /// Deterministic account age in whole days relative to `reference_time`.
+    pub fn account_age_days_at(&self, reference_time: DateTime<Utc>) -> u32 {
+        self.first_seen_at
+            .map(|t| (reference_time - t).num_days().max(0) as u32)
+            .unwrap_or(0)
+    }
+}
+
 pub struct PublisherIndex {
     stats: HashMap<String, PublisherStats>,
     /// Reverse map: canonical package ID → publisher pubkey.
@@ -40,6 +49,24 @@ impl PublisherIndex {
             stats: HashMap::new(),
             canonical_to_pubkey: HashMap::new(),
         }
+    }
+
+    pub fn from_parts(
+        stats: HashMap<String, PublisherStats>,
+        canonical_to_pubkey: HashMap<String, String>,
+    ) -> Self {
+        Self {
+            stats,
+            canonical_to_pubkey,
+        }
+    }
+
+    pub fn stats_entries(&self) -> impl Iterator<Item = (&String, &PublisherStats)> {
+        self.stats.iter()
+    }
+
+    pub fn canonical_mappings(&self) -> impl Iterator<Item = (&String, &String)> {
+        self.canonical_to_pubkey.iter()
     }
 
     /// Rebuild the index by replaying every block from the chain store.
@@ -94,23 +121,10 @@ impl PublisherIndex {
             Transaction::Revoke {
                 package_canonical, ..
             } => {
-                // Look up the correct publisher via the reverse index.
-                if let Some(pubkey) = self.canonical_to_pubkey.get(package_canonical).cloned() {
-                    if let Some(stats) = self.stats.get_mut(&pubkey) {
-                        stats.verified_count = stats.verified_count.saturating_sub(1);
-                        stats.revoked_count += 1;
-                        tracing::info!(
-                            "Publisher {} penalised: revocation of {}",
-                            &pubkey[..std::cmp::min(16, pubkey.len())],
-                            package_canonical,
-                        );
-                    }
-                } else {
-                    tracing::warn!(
-                        "Revocation for '{}' has no known publisher in index",
-                        package_canonical,
-                    );
-                }
+                self.apply_revocation(package_canonical);
+            }
+            Transaction::RevokeV2 { request, .. } => {
+                self.apply_revocation(&request.package_canonical);
             }
 
             Transaction::Slash {
@@ -164,5 +178,24 @@ impl PublisherIndex {
 
     pub fn all_stats(&self) -> Vec<&PublisherStats> {
         self.stats.values().collect()
+    }
+
+    fn apply_revocation(&mut self, package_canonical: &str) {
+        if let Some(pubkey) = self.canonical_to_pubkey.get(package_canonical).cloned() {
+            if let Some(stats) = self.stats.get_mut(&pubkey) {
+                stats.verified_count = stats.verified_count.saturating_sub(1);
+                stats.revoked_count += 1;
+                tracing::info!(
+                    "Publisher {} penalised: revocation of {}",
+                    &pubkey[..std::cmp::min(16, pubkey.len())],
+                    package_canonical,
+                );
+            }
+        } else {
+            tracing::warn!(
+                "Revocation for '{}' has no known publisher in index",
+                package_canonical,
+            );
+        }
     }
 }

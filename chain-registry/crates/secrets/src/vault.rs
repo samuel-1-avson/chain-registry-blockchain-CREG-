@@ -1,4 +1,4 @@
-use crate::{extract_vault_field, normalize_secp256k1_hex, HotKeyRole};
+use crate::{extract_vault_field, normalize_signing_key_secret, HotKeyRole, SecretString};
 use anyhow::{bail, Context, Result};
 use reqwest::Client;
 use std::time::Duration;
@@ -6,7 +6,7 @@ use std::time::Duration;
 #[derive(Debug, Clone)]
 pub struct VaultSecretsBackend {
     addr: String,
-    token: String,
+    token: SecretString,
     client: Client,
 }
 
@@ -15,11 +15,13 @@ impl VaultSecretsBackend {
         let addr = std::env::var("VAULT_ADDR")
             .or_else(|_| std::env::var("CREG_VAULT_ADDR"))
             .context("VAULT_ADDR or CREG_VAULT_ADDR must be set when CREG_SECRETS_BACKEND=vault")?;
-        let token = std::env::var("VAULT_TOKEN")
-            .or_else(|_| std::env::var("CREG_VAULT_TOKEN"))
-            .context(
-                "VAULT_TOKEN or CREG_VAULT_TOKEN must be set when CREG_SECRETS_BACKEND=vault",
-            )?;
+        let token = SecretString::new(
+            std::env::var("VAULT_TOKEN")
+                .or_else(|_| std::env::var("CREG_VAULT_TOKEN"))
+                .context(
+                    "VAULT_TOKEN or CREG_VAULT_TOKEN must be set when CREG_SECRETS_BACKEND=vault",
+                )?,
+        );
         let client = Client::builder()
             .timeout(Duration::from_secs(10))
             .build()
@@ -32,16 +34,22 @@ impl VaultSecretsBackend {
     }
 
     pub async fn secp256k1_signing_key_hex(&self, role: HotKeyRole) -> Result<String> {
+        self.signing_key_secret(role)
+            .await
+            .map(|secret| secret.expose_secret().to_owned())
+    }
+
+    pub async fn signing_key_secret(&self, role: HotKeyRole) -> Result<SecretString> {
         let path = std::env::var(role.vault_path_env())
             .unwrap_or_else(|_| role.default_vault_path().to_string());
         let data = self.read_kv2_secret(&path).await?;
-        let raw = extract_vault_field(&data, role).with_context(|| {
+        let raw = zeroize::Zeroizing::new(extract_vault_field(&data, role).with_context(|| {
             format!(
                 "no recognized key field in Vault secret {path} (tried {:?})",
                 role.vault_field_candidates()
             )
-        })?;
-        normalize_secp256k1_hex(&raw, role)
+        })?);
+        normalize_signing_key_secret(&raw, role)
     }
 
     async fn read_kv2_secret(&self, path: &str) -> Result<serde_json::Value> {
@@ -50,7 +58,7 @@ impl VaultSecretsBackend {
         let resp = self
             .client
             .get(&url)
-            .header("X-Vault-Token", &self.token)
+            .header("X-Vault-Token", self.token.expose_secret())
             .send()
             .await
             .with_context(|| format!("Vault GET {url} failed"))?;

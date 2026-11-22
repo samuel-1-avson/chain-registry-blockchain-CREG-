@@ -289,26 +289,49 @@ impl FeatureExtractor {
         Ok(features)
     }
 
-    /// Calculate AST depth recursively
-    fn calculate_ast_depth(node: &tree_sitter::Node) -> u32 {
-        let mut max_depth = 0u32;
-        let mut cursor = node.walk();
+    /// Maximum AST nodes visited per file during feature extraction.
+    const MAX_AST_NODES: usize = 100_000;
 
-        for child in node.children(&mut cursor) {
-            let child_depth = Self::calculate_ast_depth(&child);
-            max_depth = max_depth.max(child_depth + 1);
+    /// Calculate AST depth iteratively (recursion-free to prevent stack overflow
+    /// on deeply nested adversarial inputs).
+    fn calculate_ast_depth(node: &tree_sitter::Node) -> u32 {
+        let mut stack = vec![(*node, 0u32)];
+        let mut max_depth = 0u32;
+        let mut visited = 0usize;
+
+        while let Some((current, depth)) = stack.pop() {
+            max_depth = max_depth.max(depth);
+            visited += 1;
+            if visited >= Self::MAX_AST_NODES {
+                break;
+            }
+            let mut cursor = current.walk();
+            for child in current.children(&mut cursor) {
+                stack.push((child, depth.saturating_add(1)));
+            }
         }
 
         max_depth
     }
 
-    /// Count nodes of a specific type
+    /// Count nodes of a specific type iteratively.
     fn count_nodes(node: &tree_sitter::Node, node_type: &str) -> usize {
-        let mut count = if node.kind() == node_type { 1 } else { 0 };
-        let mut cursor = node.walk();
+        let mut stack = vec![*node];
+        let mut count = 0usize;
+        let mut visited = 0usize;
 
-        for child in node.children(&mut cursor) {
-            count += Self::count_nodes(&child, node_type);
+        while let Some(current) = stack.pop() {
+            if current.kind() == node_type {
+                count += 1;
+            }
+            visited += 1;
+            if visited >= Self::MAX_AST_NODES {
+                break;
+            }
+            let mut cursor = current.walk();
+            for child in current.children(&mut cursor) {
+                stack.push(child);
+            }
         }
 
         count

@@ -11,17 +11,15 @@ use std::sync::Arc;
 use tokio::sync::RwLock;
 use tokio::time::{interval, Duration};
 
-/// Replacement leadership is enabled only in the explicitly built Phase C
-/// real-fleet candidate. Ordinary node builds stay fail-closed until the
-/// independent-host acceptance run has completed.
-pub(crate) const PBFT_VIEW_CHANGE_READY: bool = cfg!(feature = "phase-c-real-fleet");
+/// Replacement leadership is enabled unconditionally (ADR-018 Increment 3).
+pub(crate) const PBFT_VIEW_CHANGE_READY: bool = true;
 
 /// Snapshot gathered after the VRF proposer gate passes.
 struct ProposerContext {
     tip_height: u64,
     prev_hash: String,
     node_id: String,
-    privkey: Option<String>,
+    privkey: Option<chain_registry_secrets::SecretString>,
     our_pubkey: Option<String>,
     validator_set_hash: String,
     package_authority: common::ValidatorSet,
@@ -181,9 +179,8 @@ pub(crate) async fn pause_after_durable_commit_if_armed(
         || block.header.height != arm.height
         || !block.transactions.iter().any(|transaction| {
             matches!(
-                transaction,
-                Transaction::Revoke { package_canonical, .. }
-                    if package_canonical == &arm.package_canonical
+                transaction.revocation_target(),
+                Some((package_canonical, _, _, _)) if package_canonical == arm.package_canonical
             )
         })
     {
@@ -338,14 +335,18 @@ fn retire_ineligible_unprepared_work(
                     None
                 }
             }
-            Transaction::Revoke {
-                package_canonical, ..
-            } => match s.chain.get_package(package_canonical)? {
-                Some(record) if matches!(record.status, PackageStatus::Revoked { .. }) => {
-                    Some("revocation target is already revoked on this chain")
+            Transaction::Revoke { .. } | Transaction::RevokeV2 { .. } => {
+                let package_canonical = tx
+                    .revocation_target()
+                    .map(|(canonical, _, _, _)| canonical)
+                    .unwrap_or_default();
+                match s.chain.get_package(package_canonical)? {
+                    Some(record) if matches!(record.status, PackageStatus::Revoked { .. }) => {
+                        Some("revocation target is already revoked on this chain")
+                    }
+                    _ => None,
                 }
-                _ => None,
-            },
+            }
             _ => None,
         };
         if let Some(reason) = reason {
@@ -1590,6 +1591,9 @@ mod tests {
             pending_pool: PendingPool::new(),
             publisher_index: PublisherIndex::new(),
             validator_set_bootstrap: ValidatorSet::new(validators.clone()),
+            validator_set_snapshot: Arc::new(crate::state::ArcSwap::from_pointee(
+                ValidatorSet::new(validators.clone()),
+            )),
             validator_set: ValidatorSet::new(validators),
             package_rounds: std::collections::HashMap::new(),
             package_committees: std::collections::HashMap::new(),
@@ -1760,13 +1764,16 @@ mod tests {
         {
             let mut s = state.write().await;
             s.config.node_id = rank1.clone();
-            s.config.validator_privkey = Some(privkey_for_id(
-                &rank1,
-                "validator-a",
-                &primary_sk,
-                "validator-b",
-                &secondary_sk,
-            ));
+            s.config.validator_privkey = Some(
+                privkey_for_id(
+                    &rank1,
+                    "validator-a",
+                    &primary_sk,
+                    "validator-b",
+                    &secondary_sk,
+                )
+                .into(),
+            );
         }
 
         let gate = prepare_proposer_context(Arc::clone(&state), &p2p, 0).await;
@@ -1792,13 +1799,16 @@ mod tests {
         {
             let mut s = state.write().await;
             s.config.node_id = rank0.clone();
-            s.config.validator_privkey = Some(privkey_for_id(
-                &rank0,
-                "validator-a",
-                &primary_sk,
-                "validator-b",
-                &secondary_sk,
-            ));
+            s.config.validator_privkey = Some(
+                privkey_for_id(
+                    &rank0,
+                    "validator-a",
+                    &primary_sk,
+                    "validator-b",
+                    &secondary_sk,
+                )
+                .into(),
+            );
             let pubkey = s
                 .validator_set
                 .validators

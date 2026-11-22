@@ -11,11 +11,11 @@ use common::{
     sha256_hex, Block, BlockHeader, PackageId, PackageManifest, PublishRequest, Transaction,
 };
 use consensus::{
-    bls_aggregate::{aggregate_signatures, BlsKeypair, BlsSignature},
     pbft::PbftEngine,
     validator_set::{ValidatorInfo, ValidatorSet},
 };
 use cross_chain::merkle_proof::{build_merkle_tree, generate_inclusion_proof, verify_merkle_path};
+use ed25519_dalek::{Signer, SigningKey, Verifier};
 use rand::rngs::OsRng;
 use std::time::{Duration, Instant};
 
@@ -51,7 +51,6 @@ pub struct StressTestReport {
     pub p50_latency_ms: f64,
     pub p90_latency_ms: f64,
     pub p99_latency_ms: f64,
-    pub bls_compression_pct: f64,
     pub merkle_root_throughput_per_sec: f64,
 }
 
@@ -139,13 +138,13 @@ pub async fn run_stress_test(config: StressTestConfig) -> Result<StressTestRepor
     let overall_start = Instant::now();
     let mut latencies = Vec::with_capacity(total_target_items);
 
-    // Setup 4-validator cluster PBFT & BLS keys for consensus simulation
-    let val_keys: Vec<BlsKeypair> = (0..4).map(|_| BlsKeypair::generate(&mut OsRng)).collect();
+    // Setup 4-validator cluster PBFT & Ed25519 keys for consensus simulation
+    let val_keys: Vec<SigningKey> = (0..4).map(|_| SigningKey::generate(&mut OsRng)).collect();
     let mut vs = ValidatorSet::new();
     for i in 1..=4 {
         vs.add(ValidatorInfo {
             id: format!("validator-node-{}", i),
-            pubkey: format!("pubkey-{}", i),
+            pubkey: hex::encode(val_keys[i - 1].verifying_key().as_bytes()),
             eth_address: Some(format!("0x{:040x}", i)),
             stake: 100,
             reputation: 80,
@@ -198,13 +197,16 @@ pub async fn run_stress_test(config: StressTestConfig) -> Result<StressTestRepor
     ));
     let merkle_duration = merkle_start.elapsed();
 
-    // Measure BLS Multi-Signature aggregation
-    let sigs: Vec<BlsSignature> = val_keys
+    // Measure Ed25519 quorum signing & verification
+    let sigs: Vec<_> = val_keys
         .iter()
         .map(|k| k.sign(root_hash.as_bytes()))
         .collect();
-    let indices = vec![0, 1, 2, 3];
-    let agg_sig = aggregate_signatures(&sigs, &indices, 4).expect("BLS aggregation");
+    for (k, sig) in val_keys.iter().zip(&sigs) {
+        k.verifying_key()
+            .verify(root_hash.as_bytes(), sig)
+            .expect("Ed25519 verification");
+    }
 
     let total_elapsed = overall_start.elapsed();
     let total_secs = total_elapsed.as_secs_f64();
@@ -216,10 +218,6 @@ pub async fn run_stress_test(config: StressTestConfig) -> Result<StressTestRepor
     let p90 = latencies[latencies.len() * 90 / 100].as_micros() as f64 / 1000.0;
     let p99 = latencies[latencies.len() * 99 / 100].as_micros() as f64 / 1000.0;
 
-    let uncompressed_bytes = sigs.len() * 32;
-    let compressed_bytes = 32 + agg_sig.participant_bitmask.len();
-    let compression_pct = (1.0 - (compressed_bytes as f64 / uncompressed_bytes as f64)) * 100.0;
-
     let report = StressTestReport {
         total_packages_generated: total_target_items,
         total_packages_processed: processed,
@@ -230,7 +228,6 @@ pub async fn run_stress_test(config: StressTestConfig) -> Result<StressTestRepor
         p50_latency_ms: p50,
         p90_latency_ms: p90,
         p99_latency_ms: p99,
-        bls_compression_pct: compression_pct,
         merkle_root_throughput_per_sec: processed as f64
             / merkle_duration.as_secs_f64().max(0.0001),
     };
@@ -277,8 +274,8 @@ pub async fn run_stress_test(config: StressTestConfig) -> Result<StressTestRepor
         report.merkle_root_throughput_per_sec
     );
     println!(
-        "    • BLS Aggregation:     {:.1}% header compression (4 -> 1 signature)",
-        report.bls_compression_pct.max(75.0)
+        "    • Ed25519 Quorum:      {} valid signatures verified",
+        sigs.len()
     );
     println!("    • Root Commitment:     {}", root_hash[..16].yellow());
     println!(

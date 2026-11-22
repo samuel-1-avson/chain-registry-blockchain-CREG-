@@ -23,6 +23,44 @@ pub struct ReputationAssessment {
     pub revoked_pgp_fps: Vec<String>,
 }
 
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct PublisherReputationSnapshot {
+    pub total_packages: u32,
+    pub verified_count: u32,
+    pub revoked_count: u32,
+    pub stake_wei: u64,
+    pub account_age_days: u32,
+    #[serde(default)]
+    pub revoked_pgp_fps: Vec<String>,
+}
+
+/// Deterministically score publisher reputation from on-chain indexed state
+/// snapshotted at a canonical block height (`None` => first-time publisher).
+pub fn assess_publisher_from_snapshot(
+    publisher_pubkey: &str,
+    snapshot: Option<&PublisherReputationSnapshot>,
+) -> ReputationAssessment {
+    match snapshot {
+        Some(snap) => build_assessment(
+            publisher_pubkey,
+            &PublisherRecord {
+                total_packages: snap.total_packages,
+                verified_count: snap.verified_count,
+                revoked_count: snap.revoked_count,
+                stake_wei: snap.stake_wei,
+                first_seen_days: snap.account_age_days,
+                revoked_pgp_fps: snap.revoked_pgp_fps.clone(),
+            },
+        ),
+        None => ReputationAssessment {
+            confidence_delta: -10,
+            publisher_pubkey: publisher_pubkey.to_string(),
+            notes: vec!["Publisher not found on chain — first-time publisher (-10)".into()],
+            revoked_pgp_fps: vec![],
+        },
+    }
+}
+
 /// Query the reputation of a publisher from the chain node.
 /// In a full deployment this calls GET /v1/publishers/:pubkey on the node.
 pub async fn assess_publisher(

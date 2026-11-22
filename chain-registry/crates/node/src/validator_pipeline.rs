@@ -129,39 +129,44 @@ async fn process_package(
 
     // ── 2.5. Decrypt if shielded ──────────────────────────────────────────────
     if req.shielded {
-        if let Some(bundle) = &req.key_bundle {
-            tracing::info!("Decrypting shielded package: {}", canonical);
-            match decrypt_shielded(&tarball, bundle, &state).await {
-                Ok(decrypted) => {
-                    tarball = decrypted;
-                }
-                Err(e) => {
-                    tracing::error!("Decryption failed for {}: {}", canonical, e);
-                    cleanup(&state, &canonical).await;
-                    return;
-                }
+        let Some(bundle) = &req.key_bundle else {
+            tracing::warn!(
+                canonical = %canonical,
+                "Dropping shielded submission {} with missing key_bundle (VNA-01)",
+                canonical
+            );
+            cleanup(&state, &canonical).await;
+            return;
+        };
+        tracing::info!("Decrypting shielded package: {}", canonical);
+        match decrypt_shielded(&tarball, bundle, &state).await {
+            Ok(decrypted) => {
+                tarball = decrypted;
+            }
+            Err(e) => {
+                tracing::error!("Decryption failed for {}: {}", canonical, e);
+                cleanup(&state, &canonical).await;
+                return;
             }
         }
     }
 
-    // ── Verify content hash ───────────────────────────────────────────────────
+    // ── Verify content hash (never auto-emit Transaction::Revoke on pre-vote mismatch, VNA-01) ──
     let actual = common::sha256_hex(&tarball);
-    if actual != req.content_hash {
-        tracing::error!("Content hash mismatch for {}", canonical);
-        let node_id = state.read().await.config.node_id.clone();
-        let tx = common::Transaction::Revoke {
-            package_canonical: canonical.clone(),
-            reason: "Content hash mismatch — possible tampering".into(),
-            revoked_by: node_id,
-            evidence_hash: "".into(),
-        };
-        if let Err(error) = crate::finalized_tx::persist_and_notify(&state, &tx_out, tx).await {
-            tracing::error!(
-                "Failed to persist finalized revocation for {}: {}",
-                canonical,
-                error
-            );
-        }
+    if let Some(reason) = precheck_fetched_tarball_drop_reason(
+        req.shielded,
+        req.key_bundle.is_some(),
+        &req.content_hash,
+        &actual,
+    ) {
+        tracing::warn!(
+            canonical = %canonical,
+            declared = %req.content_hash,
+            actual = %actual,
+            "Dropping unverified submission {}: {} (no automatic Transaction::Revoke)",
+            canonical,
+            reason
+        );
         cleanup(&state, &canonical).await;
         return;
     }
@@ -171,9 +176,11 @@ async fn process_package(
         node_id,
         privkey_opt,
         prev_manifest,
-        prev_canonical,
+        reputation_snapshot,
         assigned_validator_count,
         admitted_committee,
+        chain_id,
+        genesis_hash,
     ) = {
         let s = state.read().await;
         let prev = s
@@ -181,7 +188,34 @@ async fn process_package(
             .get_latest_version(&req.id.ecosystem, &req.id.name)
             .ok()
             .flatten();
-        let prev_can = prev.as_ref().map(|r| r.id.canonical());
+        let tip = s.chain.tip_height().unwrap_or(0);
+        let tip_timestamp = s
+            .chain
+            .get_block_by_height(tip)
+            .ok()
+            .flatten()
+            .map(|b| b.header.timestamp)
+            .unwrap_or_else(|| common::Block::genesis().header.timestamp);
+        let rep_snapshot = s.publisher_index.get(&req.publisher_pubkey).map(|stats| {
+            validator::reputation::PublisherReputationSnapshot {
+                total_packages: stats.total_packages,
+                verified_count: stats.verified_count,
+                revoked_count: stats.revoked_count,
+                stake_wei: stats.stake_wei,
+                account_age_days: stats.account_age_days_at(tip_timestamp),
+                revoked_pgp_fps: Vec::new(),
+            }
+        });
+        let genesis_hash = if !s.config.network_genesis_hash.is_empty() {
+            s.config.network_genesis_hash.clone()
+        } else {
+            s.chain
+                .get_block_by_height(0)
+                .ok()
+                .flatten()
+                .map(|b| b.hash())
+                .unwrap_or_default()
+        };
         (
             s.config.is_validator,
             s.config.node_id.clone(),
@@ -189,9 +223,11 @@ async fn process_package(
             // Retrieve the previous version's manifest for diff analysis.
             // Returns None for the first publish of a package.
             prev.and_then(|r| r.manifest),
-            prev_can,
+            rep_snapshot,
             s.validator_set.validators.len(),
             s.pending_pool.get_committee(&canonical).cloned(),
+            s.config.chain_id.clone(),
+            genesis_hash,
         )
     };
 
@@ -275,13 +311,6 @@ async fn process_package(
         .take(committee.effective_size.max(committee.size) as usize)
         .any(|member| member == &node_id);
 
-    // Look up the previous version's sandbox result for runtime diff analysis
-    // (DF005–DF007). Returns None on first publish or if this node did not
-    // process the previous version in the current process lifetime.
-    let prev_sandbox = prev_canonical
-        .as_deref()
-        .and_then(validator::sandbox::get_result);
-
     // === LARGE-SCALE ANALYSIS SAMPLING (critical for 10k+ validators) ===
     // We only run the expensive full pipeline (IPFS fetch already done + sandbox etc.)
     // on a subset of validators. The rest will rely on evidence votes gossiped by
@@ -303,12 +332,13 @@ async fn process_package(
                 canonical,
                 assigned_validator_count
             );
-            match validator::validate_package(
+            match validator::validate_package_with_reputation(
                 &req,
                 &tarball,
                 privkey,
                 prev_manifest.as_ref(),
-                prev_sandbox.as_ref(),
+                None,
+                reputation_snapshot.as_ref(),
             )
             .await
             {
@@ -375,7 +405,7 @@ async fn process_package(
         String::new()
     };
 
-    let our_sig = {
+    let (signing_key, validator_pubkey) = {
         use common::crypto::SigningKey;
         let key_bytes = match hex::decode(privkey_str) {
             Ok(b) => b,
@@ -395,6 +425,10 @@ async fn process_package(
         };
         let signing_key = SigningKey::from_ed25519_seed(&key_arr);
         let validator_pubkey = signing_key.public_key().to_hex();
+        (signing_key, validator_pubkey)
+    };
+
+    let our_sig = {
         let approved = matches!(vote, ValidatorVote::Approve);
         let scanner_profile_digest =
             common::scanner_profile_digest(&ml_model_version, &analysis_bundles);
@@ -433,7 +467,7 @@ async fn process_package(
 
         common::ValidatorSignature {
             validator_id: node_id.clone(),
-            validator_pubkey,
+            validator_pubkey: validator_pubkey.clone(),
             signature: signature.to_hex(),
             vote: vote.clone(),
             signed_at: Utc::now(),
@@ -517,7 +551,7 @@ async fn process_package(
     let mut consensus_outcome = None;
 
     // Get committee for hybrid quorum
-    let committee = {
+    let mut committee = {
         let sr = state.read().await;
         sr.package_committees
             .get(&canonical)
@@ -543,13 +577,20 @@ async fn process_package(
         // Hybrid expansion: after primary timeout, expand eligible committee
         if i > (vote_timeout_secs * 1000 / VOTE_POLL_MS) / 2 {
             let mut sw = state.write().await;
-            if let Some(c) = sw.package_committees.get_mut(&canonical) {
+            let expanded_size = sw.package_committees.get_mut(&canonical).and_then(|c| {
                 if c.effective_size < (c.members.len() as u32).min(256) {
                     let expand_by =
                         32u32.min((c.members.len() as u32).saturating_sub(c.effective_size));
                     c.effective_size += expand_by;
-                    // Note: in real impl, also update pending_pool
+                    Some(c.effective_size)
+                } else {
+                    None
                 }
+            });
+            if let Some(new_size) = expanded_size {
+                committee.effective_size = new_size;
+                sw.pending_pool
+                    .update_effective_committee_size(&canonical, new_size);
             }
         }
 
@@ -598,19 +639,9 @@ async fn process_package(
         EvidenceVoteOutcome::Verified(final_sigs) => {
             let mandatory_contributed = final_sigs.iter().filter(|s| s.is_mandatory).count() as u32;
 
-            // Update performance scores first so the snapshot includes the effect of this finalization.
-            {
-                let mut s = state.write().await;
-                crate::package_admission::update_performance_scores(
-                    &mut s.validator_set,
-                    &final_sigs,
-                    &committee,
-                    true, // package_was_accepted
-                );
-            }
-
-            // Snapshot at-finalization-time performance scores for committee members
-            // (now includes the contributions from this package's verification).
+            // Snapshot pre-finality performance scores without mutating state
+            // before canonical block commit; deterministic updates run in
+            // NodeState::on_block_committed.
             let mut committee_for_record = committee.clone();
             {
                 let s = state.read().await;
@@ -695,15 +726,27 @@ async fn process_package(
             };
             (transaction, "VERIFIED")
         }
-        EvidenceVoteOutcome::Rejected { reason } => (
-            common::Transaction::Revoke {
+        EvidenceVoteOutcome::Rejected { reason } => {
+            let mut request = common::SignedRevocationRequest {
+                chain_id,
+                genesis_hash,
                 package_canonical: canonical.clone(),
                 reason,
-                revoked_by: node_id.clone(),
-                evidence_hash: evidence_digest,
-            },
-            "REJECTED",
-        ),
+                revoker_pubkey: validator_pubkey,
+                signature: String::new(),
+                signature_version: 1,
+            };
+            request.signature = signing_key
+                .sign(request.signing_message().as_bytes())
+                .to_hex();
+            (
+                common::Transaction::RevokeV2 {
+                    request,
+                    evidence_hash: evidence_digest,
+                },
+                "REJECTED",
+            )
+        }
     };
 
     if let Err(error) = crate::finalized_tx::persist_and_notify(&state, &tx_out, tx.clone()).await {
@@ -782,49 +825,30 @@ const MAX_IPFS_PAYLOAD_BYTES: u64 = 512 * 1024 * 1024;
 /// Timeout for IPFS fetch operations (5 minutes).
 const IPFS_FETCH_TIMEOUT_SECS: u64 = 300;
 
+fn precheck_fetched_tarball_drop_reason(
+    shielded: bool,
+    has_key_bundle: bool,
+    declared_hash: &str,
+    actual_hash: &str,
+) -> Option<&'static str> {
+    if shielded && !has_key_bundle {
+        return Some("shielded submission missing key_bundle");
+    }
+    if !declared_hash.eq_ignore_ascii_case(actual_hash) {
+        return Some("content hash mismatch");
+    }
+    None
+}
+
 async fn fetch_from_ipfs(cid: &str, ipfs_url: &str) -> anyhow::Result<Vec<u8>> {
-    let url = format!("{}/api/v0/cat?arg={}", ipfs_url.trim_end_matches('/'), cid);
-    let client = reqwest::Client::builder()
-        .timeout(std::time::Duration::from_secs(IPFS_FETCH_TIMEOUT_SECS))
-        .build()
-        .map_err(|e| anyhow::anyhow!("Failed to build IPFS HTTP client: {}", e))?;
-
-    let response = client
-        .post(&url)
-        .send()
-        .await
-        .map_err(|e| anyhow::anyhow!("IPFS fetch failed for CID {}: {}", cid, e))?;
-
-    if !response.status().is_success() {
-        let status = response.status();
-        let body = response.text().await.unwrap_or_default();
-        anyhow::bail!("IPFS returned HTTP {} for CID {}: {}", status, cid, body);
-    }
-
-    // Guard against oversized payloads before buffering into memory.
-    if let Some(len) = response.content_length() {
-        if len > MAX_IPFS_PAYLOAD_BYTES {
-            anyhow::bail!(
-                "IPFS content for CID {} is too large: {} bytes (max {})",
-                cid,
-                len,
-                MAX_IPFS_PAYLOAD_BYTES
-            );
-        }
-    }
-
-    let bytes = response.bytes().await?.to_vec();
-
-    if bytes.len() as u64 > MAX_IPFS_PAYLOAD_BYTES {
-        anyhow::bail!(
-            "IPFS content for CID {} exceeded max size after download: {} bytes (max {})",
-            cid,
-            bytes.len(),
-            MAX_IPFS_PAYLOAD_BYTES
-        );
-    }
-
-    Ok(bytes)
+    crate::ipfs_fetch::fetch_ipfs_bounded(
+        cid,
+        ipfs_url,
+        MAX_IPFS_PAYLOAD_BYTES,
+        IPFS_FETCH_TIMEOUT_SECS,
+    )
+    .await
+    .map_err(Into::into)
 }
 
 /// Compute the hybrid analysis committee for a package.
@@ -943,5 +967,21 @@ mod shielded_tests {
 
         let got = super::decrypt_shielded_with_policy(false, &wire, &bundle).unwrap();
         assert_eq!(got, plaintext);
+    }
+
+    #[test]
+    fn mismatch_and_missing_key_bundle_drop_without_revocation() {
+        assert_eq!(
+            super::precheck_fetched_tarball_drop_reason(true, false, "aa", "aa"),
+            Some("shielded submission missing key_bundle")
+        );
+        assert_eq!(
+            super::precheck_fetched_tarball_drop_reason(false, false, "aa", "bb"),
+            Some("content hash mismatch")
+        );
+        assert_eq!(
+            super::precheck_fetched_tarball_drop_reason(false, false, "AA", "aa"),
+            None
+        );
     }
 }

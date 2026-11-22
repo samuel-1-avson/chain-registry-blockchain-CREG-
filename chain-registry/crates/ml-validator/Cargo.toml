@@ -35,8 +35,10 @@ tokio = { workspace = true }
 futures = "0.3"
 
 # Archive extraction for tarball scanning
-flate2 = "1"
-tar = "0.4"
+creg-unpack = { path = "../unpack" }
+arc-swap = "=1.9.1"
+object = { version = "=0.37.3", default-features = false, features = ["read", "std"] }
+wasmparser = "=0.245.1"
 
 # YARA-X for pattern-based malware detection (replaces custom ONNX training)
 yara-x = "1.14"
@@ -62,6 +64,8 @@ common = { path = "../common" }
 
 [dev-dependencies]
 tempfile = "3"
+flate2 = "1"
+tar = "0.4"
 
 [lints]
 workspace = true

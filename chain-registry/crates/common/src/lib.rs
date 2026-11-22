@@ -150,6 +150,21 @@ pub fn validator_status_is_active(status: &str) -> bool {
     )
 }
 
+/// Canonical boolean spelling check shared across `common`, `node`, and analyzers.
+pub fn is_truthy_flag(raw: &str) -> bool {
+    matches!(
+        raw.trim().to_ascii_lowercase().as_str(),
+        "1" | "true" | "yes"
+    )
+}
+
+/// Parses an environment variable as a boolean flag using [`is_truthy_flag`].
+pub fn parse_env_bool(name: &str) -> bool {
+    std::env::var(name)
+        .map(|value| is_truthy_flag(&value))
+        .unwrap_or(false)
+}
+
 #[derive(serde::Serialize, serde::Deserialize, Clone, Debug)]
 pub struct SignedRevocationRequest {
     pub chain_id: String,
@@ -172,6 +187,35 @@ impl SignedRevocationRequest {
         } else {
             format!("{}:revoke:{}", self.package_canonical, self.reason)
         }
+    }
+
+    pub fn verify_signature(&self) -> anyhow::Result<()> {
+        anyhow::ensure!(
+            self.signature_version <= 1,
+            "unsupported revocation signature version"
+        );
+        anyhow::ensure!(
+            !self.reason.is_empty()
+                && self.reason.len() <= 4096
+                && !self.package_canonical.is_empty()
+                && self.package_canonical.len() <= 256
+                && self.revoker_pubkey.len() == 64
+                && self.signature.len() == 128,
+            "invalid revocation proof bounds"
+        );
+        let key = hex::decode(&self.revoker_pubkey)?;
+        let key =
+            crate::crypto::PublicKey::from_bytes(crate::crypto::SignatureScheme::Ed25519, &key)?;
+        let signature = hex::decode(&self.signature)?;
+        key.verify(
+            self.signing_message().as_bytes(),
+            &crate::crypto::Signature::from_bytes(
+                crate::crypto::SignatureScheme::Ed25519,
+                &signature,
+            )?,
+            crate::crypto::VerifyMode::Strict,
+        )?;
+        Ok(())
     }
 }
 
@@ -258,5 +302,17 @@ mod validator_status_tests {
         assert!(!validator_status_is_active("pending"));
         assert!(!validator_status_is_active("jailed"));
         assert!(!validator_status_is_active(""));
+    }
+
+    #[test]
+    fn truthy_flag_parses_all_canonical_spellings() {
+        use super::is_truthy_flag;
+
+        for yes in ["1", "true", "TRUE", " True ", "yes", "YES"] {
+            assert!(is_truthy_flag(yes), "expected truthy for {yes:?}");
+        }
+        for no in ["", "0", "false", "FALSE", "no", "on", "maybe"] {
+            assert!(!is_truthy_flag(no), "expected falsy for {no:?}");
+        }
     }
 }

@@ -641,7 +641,9 @@ async fn reconcile_state_from_worker(
         }
     }
 
-    s.validator_set.validators = next_validators;
+    s.set_validator_set(common::ValidatorSet {
+        validators: next_validators,
+    });
 
     // Record this set in the height-indexed history (effective from the next
     // block) so blocks signed under it verify correctly after a later rotation
@@ -1687,6 +1689,9 @@ mod tests {
             pending_pool: PendingPool::new(),
             publisher_index: PublisherIndex::new(),
             validator_set_bootstrap: bootstrap.clone(),
+            validator_set_snapshot: Arc::new(crate::state::ArcSwap::from_pointee(
+                bootstrap.clone(),
+            )),
             validator_set: bootstrap,
             package_rounds: HashMap::new(),
             package_committees: HashMap::new(),

@@ -1,25 +1,17 @@
 //! Multi-Layer Malware Detection Pipeline
 //!
-//! Replaces the old custom-ONNX approach with three production-ready layers
-//! that require **zero training data**:
+//! Replaces legacy ONNX theater with three deterministic verification layers:
 //!
-//! 1. **YARA-X scanning** — community-maintained malware rules (VirusTotal).
-//! 2. **OSV.dev lookups** — Google's open vulnerability database.
+//! 1. **YARA-X raw-byte scanning** — lock-free `Arc<yara_x::Rules>` matching with timeouts.
+//! 2. **Pinned OSV / off-chain lookups** — deterministic vulnerability matching.
 //! 3. **Content-hash threat intel** — SHA-256 matching against known-bad hashes.
-//!
-//! The legacy ONNX path is still available via `CREG_FORCE_ONNX=true` if a
-//! real trained model exists, but the default pipeline no longer needs one.
 
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::path::Path;
-use std::time::Duration;
 use tracing::{debug, warn};
 
-use crate::yara_scanner::YaraMatch;
-
-/// Maximum wall-clock time allowed for a single deep-scan inference pass.
-const SCAN_TIMEOUT: Duration = Duration::from_secs(30);
+use crate::yara_scanner::{YaraMatch, YaraScanError};
 
 /// Errors that can occur during deep scanning.
 #[derive(Debug, thiserror::Error)]
@@ -36,41 +28,33 @@ pub enum MlError {
     Timeout,
 }
 
-/// A file flagged as suspicious by the deep-learning model.
+/// A file flagged as suspicious by deep scanning.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SuspiciousFile {
     /// Path of the file inside the package.
     pub path: String,
     /// Malicious probability assigned to this file (0.0 – 1.0).
     pub probability: f32,
-    /// Short code snippet (first 200 chars) for reporting.
+    /// Short human-readable match detail.
     pub snippet: String,
 }
 
-/// Result of a deep-learning scan over a package tarball.
+/// Result of a multi-layer deep scan over a package tarball.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DeepScanResult {
     /// Probability that the package is malicious (0.0 – 1.0).
     pub malicious_probability: f32,
-
-    /// Model confidence in the prediction (0.0 – 1.0).
+    /// Confidence in the prediction (0.0 – 1.0).
     pub confidence: f32,
-
-    /// Human-readable classification based on probability thresholds.
+    /// Classification bucket based on probability thresholds.
     pub classification: ThreatClassification,
-
-    /// Optional attention weights mapped to source-file regions.
-    /// Keys are file paths; values are per-line suspiciousness scores.
+    /// Optional per-region scores.
     pub attention_regions: Option<HashMap<String, Vec<f32>>>,
-
-    /// Files flagged as suspicious by the model.
+    /// Flagged files from YARA / hash intel.
     pub suspicious_files: Vec<SuspiciousFile>,
-
-    /// Model version or artifact identifier used for the scan.
+    /// Scanner profile/version identifier used for the scan.
     pub model_version: String,
-
-    /// Whether the result was produced by a real ONNX inference or a
-    /// fallback/mock because the model is not present.
+    /// Legacy compatibility flag (`false` for real deterministic scans).
     pub is_mock: bool,
 }
 
@@ -81,8 +65,8 @@ pub enum ThreatClassification {
     Suspicious,
     LikelyMalicious,
     ConfirmedMalicious,
-    /// Inference did not complete (timeout, missing model, etc.).
-    /// Validators should treat this as an abstention rather than approval.
+    /// Inference did not complete (timeout, missing rules, etc.).
+    /// Validators abstain or fail closed rather than approving.
     Degraded,
 }
 
@@ -108,34 +92,90 @@ impl ThreatClassification {
     }
 }
 
-/// Extract source files from a tarball and scan them with the active YARA rules.
-/// This is used by the node's pre-mempool admission gate before a package enters
-/// consensus.
+fn is_yara_manifest_or_hook(path: &str) -> bool {
+    let lower = path.to_ascii_lowercase();
+    lower.ends_with("/package.json")
+        || lower == "package.json"
+        || lower.ends_with("/cargo.toml")
+        || lower == "cargo.toml"
+        || lower.ends_with("/setup.py")
+        || lower == "setup.py"
+        || lower.ends_with("/pyproject.toml")
+        || lower == "pyproject.toml"
+        || lower.ends_with("/setup.cfg")
+        || lower == "setup.cfg"
+        || lower.ends_with("/pom.xml")
+        || lower == "pom.xml"
+        || lower.ends_with(".gemspec")
+        || lower.ends_with(".pth")
+        || lower.ends_with("/.npmrc")
+        || lower == ".npmrc"
+        || lower.ends_with("/.pypirc")
+        || lower == ".pypirc"
+}
+
+fn has_binary_magic(bytes: &[u8]) -> bool {
+    bytes.starts_with(b"\x7fELF")
+        || bytes.starts_with(b"\x00asm")
+        || bytes.starts_with(b"MZ")
+        || bytes.starts_with(&[0xfe, 0xed, 0xfa, 0xce])
+        || bytes.starts_with(&[0xce, 0xfa, 0xed, 0xfe])
+        || bytes.starts_with(&[0xfe, 0xed, 0xfa, 0xcf])
+        || bytes.starts_with(&[0xcf, 0xfa, 0xed, 0xfe])
+}
+
+/// Selects all raw-byte scan targets from a bounded [`creg_unpack::UnpackedArchive`]:
+/// ecosystem scripts/sources, declared manifests & hooks, non-UTF-8 source/config
+/// files (`VNA-09`), and embedded ELF/PE/Mach-O/WASM binaries.
+pub fn select_yara_targets<'a>(
+    archive: &'a creg_unpack::UnpackedArchive,
+    ecosystem: &str,
+) -> Vec<(&'a str, &'a [u8])> {
+    archive
+        .files
+        .iter()
+        .filter(|file| {
+            creg_unpack::is_source_file_for_ecosystem(&file.path, ecosystem)
+                || is_yara_manifest_or_hook(&file.path)
+                || (!file.is_valid_utf8 && (file.is_declared_source || file.is_declared_config))
+                || has_binary_magic(&file.raw_bytes)
+        })
+        .map(|file| (file.path.as_str(), file.raw_bytes.as_ref()))
+        .collect()
+}
+
+/// Extracts files via `creg-unpack` and runs lock-free raw-byte YARA scanning.
 pub fn scan_tarball_with_yara(
     tarball_bytes: &[u8],
     ecosystem: &str,
 ) -> Result<Vec<YaraMatch>, MlError> {
-    let files = extract_source_files(tarball_bytes, ecosystem)
+    let archive = creg_unpack::unpack_tarball(tarball_bytes)
         .map_err(|e| MlError::ExtractionError(e.to_string()))?;
-    Ok(crate::yara_scanner::scan_files(&files))
+    let targets = select_yara_targets(&archive, ecosystem);
+    crate::yara_scanner::scan_raw_files(&targets).map_err(map_yara_err)
 }
 
-/// Deep-scan configuration.
+fn map_yara_err(err: YaraScanError) -> MlError {
+    match err {
+        YaraScanError::RulesUnavailable => {
+            MlError::ModelNotFound("YARA rule bundle unavailable".to_string())
+        }
+        YaraScanError::Timeout { .. } => MlError::Timeout,
+        YaraScanError::ScanFailed { reason, .. } => MlError::InferenceError(reason),
+    }
+}
+
+/// Deep-scan orchestrator.
 pub struct DeepScanner {
     _model_path: std::path::PathBuf,
     _tokenizer_path: Option<std::path::PathBuf>,
     _max_length: usize,
-    /// Optional package info for OSV lookups.
     package_info: Option<crate::osv_client::PackageInfo>,
-    /// Ecosystem of the package being scanned (e.g. "npm", "pypi", "cargo").
-    /// Used to restrict which file extensions are analysed, preventing
-    /// cross-ecosystem false positives (e.g. Python helper scripts inside a
-    /// Rust crate being scanned as JavaScript).
     pub ecosystem: String,
 }
 
 impl DeepScanner {
-    /// Create a new scanner pointing at the given ONNX model.
+    /// Create a new scanner. The ONNX model path is kept only for API compatibility.
     pub fn new<P: AsRef<Path>>(model_path: P) -> Self {
         Self {
             _model_path: model_path.as_ref().to_path_buf(),
@@ -146,16 +186,11 @@ impl DeepScanner {
         }
     }
 
-    /// Check that the configured model file exists and is a valid size.
-    /// Call at application startup to fail fast if the model is missing.
-    ///
-    /// Returns `Ok(())` if the default pipeline (YARA + OSV) will be used
-    /// (i.e. `CREG_FORCE_ONNX` is not set).  When ONNX is forced, returns
-    /// an error if the model file is missing or suspiciously small.
+    /// Inspect scanner profile readiness at startup.
     pub fn validate_at_startup(&self) -> Result<(), MlError> {
         if std::env::var("CREG_FORCE_ONNX").unwrap_or_default() == "true" {
             tracing::warn!(
-                "CREG_FORCE_ONNX=true is DEPRECATED and ignored. The legacy ONNX path has been retired. Defaulting to the YARA-X rule-based scanning waterfall."
+                "CREG_FORCE_ONNX=true is DEPRECATED and ignored. The legacy ONNX path has been retired."
             );
         }
         let profile = crate::scanner_profile::current();
@@ -170,26 +205,19 @@ impl DeepScanner {
             scanner_profile_digest = %profile.digest,
             yara_digest = %profile.yara_digest,
             threat_intel_digest = %profile.threat_intel_digest,
-            threat_intel_source = %profile.threat_intel_source,
-            threat_intel_built_at = %profile.threat_intel_built_at,
             osv_digest = %profile.osv_digest,
             osv_epoch = %profile.osv_epoch,
-            osv_source = %profile.osv_source,
-            osv_built_at = %profile.osv_built_at,
-            osv_lookups = profile.osv_lookups,
             scanner_version = %profile.scanner_version,
             "Deterministic package-analysis profile inspected"
         );
         Ok(())
     }
 
-    /// Attach a tokenizer JSON path.
     pub fn with_tokenizer<P: AsRef<Path>>(mut self, path: P) -> Self {
         self._tokenizer_path = Some(path.as_ref().to_path_buf());
         self
     }
 
-    /// Attach package metadata for OSV vulnerability lookups.
     pub fn with_package_info(mut self, info: crate::osv_client::PackageInfo) -> Self {
         self.package_info = Some(info);
         self
@@ -198,13 +226,17 @@ impl DeepScanner {
     pub const SCANNER_VERSION: &str = crate::scanner_profile::SCANNER_VERSION;
     pub const DEGRADED_YARA_MISSING: &str = "degraded-yara-missing";
 
-    /// Return the model version string for inclusion in vote messages.
+    /// Return the active scanner version string for consensus votes.
     pub fn model_version(&self) -> String {
         crate::scanner_profile::current().scanner_version
     }
 
-    /// Run the multi-layer scan (default).
-    pub fn scan(&self, tarball_bytes: &[u8]) -> Result<DeepScanResult, MlError> {
+    /// Runs deep scanning directly over a pre-unpacked archive without redundant
+    /// decompression or re-hashing (`VNA-11`, `VNA-12`).
+    pub fn scan_unpacked(
+        &self,
+        archive: &creg_unpack::UnpackedArchive,
+    ) -> Result<DeepScanResult, MlError> {
         let profile = crate::scanner_profile::current();
         if profile.strict_phase_c && !profile.ready {
             return Ok(DeepScanResult {
@@ -219,37 +251,34 @@ impl DeepScanner {
         }
         if std::env::var("CREG_FORCE_ONNX").unwrap_or_default() == "true" {
             tracing::warn!(
-                "CREG_FORCE_ONNX=true is DEPRECATED and ignored. Legacy ONNX scan is retired. Running YARA-X multi-layer scan."
+                "CREG_FORCE_ONNX=true is DEPRECATED and ignored. Running lock-free YARA-X scan."
             );
         }
 
-        // ── Multi-Layer Pipeline ──────────────────────────────────────
-        // Corrupt archives fail closed. A valid archive with no matching
-        // source files still runs tarball-level threat intel rather than
-        // pretending a scanner completed.
-        let files = extract_source_files(tarball_bytes, &self.ecosystem)
-            .map_err(|e| MlError::ExtractionError(e.to_string()))?;
-
-        if !crate::yara_scanner::rules_available() {
-            warn!(
-                "YARA rules unavailable — vote will be degraded-yara-missing and excluded from quorum"
-            );
-            return Ok(DeepScanResult {
-                malicious_probability: 0.0,
-                confidence: 0.0,
-                classification: ThreatClassification::Degraded,
-                attention_regions: None,
-                suspicious_files: Vec::new(),
-                model_version: Self::DEGRADED_YARA_MISSING.to_string(),
-                is_mock: false,
-            });
-        }
-
-        // Layer 1: YARA pattern matching.
-        let yara_matches = crate::yara_scanner::scan_files(&files);
+        let targets = select_yara_targets(archive, &self.ecosystem);
+        let yara_matches = match crate::yara_scanner::scan_raw_files(&targets) {
+            Ok(matches) => matches,
+            Err(YaraScanError::RulesUnavailable) => {
+                warn!(
+                    "YARA rules unavailable — vote will be degraded-yara-missing and excluded from quorum"
+                );
+                return Ok(DeepScanResult {
+                    malicious_probability: 0.0,
+                    confidence: 0.0,
+                    classification: ThreatClassification::Degraded,
+                    attention_regions: None,
+                    suspicious_files: Vec::new(),
+                    model_version: Self::DEGRADED_YARA_MISSING.to_string(),
+                    is_mock: false,
+                });
+            }
+            Err(YaraScanError::Timeout { .. }) => return Err(MlError::Timeout),
+            Err(YaraScanError::ScanFailed { reason, .. }) => {
+                return Err(MlError::InferenceError(reason));
+            }
+        };
         let yara_prob = crate::yara_scanner::matches_to_probability(&yara_matches);
 
-        // Layer 2: OSV vulnerability lookup (optional).
         let osv_prob = if let Some(ref info) = self.package_info {
             let osv_result = crate::osv_client::query(info);
             crate::osv_client::vulns_to_probability(&osv_result)
@@ -257,17 +286,11 @@ impl DeepScanner {
             0.0
         };
 
-        // Layer 3: Content-hash threat intelligence.
-        let threat_result = crate::threat_intel::check(tarball_bytes, &files);
+        let threat_result = crate::threat_intel::check_unpacked(archive);
         let hash_prob = threat_result.to_probability();
 
-        // ── Combine scores: take the max of all three layers ─────────
-        // A single confident layer is enough to flag a package.  This
-        // avoids the averaging-dilution problem where one critical hit
-        // gets watered down by two clean layers.
         let combined = yara_prob.max(osv_prob).max(hash_prob);
 
-        // Build suspicious files list from YARA matches.
         let mut suspicious_files: Vec<SuspiciousFile> = yara_matches
             .iter()
             .map(|m| SuspiciousFile {
@@ -287,6 +310,7 @@ impl DeepScanner {
             b.probability
                 .partial_cmp(&a.probability)
                 .unwrap_or(std::cmp::Ordering::Equal)
+                .then_with(|| a.path.cmp(&b.path))
         });
         suspicious_files.truncate(10);
 
@@ -294,7 +318,7 @@ impl DeepScanner {
         let confidence = if combined > 0.01 {
             (0.5 + (combined - 0.5).abs()).min(1.0)
         } else {
-            0.5 // Moderate confidence in a clean result.
+            0.5
         };
 
         debug!(
@@ -312,6 +336,13 @@ impl DeepScanner {
             is_mock: false,
         })
     }
+
+    /// Run the multi-layer scan on compressed `.tar.gz` bytes via `creg-unpack`.
+    pub fn scan(&self, tarball_bytes: &[u8]) -> Result<DeepScanResult, MlError> {
+        let archive = creg_unpack::unpack_tarball(tarball_bytes)
+            .map_err(|e| MlError::ExtractionError(e.to_string()))?;
+        self.scan_unpacked(&archive)
+    }
 }
 
 impl Default for DeepScanner {
@@ -320,18 +351,9 @@ impl Default for DeepScanner {
     }
 }
 
-/// Convenience free function that uses the default scanner.
-///
-/// Called from the validator pipeline after the light-weight `score()`
-/// (rule-based) check.  Wraps the scan in a timeout to prevent hung
-/// sessions from blocking the validator pipeline.
-///
-/// `package_info` is optional — when provided, OSV vulnerability lookups
-/// are enabled.
-///
-/// `ecosystem` (e.g. `"npm"`, `"pypi"`, `"cargo"`) filters which source
-/// file extensions are extracted and scored, preventing cross-ecosystem
-/// false-positives.
+/// Executes deep scanning directly in the caller's thread/blocking task, relying on
+/// `creg-unpack` memory bounds and `yara_x::Scanner::set_timeout` rather than
+/// spawning detached OS threads (`VNA-11`, `VNA-12`).
 pub fn deep_scan(
     tarball_bytes: &[u8],
     package_info: Option<crate::osv_client::PackageInfo>,
@@ -340,170 +362,37 @@ pub fn deep_scan(
     let mut scanner = DeepScanner::default();
     scanner.package_info = package_info;
     scanner.ecosystem = ecosystem.to_string();
-
-    let bytes = tarball_bytes.to_vec();
-    let (result_tx, result_rx) = std::sync::mpsc::sync_channel(1);
-
-    std::thread::Builder::new()
-        .name("creg-deep-scan".to_string())
-        .spawn(move || {
-            let _ = result_tx.send(scanner.scan(&bytes));
-        })
-        .map_err(|e| MlError::InferenceError(format!("Failed to spawn deep-scan worker: {e}")))?;
-
-    match result_rx.recv_timeout(SCAN_TIMEOUT) {
-        Ok(result) => result,
-        Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {
-            warn!(
-                "Deep-scan inference timed out after {}s",
-                SCAN_TIMEOUT.as_secs()
-            );
-            Err(MlError::Timeout)
-        }
-        Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => Err(MlError::InferenceError(
-            "Deep-scan worker exited before returning a result".into(),
-        )),
-    }
+    scanner.scan(tarball_bytes)
 }
 
-/// Extract text source files from a tar.gz byte slice, filtered to extensions
-/// appropriate for the given ecosystem. Passing an empty or unknown ecosystem
-/// falls back to a broad cross-ecosystem set.
-///
-/// Filtering by ecosystem prevents false positives: a Rust crate that ships
-/// Python helper scripts should not have those scripts scanned with the
-/// JavaScript/Python ruleset and vice-versa.
-/// Maximum total extracted uncompressed bytes permitted per archive (256 MiB).
-const MAX_TOTAL_EXTRACTED_BYTES: usize = 256 * 1024 * 1024;
-/// Maximum uncompressed bytes permitted per single source file (32 MiB).
-const MAX_SINGLE_FILE_BYTES: usize = 32 * 1024 * 1024;
-/// Maximum number of file entries permitted inside an archive (10,000 files).
-const MAX_ARCHIVE_FILE_COUNT: usize = 10_000;
-/// Maximum uncompressed expansion ratio relative to compressed size (100:1).
-const MAX_DECOMPRESSION_RATIO: usize = 100;
-
-fn extract_source_files(
-    tarball: &[u8],
+/// Executes deep scanning over an already-unpacked `creg_unpack::UnpackedArchive`.
+pub fn deep_scan_unpacked(
+    archive: &creg_unpack::UnpackedArchive,
+    package_info: Option<crate::osv_client::PackageInfo>,
     ecosystem: &str,
-) -> Result<Vec<(String, String)>, std::io::Error> {
-    use std::io::Read;
-
-    let max_allowed_total = (tarball.len().saturating_mul(MAX_DECOMPRESSION_RATIO))
-        .clamp(1024 * 1024, MAX_TOTAL_EXTRACTED_BYTES);
-
-    let gz = flate2::read::GzDecoder::new(tarball);
-    let mut archive = tar::Archive::new(gz);
-    let mut files = Vec::new();
-    let mut total_extracted_bytes: usize = 0;
-    let mut entry_count: usize = 0;
-
-    for entry in archive.entries()? {
-        entry_count = entry_count.saturating_add(1);
-        if entry_count > MAX_ARCHIVE_FILE_COUNT {
-            return Err(std::io::Error::new(
-                std::io::ErrorKind::InvalidData,
-                format!("Archive exceeds maximum file count limit ({MAX_ARCHIVE_FILE_COUNT})"),
-            ));
-        }
-
-        let mut entry = entry?;
-        let path = entry.path()?.to_string_lossy().to_string();
-
-        if is_source_file_for_ecosystem(&path, ecosystem) {
-            let mut content = String::new();
-            let mut handle = (&mut entry).take((MAX_SINGLE_FILE_BYTES + 1) as u64);
-            if handle.read_to_string(&mut content).is_ok() && !content.is_empty() {
-                if content.len() > MAX_SINGLE_FILE_BYTES {
-                    return Err(std::io::Error::new(
-                        std::io::ErrorKind::InvalidData,
-                        format!("Single file '{}' exceeds maximum allowed size ({MAX_SINGLE_FILE_BYTES} bytes)", path),
-                    ));
-                }
-
-                total_extracted_bytes = total_extracted_bytes.saturating_add(content.len());
-                if total_extracted_bytes > max_allowed_total {
-                    return Err(std::io::Error::new(
-                        std::io::ErrorKind::InvalidData,
-                        format!(
-                            "Archive exceeds maximum decompression limit (extracted {} bytes, limit {})",
-                            total_extracted_bytes, max_allowed_total
-                        ),
-                    ));
-                }
-
-                files.push((path, content));
-            }
-        }
-    }
-    Ok(files)
-}
-
-/// Check whether a file path is a source file relevant to the given ecosystem.
-/// Falls back to a broad allowlist when the ecosystem is unknown.
-fn is_source_file_for_ecosystem(path: &str, ecosystem: &str) -> bool {
-    let ext = std::path::Path::new(path)
-        .extension()
-        .and_then(|e| e.to_str())
-        .unwrap_or("");
-
-    match ecosystem.to_ascii_lowercase().trim() {
-        "npm" => matches!(
-            ext,
-            "js" | "ts" | "mjs" | "cjs" | "jsx" | "tsx" | "sh" | "bash"
-        ),
-        "pypi" => matches!(ext, "py" | "pyw" | "sh" | "bash"),
-        "cargo" => matches!(ext, "rs" | "sh" | "bash" | "toml"),
-        "rubygems" | "gem" => matches!(ext, "rb" | "sh" | "bash"),
-        "maven" | "gradle" => matches!(ext, "java" | "kt" | "groovy" | "scala" | "sh"),
-        "nuget" => matches!(ext, "cs" | "vb" | "fs" | "ps1" | "psm1"),
-        "go" | "goproxy" => matches!(ext, "go" | "sh" | "bash"),
-        // Broad fallback for unknown ecosystems — covers all common scripting languages
-        _ => matches!(
-            ext,
-            "js" | "ts"
-                | "mjs"
-                | "cjs"
-                | "py"
-                | "rb"
-                | "rs"
-                | "java"
-                | "go"
-                | "sh"
-                | "bash"
-                | "php"
-                | "kt"
-                | "swift"
-                | "c"
-                | "cpp"
-        ),
-    }
-}
-
-/// Check whether a file path looks like executable source code.
-/// Uses the broad multi-ecosystem fallback; equivalent to
-/// `is_source_file_for_ecosystem(path, "")`.
-#[cfg(test)]
-fn is_source_file(path: &str) -> bool {
-    is_source_file_for_ecosystem(path, "")
+) -> Result<DeepScanResult, MlError> {
+    let mut scanner = DeepScanner::default();
+    scanner.package_info = package_info;
+    scanner.ecosystem = ecosystem.to_string();
+    scanner.scan_unpacked(archive)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
 
-    fn gzip_tar(files: &[(&str, &str)]) -> Vec<u8> {
+    fn gzip_tar(files: &[(&str, &[u8])]) -> Vec<u8> {
         use flate2::write::GzEncoder;
         use flate2::Compression;
 
         let encoder = GzEncoder::new(Vec::new(), Compression::default());
         let mut builder = tar::Builder::new(encoder);
-        for (name, content) in files {
-            let bytes = content.as_bytes();
+        for (name, bytes) in files {
             let mut header = tar::Header::new_gnu();
             header.set_size(bytes.len() as u64);
             header.set_mode(0o644);
             header.set_cksum();
-            builder.append_data(&mut header, *name, bytes).unwrap();
+            builder.append_data(&mut header, *name, *bytes).unwrap();
         }
         builder.into_inner().unwrap().finish().unwrap()
     }
@@ -521,12 +410,6 @@ mod tests {
         dir
     }
 
-    static ENV_LOCK: std::sync::OnceLock<std::sync::Mutex<()>> = std::sync::OnceLock::new();
-
-    fn env_lock() -> &'static std::sync::Mutex<()> {
-        ENV_LOCK.get_or_init(|| std::sync::Mutex::new(()))
-    }
-
     struct YaraDirGuard {
         _lock: std::sync::MutexGuard<'static, ()>,
         previous: Option<String>,
@@ -535,7 +418,7 @@ mod tests {
 
     impl YaraDirGuard {
         fn set(dir: std::path::PathBuf) -> Self {
-            let lock = env_lock().lock().unwrap();
+            let lock = crate::env_test_lock();
             let previous = std::env::var("CREG_YARA_RULES_DIR").ok();
             std::env::set_var("CREG_YARA_RULES_DIR", dir.as_os_str());
             Self {
@@ -567,7 +450,7 @@ mod tests {
 
     #[test]
     fn test_onnx_fallback_still_fails_closed_on_invalid_tarball() {
-        let _lock = env_lock().lock().unwrap();
+        let _lock = crate::env_test_lock();
         std::env::set_var("CREG_FORCE_ONNX", "true");
         let scanner = DeepScanner::new("/nonexistent/path/model.onnx");
         let err = scanner.scan(b"dummy tarball bytes");
@@ -586,7 +469,7 @@ mod tests {
         let _guard = YaraDirGuard::set(dir);
 
         let scanner = DeepScanner::new("/nonexistent/path/model.onnx");
-        let tarball = gzip_tar(&[("README.md", "# no source files")]);
+        let tarball = gzip_tar(&[("README.md", b"# no source files")]);
         let result = scanner.scan(&tarball).expect("valid gzip tar must scan");
         assert!(!result.is_mock);
         assert_eq!(result.model_version, scanner.model_version());
@@ -602,12 +485,30 @@ mod tests {
         let _guard = YaraDirGuard::set(dir);
 
         let scanner = DeepScanner::new("/nonexistent/path/model.onnx");
-        let tarball = gzip_tar(&[("src/lib.rs", "fn main() {}")]);
+        let tarball = gzip_tar(&[("src/lib.rs", b"fn main() {}")]);
         let result = scanner.scan(&tarball).expect("valid gzip tar must scan");
         assert_eq!(result.model_version, DeepScanner::DEGRADED_YARA_MISSING);
         assert_eq!(result.classification, ThreatClassification::Degraded);
         assert!(result.classification.should_abstain());
         assert_eq!(scanner.model_version(), DeepScanner::DEGRADED_YARA_MISSING);
+    }
+
+    #[test]
+    fn non_utf8_source_file_still_matches_yara_rule() {
+        let dir = temp_rules_dir("rawbyte");
+        std::fs::write(
+            dir.join("raw.yar"),
+            "rule RawByteHit { meta: threat_level = 5 strings: $a = \"eval(\" $b = \"process.env\" condition: $a and $b }\n",
+        )
+        .expect("write rule");
+        let _guard = YaraDirGuard::set(dir);
+
+        let mut evil_js = b"// \xff\xfe invalid utf8 prefix\n".to_vec();
+        evil_js.extend_from_slice(b"eval(process.env.AWS_SECRET_ACCESS_KEY);");
+        let tarball = gzip_tar(&[("package/index.js", &evil_js)]);
+        let matches = scan_tarball_with_yara(&tarball, "npm").expect("raw byte scan");
+        assert_eq!(matches.len(), 1);
+        assert_eq!(matches[0].rule_name, "RawByteHit");
     }
 
     #[test]
@@ -658,28 +559,15 @@ mod tests {
         assert!(!ThreatClassification::Suspicious.should_block());
         assert!(!ThreatClassification::Safe.should_block());
         assert!(!ThreatClassification::Degraded.should_block());
-        // Degraded should cause abstention, not blocking
         assert!(ThreatClassification::Degraded.should_abstain());
         assert!(!ThreatClassification::Safe.should_abstain());
     }
 
     #[test]
-    fn test_is_source_file() {
-        assert!(is_source_file("src/index.js"));
-        assert!(is_source_file("lib/main.py"));
-        assert!(is_source_file("foo.rs"));
-        assert!(!is_source_file("README.md"));
-        assert!(!is_source_file("package.json"));
-    }
-
-    #[test]
-    fn test_extract_source_files_rejects_excessive_decompression() {
-        // Create a tarball with repetitive content that would exceed the 100:1 ratio if blown up
-        let small_content = "console.log('clean');\n";
-        let tarball = gzip_tar(&[("index.js", small_content)]);
-        let files = extract_source_files(&tarball, "npm").expect("valid archive extracts cleanly");
-        assert_eq!(files.len(), 1);
-        assert_eq!(files[0].0, "index.js");
-        assert_eq!(files[0].1, small_content);
+    fn test_extract_source_files_rejects_bomb_via_creg_unpack() {
+        let zero_bomb = vec![0u8; 6 * 1024 * 1024];
+        let tarball = gzip_tar(&[("index.js", &zero_bomb)]);
+        let err = scan_tarball_with_yara(&tarball, "npm").expect_err("must reject 6 MiB file");
+        assert!(matches!(err, MlError::ExtractionError(_)));
     }
 }

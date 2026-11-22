@@ -15,6 +15,7 @@ pub mod bundle;
 pub mod diff;
 pub mod intelligence;
 pub mod llm;
+pub mod manifest_audit;
 pub mod pgp;
 pub mod report;
 pub mod reputation;
@@ -27,7 +28,7 @@ pub mod wasm_sandbox;
 use anyhow::Result;
 use common::{Finding, PublishRequest, ValidatorVote};
 use report::{AuditProof, ValidationReport};
-use reputation::{assess_publisher, FinalDecision};
+use reputation::{assess_publisher_from_snapshot, FinalDecision, PublisherReputationSnapshot};
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct ValidationResult {
@@ -52,26 +53,31 @@ pub struct ValidationResult {
 pub async fn validate_package(
     req: &PublishRequest,
     tarball: &[u8],
+    privkey: &str,
+    prev_manifest: Option<&common::PackageManifest>,
+    prev_sandbox: Option<&sandbox::SandboxResult>,
+) -> Result<ValidationResult> {
+    validate_package_with_reputation(req, tarball, privkey, prev_manifest, prev_sandbox, None).await
+}
+
+/// Run all validator pipeline stages using an explicit deterministic
+/// `reputation_snapshot` derived from committed chain state (VNA-20).
+pub async fn validate_package_with_reputation(
+    req: &PublishRequest,
+    tarball: &[u8],
     _privkey: &str,
     prev_manifest: Option<&common::PackageManifest>,
     prev_sandbox: Option<&sandbox::SandboxResult>,
+    reputation_snapshot: Option<&PublisherReputationSnapshot>,
 ) -> Result<ValidationResult> {
     let canonical = req.id.canonical();
     tracing::info!("Starting validator pipeline for {}", canonical);
 
-    let node_url =
-        std::env::var("CREG_NODE_URL").unwrap_or_else(|_| "http://127.0.0.1:8080".into());
-
-    // Refresh the typosquat dataset from CREG_TYPOSQUAT_URL if configured and
-    // the TTL has expired.  Failures are non-fatal; the compile-time baseline
-    // is always available as a fallback.
-    typosquat::maybe_refresh().await;
-
-    // ── Stage 1 (static) + Stage 6 (reputation) run concurrently ────────────
-    let (static_result, rep_result) = tokio::join!(
-        static_analysis::run(tarball, &req.manifest),
-        assess_publisher(&req.publisher_pubkey, &node_url),
-    );
+    // Offline pinned typosquat baseline/snapshot and on-chain reputation only
+    // (zero live HTTP calls on consensus path; VNA-20).
+    let static_result =
+        static_analysis::run_for_package(Some(&req.id), tarball, &req.manifest).await;
+    let rep = assess_publisher_from_snapshot(&req.publisher_pubkey, reputation_snapshot);
 
     let mut report = ValidationReport::new(req.id.clone());
     report.apply_static(static_result?);
@@ -125,13 +131,6 @@ pub async fn validate_package(
             report.apply_pgp(pgp_res);
         }
     }
-
-    let rep = rep_result.unwrap_or_else(|_| reputation::ReputationAssessment {
-        confidence_delta: 0,
-        publisher_pubkey: req.publisher_pubkey.clone(),
-        notes: vec!["Reputation check unreachable — neutral".into()],
-        revoked_pgp_fps: vec![],
-    });
 
     for note in &rep.notes {
         tracing::debug!("[{}] rep: {}", canonical, note);
@@ -196,9 +195,7 @@ pub async fn validate_package(
     // Only runs when CREG_AAA_ENABLED=true is explicitly set. The AAA auditor
     // is an external service that may not be deployed — calling it unconditionally
     // causes silent failures.
-    let aaa_enabled = std::env::var("CREG_AAA_ENABLED")
-        .map(|v| v == "true" || v == "1")
-        .unwrap_or(false);
+    let aaa_enabled = common::parse_env_bool("CREG_AAA_ENABLED");
 
     if decision.is_reject() && aaa_enabled {
         tracing::info!("[{}] Triggering Automated AI Audit (AAA)...", canonical);
@@ -325,7 +322,7 @@ fn verify_aaa_proof(proof: &AuditProof, canonical: &str, content_hash: &str) -> 
         "{}|{}|{}|{}",
         AAA_MESSAGE_DOMAIN, canonical, content_hash, proof.verdict
     );
-    vk.verify(msg.as_bytes(), &sig, VerifyMode::Permissive)
+    vk.verify(msg.as_bytes(), &sig, VerifyMode::Strict)
         .map_err(|e| anyhow::anyhow!("AAA signature verification failed: {}", e))?;
 
     Ok(())

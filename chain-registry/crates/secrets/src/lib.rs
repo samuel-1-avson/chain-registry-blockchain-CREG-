@@ -11,14 +11,69 @@ use std::fmt;
 pub use env::EnvSecretsBackend;
 pub use vault::VaultSecretsBackend;
 
-/// Services that use Ethereum secp256k1 signing keys from this crate.
+/// Heap-allocated string wrapper that zeroizes its contents on drop and
+/// redacts secret material in `Debug` output (`VNA-25`).
+#[derive(Clone, Default, PartialEq, Eq)]
+pub struct SecretString(zeroize::Zeroizing<String>);
+
+impl SecretString {
+    pub fn new(value: impl Into<String>) -> Self {
+        Self(zeroize::Zeroizing::new(value.into()))
+    }
+
+    pub fn expose_secret(&self) -> &str {
+        self.0.as_str()
+    }
+}
+
+impl std::ops::Deref for SecretString {
+    type Target = str;
+
+    fn deref(&self) -> &Self::Target {
+        self.expose_secret()
+    }
+}
+
+impl AsRef<str> for SecretString {
+    fn as_ref(&self) -> &str {
+        self.expose_secret()
+    }
+}
+
+impl AsRef<[u8]> for SecretString {
+    fn as_ref(&self) -> &[u8] {
+        self.expose_secret().as_bytes()
+    }
+}
+
+impl From<String> for SecretString {
+    fn from(value: String) -> Self {
+        Self::new(value)
+    }
+}
+
+impl From<&str> for SecretString {
+    fn from(value: &str) -> Self {
+        Self::new(value)
+    }
+}
+
+impl fmt::Debug for SecretString {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str("[REDACTED]")
+    }
+}
+
+/// Services that use signing keys loaded through this crate.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum HotKeyRole {
     Bridge,
     Faucet,
     Relayer,
-    /// Ed25519 validator key stored as hex in Vault (node only).
+    /// Ed25519 validator key stored as hex in Vault or env (node only).
     ValidatorEd25519,
+    /// Governance.sol execution signer key (node only, `VNA-32`).
+    Governance,
 }
 
 impl HotKeyRole {
@@ -28,6 +83,7 @@ impl HotKeyRole {
             Self::Faucet => "FAUCET_PRIVATE_KEY",
             Self::Relayer => "RELAYER_PRIVATE_KEY",
             Self::ValidatorEd25519 => "CREG_VALIDATOR_KEY",
+            Self::Governance => "CREG_GOVERNANCE_KEY",
         }
     }
 
@@ -37,6 +93,7 @@ impl HotKeyRole {
             Self::Faucet => "secret/data/creg/faucet",
             Self::Relayer => "secret/data/creg/relayer",
             Self::ValidatorEd25519 => "secret/data/creg/validator",
+            Self::Governance => "secret/data/creg/governance",
         }
     }
 
@@ -46,6 +103,7 @@ impl HotKeyRole {
             Self::Faucet => "CREG_VAULT_SECRET_PATH_FAUCET",
             Self::Relayer => "CREG_VAULT_SECRET_PATH_RELAYER",
             Self::ValidatorEd25519 => "CREG_VAULT_SECRET_PATH_VALIDATOR",
+            Self::Governance => "CREG_VAULT_SECRET_PATH_GOVERNANCE",
         }
     }
 
@@ -55,7 +113,12 @@ impl HotKeyRole {
             Self::Faucet => &["private_key", "faucet_key", "key"],
             Self::Relayer => &["private_key", "relayer_key", "key"],
             Self::ValidatorEd25519 => &["validator_key", "private_key", "key"],
+            Self::Governance => &["governance_key", "private_key", "key"],
         }
+    }
+
+    pub fn is_ed25519(self) -> bool {
+        matches!(self, Self::ValidatorEd25519)
     }
 }
 
@@ -106,20 +169,36 @@ impl SecretsProvider {
 
     /// Load a 32-byte secp256k1 private key as hex (optional `0x` prefix).
     pub async fn secp256k1_signing_key_hex(&self, role: HotKeyRole) -> Result<String> {
+        self.signing_key_secret(role)
+            .await
+            .map(|secret| secret.expose_secret().to_owned())
+    }
+
+    /// Optional load: returns `None` if the role's secret is not configured.
+    pub async fn try_secp256k1_signing_key_hex(&self, role: HotKeyRole) -> Result<Option<String>> {
+        self.try_signing_key_secret(role)
+            .await
+            .map(|opt| opt.map(|secret| secret.expose_secret().to_owned()))
+    }
+
+    /// Load a 32-byte signing key as a zeroizing [`SecretString`].
+    pub async fn signing_key_secret(&self, role: HotKeyRole) -> Result<SecretString> {
         match self.backend {
-            SecretsBackend::Env => self.env.secp256k1_signing_key_hex(role),
+            SecretsBackend::Env => self.env.signing_key_secret(role),
             SecretsBackend::Vault => {
                 let vault = self
                     .vault
                     .as_ref()
                     .context("vault backend not initialized")?;
-                vault.secp256k1_signing_key_hex(role).await
+                vault.signing_key_secret(role).await
             }
         }
     }
 
-    /// Optional load: returns `None` if the role's secret is not configured.
-    pub async fn try_secp256k1_signing_key_hex(&self, role: HotKeyRole) -> Result<Option<String>> {
+    /// Optional zeroizing load: returns `None` when the role's key is unconfigured
+    /// (in env mode: unset/empty; in vault mode: 404/not found). Malformed keys
+    /// and transport/auth errors are always returned as `Err` (`VNA-25`).
+    pub async fn try_signing_key_secret(&self, role: HotKeyRole) -> Result<Option<SecretString>> {
         if self.backend == SecretsBackend::Env {
             match std::env::var(role.env_var()) {
                 Err(_) => return Ok(None),
@@ -127,15 +206,13 @@ impl SecretsProvider {
                 Ok(_) => {}
             }
         }
-        match self.secp256k1_signing_key_hex(role).await {
+        match self.signing_key_secret(role).await {
             Ok(key) => Ok(Some(key)),
             Err(e) => {
                 let msg = e.to_string();
                 if self.backend == SecretsBackend::Vault
                     && (msg.contains("404") || msg.contains("not found"))
                 {
-                    Ok(None)
-                } else if self.backend == SecretsBackend::Env {
                     Ok(None)
                 } else {
                     Err(e)
@@ -166,6 +243,30 @@ fn parse_backend(raw: Option<&str>) -> Result<SecretsBackend> {
     }
 }
 
+/// Rejects plaintext environment overrides when `CREG_SECRETS_BACKEND=vault` (`VNA-25`).
+pub fn validate_vault_exclusivity(backend: SecretsBackend) -> Vec<String> {
+    if backend != SecretsBackend::Vault {
+        return Vec::new();
+    }
+    let mut errors = Vec::new();
+    for role in [
+        HotKeyRole::ValidatorEd25519,
+        HotKeyRole::Bridge,
+        HotKeyRole::Governance,
+    ] {
+        if let Ok(value) = std::env::var(role.env_var()) {
+            if !value.trim().is_empty() {
+                errors.push(format!(
+                    "{} must not be set when CREG_SECRETS_BACKEND=vault — \
+                     plaintext environment keys cannot override HashiCorp Vault custody",
+                    role.env_var()
+                ));
+            }
+        }
+    }
+    errors
+}
+
 /// Production gate: plaintext env hot keys are not allowed off testnet (ADR SEC-301).
 pub fn validate_production_secrets_policy(is_testnet: bool) -> Vec<String> {
     if is_testnet {
@@ -186,9 +287,12 @@ pub fn validate_production_secrets_policy(is_testnet: bool) -> Vec<String> {
     errors
 }
 
-pub(crate) fn normalize_secp256k1_hex(key: &str, role: HotKeyRole) -> Result<String> {
-    let raw = key.trim().trim_start_matches("0x");
-    let bytes = hex::decode(raw).with_context(|| format!("{} is not valid hex", role.env_var()))?;
+pub fn normalize_signing_key_secret(key: &str, role: HotKeyRole) -> Result<SecretString> {
+    let raw = zeroize::Zeroizing::new(key.trim().trim_start_matches("0x").to_string());
+    let bytes = zeroize::Zeroizing::new(
+        hex::decode(raw.as_str())
+            .with_context(|| format!("{} is not valid hex", role.env_var()))?,
+    );
     if bytes.len() != 32 {
         bail!(
             "{} must be 32 bytes (64 hex chars), got {} bytes",
@@ -196,7 +300,14 @@ pub(crate) fn normalize_secp256k1_hex(key: &str, role: HotKeyRole) -> Result<Str
             bytes.len()
         );
     }
-    Ok(format!("0x{}", hex::encode(bytes)))
+    if role.is_ed25519() {
+        Ok(SecretString::new(hex::encode(bytes.as_slice())))
+    } else {
+        Ok(SecretString::new(format!(
+            "0x{}",
+            hex::encode(bytes.as_slice())
+        )))
+    }
 }
 
 pub(crate) fn extract_vault_field(data: &serde_json::Value, role: HotKeyRole) -> Option<String> {
@@ -247,5 +358,33 @@ mod tests {
         });
         let key = extract_vault_field(&data, HotKeyRole::Bridge).unwrap();
         assert!(key.starts_with("0x59"));
+    }
+
+    #[test]
+    fn secret_string_redacts_debug_and_normalizes_ed25519() {
+        let secret = normalize_signing_key_secret(&"aa".repeat(32), HotKeyRole::ValidatorEd25519)
+            .expect("valid ed25519 seed");
+        assert_eq!(secret.expose_secret(), "aa".repeat(32));
+        assert_eq!(format!("{secret:?}"), "[REDACTED]");
+
+        let gov =
+            normalize_signing_key_secret(&format!("0x{}", "bb".repeat(32)), HotKeyRole::Governance)
+                .expect("valid governance key");
+        assert_eq!(gov.expose_secret(), format!("0x{}", "bb".repeat(32)));
+        assert_eq!(HotKeyRole::Governance.env_var(), "CREG_GOVERNANCE_KEY");
+    }
+
+    #[test]
+    fn vault_exclusivity_rejects_plaintext_env_overrides() {
+        let _guard = ENV_LOCK.lock().unwrap();
+        std::env::set_var("CREG_VALIDATOR_KEY", &"11".repeat(32));
+        std::env::set_var("CREG_GOVERNANCE_KEY", &"22".repeat(32));
+        let errs = validate_vault_exclusivity(SecretsBackend::Vault);
+        std::env::remove_var("CREG_VALIDATOR_KEY");
+        std::env::remove_var("CREG_GOVERNANCE_KEY");
+        assert_eq!(errs.len(), 2);
+        assert!(errs[0].contains("CREG_VALIDATOR_KEY"));
+        assert!(errs[1].contains("CREG_GOVERNANCE_KEY"));
+        assert!(validate_vault_exclusivity(SecretsBackend::Env).is_empty());
     }
 }

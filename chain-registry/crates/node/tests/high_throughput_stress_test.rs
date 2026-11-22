@@ -8,13 +8,11 @@ use common::{
     sha256_hex, Block, BlockHeader, PackageId, PackageManifest, PublishRequest, Transaction,
 };
 use consensus::{
-    bls_aggregate::{aggregate_signatures, BlsKeypair, BlsSignature},
-    pbft::{pbft_signature_message, PbftEngine},
+    pbft::{pbft_signature_message, verify_pbft_phase_signature, PbftEngine},
     validator_set::{ValidatorInfo, ValidatorSet},
 };
 use cross_chain::merkle_proof::{build_merkle_tree, generate_inclusion_proof, verify_merkle_path};
 use ed25519_dalek::{Signer, SigningKey};
-use rand::rngs::OsRng;
 use std::time::Instant;
 
 #[test]
@@ -83,20 +81,15 @@ fn test_1000_tps_admission_and_pbft_consensus_burst() {
     );
 
     // ── 3. PBFT Consensus Quorum (4 Nodes) ───────────────────────────────────
-    println!("\n  [3/4] Running PBFT Consensus Quorum with BLS Multi-Signatures...");
+    println!("\n  [3/4] Running PBFT Consensus Quorum with Ed25519 Commit Signatures...");
     let pbft_start = Instant::now();
 
-    let node_keys: Vec<(SigningKey, BlsKeypair)> = (1..=4)
-        .map(|i| {
-            (
-                SigningKey::from_bytes(&[i as u8; 32]),
-                BlsKeypair::generate(&mut OsRng),
-            )
-        })
+    let node_keys: Vec<SigningKey> = (1..=4)
+        .map(|i| SigningKey::from_bytes(&[i as u8; 32]))
         .collect();
 
     let mut vs = ValidatorSet::new();
-    for (i, (ed_key, _)) in node_keys.iter().enumerate() {
+    for (i, ed_key) in node_keys.iter().enumerate() {
         vs.add(ValidatorInfo {
             id: format!("validator-node-{}", i + 1),
             pubkey: hex::encode(ed_key.verifying_key().as_bytes()),
@@ -132,7 +125,7 @@ fn test_1000_tps_admission_and_pbft_consensus_burst() {
 
     let b_hash = pbft.start_round(test_block, vs).expect("start pbft round");
 
-    for (i, (ed_key, _)) in node_keys.iter().enumerate() {
+    for (i, ed_key) in node_keys.iter().enumerate() {
         let msg = pbft_signature_message("prepare", &b_hash);
         let sig = ed_key.sign(msg.as_bytes());
         let prep_sig = common::block::BlockSignature {
@@ -148,7 +141,7 @@ fn test_1000_tps_admission_and_pbft_consensus_burst() {
         }
     }
 
-    for (i, (ed_key, _)) in node_keys.iter().enumerate() {
+    for (i, ed_key) in node_keys.iter().enumerate() {
         let msg = pbft_signature_message("commit", &b_hash);
         let sig = ed_key.sign(msg.as_bytes());
         let commit_sig = common::block::BlockSignature {
@@ -164,16 +157,12 @@ fn test_1000_tps_admission_and_pbft_consensus_burst() {
         }
     }
 
-    let finalised = pbft.get_finalised_block(&b_hash);
-    assert!(finalised.is_some());
-
-    // Aggregate BLS signatures
-    let bls_sigs: Vec<BlsSignature> = node_keys
-        .iter()
-        .map(|(_, bls)| bls.sign(root_hash.as_bytes()))
-        .collect();
-    let indices = vec![0, 1, 2, 3];
-    let agg_sig = aggregate_signatures(&bls_sigs, &indices, 4).expect("BLS aggregation");
+    let finalised = pbft.get_finalised_block(&b_hash).expect("finalised block");
+    assert!(finalised.pbft_signatures.len() >= 3);
+    for sig in &finalised.pbft_signatures {
+        verify_pbft_phase_signature("commit", &b_hash, &sig.pubkey, &sig.signature)
+            .expect("valid Ed25519 commit signature");
+    }
     let pbft_duration = pbft_start.elapsed();
 
     println!(
@@ -181,8 +170,8 @@ fn test_1000_tps_admission_and_pbft_consensus_burst() {
         pbft_duration
     );
     println!(
-        "  ✓ 4 BLS signatures aggregated into single 32-byte signature (signers: {})",
-        agg_sig.participant_count
+        "  ✓ {} Ed25519 commit signatures verified strictly",
+        finalised.pbft_signatures.len()
     );
 
     // ── 4. Benchmark Performance Metrics ──────────────────────────────────────

@@ -420,7 +420,7 @@ impl ProcessTreeGuard {
                 unsafe { CloseHandle(job) };
                 return Err(AuthorityAdapterError::ProcessContainmentUnavailable);
             }
-            return Ok(Self { job });
+            Ok(Self { job })
         }
         #[cfg(not(any(unix, windows)))]
         {
@@ -1304,7 +1304,7 @@ fn stream_hex_payload_digest(
     }
     let mut sha256 = (algorithm == ArtifactDigestAlgorithm::Sha256).then(Sha256::new);
     let mut sha512 = (algorithm == ArtifactDigestAlgorithm::Sha512).then(Sha512::new);
-    for pair in value.as_bytes().chunks_exact(2) {
+    for pair in value.as_bytes().as_chunks::<2>().0 {
         let high = (pair[0] as char)
             .to_digit(16)
             .ok_or(HexPayloadDigestError::Encoding)? as u8;

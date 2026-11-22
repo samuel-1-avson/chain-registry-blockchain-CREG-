@@ -18,6 +18,7 @@ sol!(
 pub enum AdmissionSurface {
     Rest,
     Grpc,
+    P2p,
 }
 
 impl AdmissionSurface {
@@ -25,6 +26,7 @@ impl AdmissionSurface {
         match self {
             Self::Rest => "REST",
             Self::Grpc => "gRPC",
+            Self::P2p => "P2P",
         }
     }
 }
@@ -305,11 +307,9 @@ pub fn update_performance_scores(
     final_sigs: &[common::ValidatorSignature],
     committee: &common::AnalysisCommittee,
     package_was_accepted: bool,
+    reference_timestamp_secs: u64,
 ) {
-    let now = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map(|d| d.as_secs())
-        .unwrap_or(0);
+    let now = reference_timestamp_secs;
 
     for sig in final_sigs {
         if let Some(v) = validator_set
@@ -335,9 +335,9 @@ pub fn update_performance_scores(
                 delta += 10; // mandatory work is harder/more valuable
             }
 
-            // Simple timeliness proxy: if signed recently relative to "now", bonus.
-            // In real use the caller can pass better timing from signed_at vs admission.
-            let age_secs = (now.saturating_sub(sig.signed_at.timestamp() as u64)) as i32;
+            // Deterministic timeliness proxy relative to committed block timestamp.
+            let signed_secs = sig.signed_at.timestamp().max(0) as u64;
+            let age_secs = now.saturating_sub(signed_secs).min(i32::MAX as u64) as i32;
             if age_secs < 30 {
                 delta += 8;
             } else if age_secs < 60 {
@@ -351,11 +351,10 @@ pub fn update_performance_scores(
                 delta += 5;
             }
 
-            // Decay for old contributions: gradually reduce influence of historical scores
-            // so recent performance (recent resources/capability demonstration) matters more.
-            // This prevents stale high scores from locking in nodes that no longer perform well.
+            // Exact integer decay for historical scores (no floating-point drift).
             if v.contribution_count > 5 {
-                v.performance_score = ((v.performance_score as f64 * 0.985) as u32).max(50);
+                v.performance_score =
+                    ((u64::from(v.performance_score) * 985) / 1000).max(50) as u32;
             }
 
             // Apply with simple moving average (contribution_count prevents early volatility)
@@ -391,6 +390,15 @@ pub async fn admit_publish_request(
                  deployed; refusing experimental single-node X25519 so confidentiality is not \
                  over-claimed"
                     .into(),
+            ));
+        }
+        if request
+            .key_bundle
+            .as_deref()
+            .is_none_or(|b| b.trim().is_empty())
+        {
+            return Err(AdmissionError::InvalidPublisherSignature(
+                "Shielded package submission requires a non-empty key_bundle".into(),
             ));
         }
     }
@@ -759,7 +767,135 @@ fn validate_package_id(request: &PublishRequest) -> Result<(), AdmissionError> {
             ))
         },
     )?;
+    crate::ipfs_fetch::validate_cid_for_node(&request.ipfs_cid).map_err(|error| {
+        AdmissionError::InvalidPackageId(format!("Invalid ipfs_cid for admission: {error}"))
+    })?;
     Ok(())
+}
+
+/// Fast synchronous-crypto + local-state validation executed for P2P
+/// `creg/v1/submissions` BEFORE returning `MessageAcceptance::Accept` (`VNA-03`).
+/// Never performs network I/O on the libp2p Swarm task.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum P2pSubmissionPrecheck {
+    Valid,
+    DuplicateIgnore,
+    Reject(String),
+}
+
+pub async fn precheck_p2p_submission(
+    state: &SharedState,
+    request: &PublishRequest,
+) -> P2pSubmissionPrecheck {
+    if let Err(err) = validate_package_id(request) {
+        return P2pSubmissionPrecheck::Reject(err.to_string());
+    }
+    if request.content_hash.len() != 64
+        || !request
+            .content_hash
+            .bytes()
+            .all(|byte| byte.is_ascii_hexdigit())
+    {
+        return P2pSubmissionPrecheck::Reject(
+            "content_hash must be a 64-character SHA-256 hex digest".into(),
+        );
+    }
+    if request.shielded && !common::shielded_publish_enabled() {
+        return P2pSubmissionPrecheck::Reject("shielded publish is disabled on this node".into());
+    }
+    if let Err(err) = verify_publish_sig(request) {
+        return P2pSubmissionPrecheck::Reject(format!("invalid publisher signature: {err}"));
+    }
+
+    let production = env_flag("CREG_PRODUCTION");
+    let allow_legacy = !production && env_flag("CREG_ALLOW_LEGACY_PUBLISHER_PROOF");
+    if request.publisher_evm_signature.trim().is_empty() && !allow_legacy {
+        return P2pSubmissionPrecheck::Reject(
+            "publisher_evm_signature is required for P2P submission".into(),
+        );
+    }
+
+    let canonical = request.id.canonical();
+    let namespace_prefix = if request.publisher_authorization_version == 4 {
+        match common::authoritative_package_namespace(&request.id) {
+            Ok(ns) => ns,
+            Err(err) => return P2pSubmissionPrecheck::Reject(err.to_string()),
+        }
+    } else {
+        common::package_namespace_prefix(&request.id)
+    };
+
+    let s = state.read().await;
+    if request.shielded {
+        if s.config.threshold_encryption {
+            return P2pSubmissionPrecheck::Reject(
+                "shielded publish refused when threshold_encryption lacks share collection".into(),
+            );
+        }
+        if request
+            .key_bundle
+            .as_deref()
+            .is_none_or(|b| b.trim().is_empty())
+        {
+            return P2pSubmissionPrecheck::Reject(
+                "shielded package submission requires a key_bundle".into(),
+            );
+        }
+    }
+
+    match s.chain.get_package(&canonical) {
+        Ok(Some(record)) => {
+            if matches!(record.status, PackageStatus::Verified) {
+                return P2pSubmissionPrecheck::DuplicateIgnore;
+            }
+            if matches!(record.status, PackageStatus::Revoked { .. }) {
+                return P2pSubmissionPrecheck::Reject(format!(
+                    "{canonical} is revoked and cannot be resubmitted"
+                ));
+            }
+        }
+        Ok(None) => {}
+        Err(err) => {
+            return P2pSubmissionPrecheck::Reject(format!("storage error: {err}"));
+        }
+    }
+
+    if let Some(existing) = s.pending_pool.get(&canonical) {
+        if existing.request.content_hash == request.content_hash {
+            return P2pSubmissionPrecheck::DuplicateIgnore;
+        }
+    }
+
+    let next_height = s.chain.tip_height().unwrap_or(0).saturating_add(1);
+    let authority_active = s
+        .config
+        .namespace_authority_activation_height
+        .is_some_and(|height| next_height >= height);
+    if authority_active && request.publisher_authorization_version != 4 {
+        return P2pSubmissionPrecheck::Reject(
+            "Publisher authorization v4 is required after namespace-authority activation".into(),
+        );
+    }
+
+    let chain_controller = s.chain.publisher_for_prefix(&namespace_prefix);
+    let pending_controller = s.pending_pool.publisher_for_prefix(&namespace_prefix);
+    let delegated = match active_publish_delegation(&s.chain, &namespace_prefix, request) {
+        Ok(d) => d,
+        Err(err) => {
+            return P2pSubmissionPrecheck::Reject(format!("delegation lookup failed: {err}"))
+        }
+    };
+    if let Err(err) = ensure_namespace_controller(
+        &namespace_prefix,
+        &request.publisher_pubkey,
+        chain_controller,
+        pending_controller,
+        delegated,
+    ) {
+        return P2pSubmissionPrecheck::Reject(err.to_string());
+    }
+
+    P2pSubmissionPrecheck::Valid
 }
 
 pub(crate) fn verify_publish_sig(req: &PublishRequest) -> anyhow::Result<()> {
@@ -1227,10 +1363,8 @@ mod tests {
         sync::{Mutex, RwLock},
     };
 
-    static ENV_LOCK: std::sync::OnceLock<Mutex<()>> = std::sync::OnceLock::new();
-
     fn env_lock() -> &'static Mutex<()> {
-        ENV_LOCK.get_or_init(|| Mutex::new(()))
+        crate::config::global_test_env_lock()
     }
 
     struct EnvRestore {
@@ -1388,6 +1522,9 @@ rule TestMaliciousPayload {{
             pending_pool: PendingPool::new(),
             publisher_index: PublisherIndex::new(),
             validator_set_bootstrap: validator_set.clone(),
+            validator_set_snapshot: Arc::new(crate::state::ArcSwap::from_pointee(
+                validator_set.clone(),
+            )),
             validator_set,
             package_rounds: HashMap::new(),
             package_committees: HashMap::new(),
@@ -2080,6 +2217,53 @@ rule TestMaliciousPayload {{
             .await
             .unwrap_err();
         assert!(matches!(err, PublisherAdmissionError::Unstaked(_)));
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn p2p_precheck_rejects_unauthenticated_cid_injected_and_shieldless_submissions(
+    ) -> anyhow::Result<()> {
+        let _guard = env_lock().lock().await;
+        let _legacy = EnvRestore::set("CREG_ALLOW_LEGACY_PUBLISHER_PROOF", "true");
+        let _shielded = EnvRestore::set("CREG_SHIELDED_PUBLISH_ENABLED", "true");
+        let (state, _tempdir) = make_test_state(10, "http://127.0.0.1:65535".into()).await?;
+
+        let valid = signed_request(
+            b"valid-payload",
+            common::sha256_hex(b"valid-payload"),
+            "bafyp2pvalid",
+        );
+        assert_eq!(
+            precheck_p2p_submission(&state, &valid).await,
+            P2pSubmissionPrecheck::Valid
+        );
+
+        let mut injected_cid = valid.clone();
+        injected_cid.ipfs_cid = "bafyevil&offline=true".into();
+        assert!(matches!(
+            precheck_p2p_submission(&state, &injected_cid).await,
+            P2pSubmissionPrecheck::Reject(_)
+        ));
+
+        let mut forged_sig = valid.clone();
+        forged_sig.signature = "00".repeat(64);
+        assert!(matches!(
+            precheck_p2p_submission(&state, &forged_sig).await,
+            P2pSubmissionPrecheck::Reject(_)
+        ));
+
+        let mut shielded_missing_bundle = signed_request(
+            b"shield-payload",
+            common::sha256_hex(b"shield-payload"),
+            "bafyshieldnobundle",
+        );
+        shielded_missing_bundle.shielded = true;
+        shielded_missing_bundle.key_bundle = None;
+        assert!(matches!(
+            precheck_p2p_submission(&state, &shielded_missing_bundle).await,
+            P2pSubmissionPrecheck::Reject(_)
+        ));
 
         Ok(())
     }

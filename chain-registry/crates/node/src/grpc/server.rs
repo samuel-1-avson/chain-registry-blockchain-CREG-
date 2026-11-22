@@ -2,10 +2,15 @@
 // Implementation of the gRPC Services defined in node.proto.
 
 use futures::Stream;
+use sha2::Digest;
 use std::pin::Pin;
+use std::sync::Arc;
+use tokio::sync::Semaphore;
 use tokio_stream::wrappers::BroadcastStream;
 use tokio_stream::StreamExt;
 use tonic::{Request, Response, Status};
+
+const MAX_GRPC_WATCHERS: usize = 128;
 
 use crate::{events::EventBus, SharedState};
 use common::proto::{
@@ -113,10 +118,6 @@ impl RegistryService for MyRegistry {
         let req = request.into_inner();
         let publish_req = parse_submit_request_to_publish_request(req)?;
 
-        crate::package_admission::verify_publish_auth(&self.state, &publish_req)
-            .await
-            .map_err(admission_status)?;
-
         let receipt = crate::package_admission::admit_publish_request(
             &self.state,
             publish_req,
@@ -156,47 +157,52 @@ impl RegistryService for MyRegistry {
             }
         };
 
-        let mut publish_req = parse_submit_request_to_publish_request(metadata)?;
+        let publish_req = parse_submit_request_to_publish_request(metadata)?;
+        if publish_req.content_hash.trim().is_empty() {
+            return Err(Status::invalid_argument(
+                "Stream metadata must declare content_hash before streaming body chunks",
+            ));
+        }
+
+        // Authenticate publisher & stake on Chunk 0 BEFORE buffering/hashing
+        // any streamed payload bytes (VNA-04, VNA-31).
+        crate::package_admission::verify_publish_auth(&self.state, &publish_req)
+            .await
+            .map_err(admission_status)?;
+
         let mut total_bytes = 0usize;
-        let mut full_payload = Vec::new();
+        let mut hasher = sha2::Sha256::new();
         const MAX_STREAM_BYTES: usize = 64 * 1024 * 1024; // 64 MB
 
         while let Some(chunk) = stream.message().await? {
             if let Some(common::proto::publish_chunk::Payload::ChunkData(bytes)) = chunk.payload {
                 total_bytes = total_bytes.saturating_add(bytes.len());
                 if total_bytes > MAX_STREAM_BYTES {
-                    return Err(Status::invalid_argument(format!(
+                    return Err(Status::resource_exhausted(format!(
                         "Streamed payload exceeds maximum size limit ({} MB)",
                         MAX_STREAM_BYTES / (1024 * 1024)
                     )));
                 }
-                full_payload.extend_from_slice(&bytes);
+                hasher.update(&bytes);
             }
         }
 
-        if !full_payload.is_empty() {
-            let actual_hash = common::sha256_hex(&full_payload);
-            if !publish_req.content_hash.trim().is_empty()
-                && !publish_req.content_hash.eq_ignore_ascii_case(&actual_hash)
-            {
+        if total_bytes > 0 {
+            let actual_hash = hex::encode(hasher.finalize());
+            if !publish_req.content_hash.eq_ignore_ascii_case(&actual_hash) {
                 return Err(Status::invalid_argument(format!(
                     "Streamed content hash mismatch: declared {}, actual {}",
                     publish_req.content_hash, actual_hash
                 )));
             }
-            publish_req.content_hash = actual_hash;
         }
-
-        crate::package_admission::verify_publish_auth(&self.state, &publish_req)
-            .await
-            .map_err(admission_status)?;
 
         let receipt = crate::package_admission::admit_publish_request(
             &self.state,
             publish_req,
             crate::package_admission::AdmissionOptions {
                 surface: crate::package_admission::AdmissionSurface::Grpc,
-                verify_publisher_auth: true,
+                verify_publisher_auth: false,
             },
         )
         .await
@@ -304,13 +310,47 @@ fn parse_submit_request_to_publish_request(
     })
 }
 
+fn event_matches_filter(event: &crate::events::RegistryEvent, filter: &str) -> bool {
+    let trimmed = filter.trim();
+    if trimmed.is_empty() || trimmed.eq_ignore_ascii_case("all") {
+        return true;
+    }
+    if trimmed.eq_ignore_ascii_case("packages") {
+        return matches!(
+            event.kind,
+            crate::events::EventKind::PackageSubmitted
+                | crate::events::EventKind::PackageVerified
+                | crate::events::EventKind::PackageRejected
+                | crate::events::EventKind::PackageRevoked
+        );
+    }
+    if trimmed.eq_ignore_ascii_case("blocks") {
+        return matches!(event.kind, crate::events::EventKind::BlockProduced);
+    }
+    if trimmed.eq_ignore_ascii_case("votes") {
+        return matches!(event.kind, crate::events::EventKind::ValidatorVoted);
+    }
+    let needle = trimmed.to_ascii_lowercase();
+    let kind_name = format!("{:?}", event.kind).to_ascii_lowercase();
+    let kind_snake = event.kind.to_string().to_ascii_lowercase();
+    kind_name.contains(&needle) || kind_snake.contains(&needle)
+}
+
 pub struct MyWatcher {
     event_bus: EventBus,
+    watcher_slots: Arc<Semaphore>,
 }
 
 impl MyWatcher {
     pub fn new(event_bus: EventBus) -> Self {
-        Self { event_bus }
+        Self::with_max_watchers(event_bus, MAX_GRPC_WATCHERS)
+    }
+
+    pub fn with_max_watchers(event_bus: EventBus, max_watchers: usize) -> Self {
+        Self {
+            event_bus,
+            watcher_slots: Arc::new(Semaphore::new(max_watchers.max(1))),
+        }
     }
 }
 
@@ -320,19 +360,29 @@ impl WatchService for MyWatcher {
 
     async fn stream_events(
         &self,
-        _request: Request<WatchRequest>,
+        request: Request<WatchRequest>,
     ) -> Result<Response<Self::StreamEventsStream>, Status> {
+        let permit = self
+            .watcher_slots
+            .clone()
+            .try_acquire_owned()
+            .map_err(|_| Status::resource_exhausted("too many active gRPC event watchers"))?;
+        let filter = request.into_inner().filter;
         let rx = self.event_bus.subscribe();
-        let stream = BroadcastStream::new(rx).map(|res| {
+        let stream = BroadcastStream::new(rx).filter_map(move |res| {
+            let _keep_permit_alive = &permit;
             match res {
                 Ok(event) => {
-                    Ok(ProtoEvent {
+                    if !event_matches_filter(&event, &filter) {
+                        return None;
+                    }
+                    Some(Ok(ProtoEvent {
                         kind: format!("{:?}", event.kind),
                         payload_json: serde_json::to_string(&event.payload).unwrap_or_default(),
                         timestamp: None, // In production, convert chrono to prost_types::Timestamp
-                    })
+                    }))
                 }
-                Err(_) => Err(Status::data_loss("Stream lagged")),
+                Err(_) => Some(Err(Status::data_loss("Stream lagged"))),
             }
         });
 
@@ -463,6 +513,9 @@ mod tests {
             publisher_index: crate::publisher_index::PublisherIndex::new(),
             validator_set_bootstrap: common::ValidatorSet::default(),
             validator_set: common::ValidatorSet::default(),
+            validator_set_snapshot: std::sync::Arc::new(crate::state::ArcSwap::from_pointee(
+                common::ValidatorSet::default(),
+            )),
             package_rounds: std::collections::HashMap::new(),
             package_committees: std::collections::HashMap::new(),
             config: crate::config::NodeConfig {
@@ -506,5 +559,48 @@ mod tests {
             .await
             .unwrap_err();
         assert_eq!(err.code(), tonic::Code::InvalidArgument);
+    }
+
+    #[tokio::test]
+    async fn my_watcher_enforces_filter_and_concurrency_cap() -> anyhow::Result<()> {
+        let event_bus = new_event_bus();
+        let watcher = MyWatcher::with_max_watchers(event_bus.clone(), 1);
+        let response = watcher
+            .stream_events(Request::new(WatchRequest {
+                filter: "blocks".into(),
+            }))
+            .await?;
+
+        let Err(busy) = watcher
+            .stream_events(Request::new(WatchRequest {
+                filter: "all".into(),
+            }))
+            .await
+        else {
+            panic!("expected ResourceExhausted when watcher cap reached");
+        };
+        assert_eq!(busy.code(), tonic::Code::ResourceExhausted);
+
+        emit(
+            &event_bus,
+            RegistryEvent::package_submitted("npm:ignored@1.0.0", "pubkey-a"),
+        );
+        emit(&event_bus, RegistryEvent::block_produced(7, "hash7", 1));
+
+        let mut stream = response.into_inner();
+        let first = stream
+            .next()
+            .await
+            .expect("filtered watch stream should yield block event")?;
+        assert_eq!(first.kind, "BlockProduced");
+
+        drop(stream);
+        let reacquired = watcher
+            .stream_events(Request::new(WatchRequest {
+                filter: "packages".into(),
+            }))
+            .await;
+        assert!(reacquired.is_ok(), "dropping stream must release permit");
+        Ok(())
     }
 }

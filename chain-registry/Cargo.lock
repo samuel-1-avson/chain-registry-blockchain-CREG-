@@ -2183,6 +2183,7 @@ dependencies = [
  "aes-gcm",
  "alloy",
  "anyhow",
+ "arc-swap",
  "axum",
  "axum-server",
  "chain-registry-secrets",
@@ -2210,7 +2211,7 @@ dependencies = [
  "serde",
  "serde_json",
  "sha2 0.10.9",
- "sled",
+ "subtle",
  "tar",
  "tempfile",
  "thiserror 1.0.69",
@@ -2229,7 +2230,7 @@ dependencies = [
  "validator",
  "windows-sys 0.61.2",
  "x25519-dalek",
- "zk-validator",
+ "zeroize",
 ]
 
 [[package]]
@@ -2268,6 +2269,7 @@ dependencies = [
  "serde",
  "serde_json",
  "tracing",
+ "zeroize",
 ]
 
 [[package]]
@@ -2513,10 +2515,6 @@ name = "consensus"
 version = "0.1.0"
 dependencies = [
  "anyhow",
- "ark-bn254",
- "ark-ec",
- "ark-ff 0.4.2",
- "ark-serialize 0.4.2",
  "chrono",
  "common",
  "ed25519-dalek",
@@ -2961,6 +2959,20 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "9481c1c90cbf2ac953f07c8d4a58aa3945c425b7185c9154d67a65e4230da511"
 dependencies = [
  "cfg-if",
+]
+
+[[package]]
+name = "creg-unpack"
+version = "0.1.0"
+dependencies = [
+ "bytes",
+ "common",
+ "flate2",
+ "hex",
+ "serde",
+ "sha2 0.10.9",
+ "tar",
+ "thiserror 1.0.69",
 ]
 
 [[package]]
@@ -6747,11 +6759,14 @@ name = "ml-validator"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "arc-swap",
  "common",
+ "creg-unpack",
  "flate2",
  "futures",
  "hex",
  "lru",
+ "object 0.37.3",
  "rayon",
  "regex",
  "reqwest 0.11.27",
@@ -6768,6 +6783,7 @@ dependencies = [
  "tree-sitter-javascript",
  "tree-sitter-python",
  "tree-sitter-rust",
+ "wasmparser 0.245.1",
  "xxhash-rust",
  "yara-x",
 ]
@@ -11316,9 +11332,11 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "base64 0.22.1",
+ "bytes",
  "cap-std 3.4.5",
  "chrono",
  "common",
+ "creg-unpack",
  "ed25519-dalek",
  "flate2",
  "hex",
@@ -11335,6 +11353,7 @@ dependencies = [
  "tempfile",
  "thiserror 1.0.69",
  "tokio",
+ "toml 0.8.23",
  "tracing",
  "uuid 1.22.0",
  "wasm-sandbox",

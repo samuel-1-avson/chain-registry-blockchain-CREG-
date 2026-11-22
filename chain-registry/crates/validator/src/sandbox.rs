@@ -406,21 +406,12 @@ fn compute_cache_key(tarball_bytes: &[u8], ecosystem: &str, config: &SandboxConf
 }
 
 async fn resolve_manifest_domains(hosts: &[String]) -> HashSet<String> {
+    // Pure deterministic literal-IP parsing (zero live DNS queries on consensus path; VNA-20).
     let mut resolved = HashSet::new();
     for host in hosts {
-        if host.parse::<IpAddr>().is_ok() {
-            resolved.insert(host.clone());
-            continue;
-        }
-        if let Ok(addrs) = tokio::net::lookup_host(format!("{}:443", host)).await {
-            for addr in addrs {
-                resolved.insert(addr.ip().to_string());
-            }
-        }
-        if let Ok(addrs) = tokio::net::lookup_host(format!("{}:80", host)).await {
-            for addr in addrs {
-                resolved.insert(addr.ip().to_string());
-            }
+        let normalized = host.trim().trim_end_matches('.');
+        if let Ok(ip) = normalized.parse::<IpAddr>() {
+            resolved.insert(ip.to_string());
         }
     }
     resolved
@@ -655,20 +646,14 @@ fn cache_result(key: &str, result: &SandboxResult) {
     }
 }
 
-/// Check if a tarball contains .wasm files (H1: WASM detection).
+/// Check if a tarball contains .wasm files (H1: WASM detection) via bounded `creg-unpack`.
 fn tarball_contains_wasm(tarball_bytes: &[u8]) -> bool {
-    use flate2::read::GzDecoder;
-    let decoder = GzDecoder::new(tarball_bytes);
-    if let Ok(mut archive) = tar::Archive::new(decoder).entries() {
-        while let Some(Ok(entry)) = archive.next() {
-            if let Ok(path) = entry.path() {
-                if path.extension().map_or(false, |ext| ext == "wasm") {
-                    return true;
-                }
-            }
-        }
-    }
-    false
+    let Ok(unpacked) = creg_unpack::unpack_tarball(tarball_bytes) else {
+        return false;
+    };
+    unpacked.files.iter().any(|file| {
+        file.path.to_ascii_lowercase().ends_with(".wasm") || file.raw_bytes.starts_with(b"\x00asm")
+    })
 }
 
 // ── Ecosystem Helpers ───────────────────────────────────────────────────────
@@ -1270,16 +1255,18 @@ fn check_against_manifest(
 ) -> Vec<Finding> {
     let mut findings = Vec::new();
 
-    // Undeclared network access — subdomain/IP matching.
+    // Undeclared network access — normalized domain/IP matching.
     for host in &obs.network_hosts {
-        let is_ip = host.parse::<IpAddr>().is_ok();
+        let norm_host = host.trim().trim_end_matches('.').to_ascii_lowercase();
+        let is_ip = norm_host.parse::<IpAddr>().is_ok();
         let allowed = if is_ip {
-            resolved_ips.contains(host)
+            resolved_ips.contains(&norm_host)
         } else {
-            manifest
-                .allowed_network_hosts
-                .iter()
-                .any(|declared| host == declared || host.ends_with(&format!(".{}", declared)))
+            manifest.allowed_network_hosts.iter().any(|declared| {
+                let norm_decl = declared.trim().trim_end_matches('.').to_ascii_lowercase();
+                !norm_decl.is_empty()
+                    && (norm_host == norm_decl || norm_host.ends_with(&format!(".{norm_decl}")))
+            })
         };
         if !allowed {
             findings.push(Finding {
@@ -1438,16 +1425,21 @@ mod tests {
 
     #[tokio::test]
     async fn test_resolve_manifest_domains() {
-        // Test with raw IPs
-        let hosts = vec!["127.0.0.1".to_string(), "8.8.8.8".to_string()];
+        // Test with raw IP literals (v4 and v6, ignoring trailing dots/whitespace)
+        let hosts = vec![
+            "127.0.0.1".to_string(),
+            "8.8.8.8.".to_string(),
+            " ::1 ".to_string(),
+        ];
         let resolved = resolve_manifest_domains(&hosts).await;
         assert!(resolved.contains("127.0.0.1"));
         assert!(resolved.contains("8.8.8.8"));
+        assert!(resolved.contains("::1"));
 
-        // Test with localhost (should resolve to 127.0.0.1)
-        let local_hosts = vec!["localhost".to_string()];
+        // Non-literal hostnames must not perform live OS DNS lookups (VNA-20 determinism).
+        let local_hosts = vec!["localhost".to_string(), "registry.example.com".to_string()];
         let resolved_local = resolve_manifest_domains(&local_hosts).await;
-        assert!(resolved_local.contains("127.0.0.1") || resolved_local.contains("::1"));
+        assert!(resolved_local.is_empty());
     }
 
     #[test]

@@ -29,7 +29,8 @@ pub use features::{FeatureExtractor, PackageFeatures};
 
 pub mod deep_scan;
 pub use deep_scan::{
-    deep_scan, DeepScanResult, DeepScanner, MlError, SuspiciousFile, ThreatClassification,
+    deep_scan, deep_scan_unpacked, DeepScanResult, DeepScanner, MlError, SuspiciousFile,
+    ThreatClassification,
 };
 pub use osv_snapshot::{
     bundle_epoch as osv_bundle_epoch, lookup_advisory as osv_lookup_advisory,
@@ -38,11 +39,22 @@ pub use osv_snapshot::{
     SCHEMA_V1,
 };
 
+pub mod ast_index;
+pub mod binary_inspect;
 pub mod osv_client;
 pub mod osv_snapshot;
 pub mod scanner_profile;
 pub mod threat_intel;
 pub mod yara_scanner;
+
+#[cfg(test)]
+pub(crate) fn env_test_lock() -> std::sync::MutexGuard<'static, ()> {
+    static ENV_LOCK: std::sync::OnceLock<std::sync::Mutex<()>> = std::sync::OnceLock::new();
+    ENV_LOCK
+        .get_or_init(|| std::sync::Mutex::new(()))
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
+}
 
 /// Threat level classification
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]

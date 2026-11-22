@@ -72,6 +72,15 @@ pub async fn apply_block(pool: &PgPool, block: &Block) -> Result<()> {
                 .execute(&mut *tx)
                 .await?;
             }
+            Transaction::RevokeV2 { request, .. } => {
+                sqlx::query(
+                    "UPDATE packages SET status = 'revoked', revocation_reason = $1 WHERE canonical = $2"
+                )
+                .bind(&request.reason)
+                .bind(&request.package_canonical)
+                .execute(&mut *tx)
+                .await?;
+            }
             Transaction::RotatePublisherKey {
                 canonical_prefix,
                 old_pubkey,

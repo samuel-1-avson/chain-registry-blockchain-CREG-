@@ -1,0 +1,18 @@
+[package]
+name = "creg-unpack"
+version = "0.1.0"
+edition = "2021"
+description = "Canonical streaming bounded raw-byte tarball extractor for Chain Registry"
+
+[dependencies]
+bytes = "=1.11.1"
+common = { path = "../common" }
+flate2 = "1"
+hex = { workspace = true }
+serde = { workspace = true }
+sha2 = { workspace = true }
+tar = "0.4"
+thiserror = { workspace = true }
+
+[lints]
+workspace = true

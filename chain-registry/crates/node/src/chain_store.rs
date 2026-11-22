@@ -12,9 +12,8 @@ use common::{
 };
 use rocksdb::{checkpoint::Checkpoint, ColumnFamilyDescriptor, Options, WriteOptions, DB};
 use semver;
-use sled;
 use std::{
-    collections::{BTreeMap, HashSet},
+    collections::{BTreeMap, HashMap, HashSet},
     path::{Path, PathBuf},
     sync::{Arc, Condvar, Mutex, OnceLock},
 };
@@ -67,6 +66,10 @@ const CF_TRANSPARENCY_EVENTS: &str = "transparency_events";
 const CF_TRANSPARENCY_LEAVES: &str = "transparency_leaves";
 const CF_TRANSPARENCY_HEADS: &str = "transparency_heads";
 const CF_REORG_JOURNAL: &str = "reorg_journal";
+const CF_PUBLISHER_INDEX: &str = "publisher_index";
+const PUB_IDX_STATS_PREFIX: &str = "stats\0";
+const PUB_IDX_PKG_PREFIX: &str = "pkg\0";
+const PUB_IDX_TIP_KEY: &[u8] = b"meta\0indexed_tip";
 const REORG_JOURNAL_KEY: &[u8] = b"active";
 const REORG_FINALIZED_WORK_PREFIX: &[u8] = b"finalized_work\0";
 const MAX_FINALIZED_WORK_RETRIES: u32 = 5;
@@ -109,6 +112,7 @@ fn is_reorg_requeueable_finalized_work(transaction: &Transaction) -> bool {
         Transaction::Publish(_)
             | Transaction::PublishAuthorizedV1 { .. }
             | Transaction::Revoke { .. }
+            | Transaction::RevokeV2 { .. }
             | Transaction::RotatePublisherKey { .. }
             | Transaction::NamespaceLifecycle(_)
             | Transaction::NamespaceLifecycleV2(_)
@@ -158,6 +162,7 @@ pub struct ChainStore {
     /// lock -> validator-set-history lock. Code holding this lock must never
     /// acquire `NodeState`.
     store_mutation_lock: Arc<StoreMutationMutex>,
+    read_only: bool,
     #[cfg(test)]
     reorg_begin_test_hook: Arc<Mutex<Option<ReorgBeginTestHook>>>,
 }
@@ -309,6 +314,14 @@ fn finalized_work_transaction_summary(transaction: &Transaction) -> serde_json::
             None,
             None,
         ),
+        Transaction::RevokeV2 { request, .. } => (
+            "revoke_v2",
+            Some(request.package_canonical.clone()),
+            Some(request.revoker_pubkey.clone()),
+            None,
+            None,
+            Some(request.chain_id.clone()),
+        ),
         _ => ("other", None, None, None, None, None),
     };
     serde_json::json!({
@@ -377,12 +390,8 @@ impl ChainStore {
                     &hash,
                     validator_count,
                 )
-            } else if let Transaction::Revoke {
-                package_canonical,
-                reason,
-                revoked_by,
-                ..
-            } = transaction
+            } else if let Some((package_canonical, reason, revoked_by, _)) =
+                transaction.revocation_target()
             {
                 match self.get_package(package_canonical) {
                     Ok(Some(_)) => crate::events::RegistryEvent::package_revoked(
@@ -815,6 +824,7 @@ impl ChainStore {
             ColumnFamilyDescriptor::new(CF_TRANSPARENCY_LEAVES, Options::default()),
             ColumnFamilyDescriptor::new(CF_TRANSPARENCY_HEADS, Options::default()),
             ColumnFamilyDescriptor::new(CF_REORG_JOURNAL, Options::default()),
+            ColumnFamilyDescriptor::new(CF_PUBLISHER_INDEX, Options::default()),
         ];
 
         let db = DB::open_cf_descriptors(&opts, &db_path, cfs).context("Failed to open RocksDB")?;
@@ -829,6 +839,7 @@ impl ChainStore {
             publisher_admission_nonce_lock: Arc::new(std::sync::Mutex::new(())),
             transparency_log_lock: Arc::new(std::sync::Mutex::new(())),
             store_mutation_lock: Arc::new(StoreMutationMutex::default()),
+            read_only: false,
             #[cfg(test)]
             reorg_begin_test_hook: Arc::new(Mutex::new(None)),
         };
@@ -868,7 +879,11 @@ impl ChainStore {
         }
 
         let opts = Options::default();
-        let cfs = vec![
+        let existing_cfs: HashSet<String> = DB::list_cf(&opts, &db_path)
+            .unwrap_or_default()
+            .into_iter()
+            .collect();
+        let mut cfs = vec![
             CF_BLOCKS_BY_HASH,
             CF_BLOCKS_BY_HEIGHT,
             CF_PACKAGES,
@@ -886,6 +901,9 @@ impl ChainStore {
             CF_TRANSPARENCY_HEADS,
             CF_REORG_JOURNAL,
         ];
+        if existing_cfs.contains(CF_PUBLISHER_INDEX) {
+            cfs.push(CF_PUBLISHER_INDEX);
+        }
         let db = DB::open_cf_for_read_only(&opts, &db_path, cfs, false)
             .context("Failed to open RocksDB in read-only mode")?;
 
@@ -899,6 +917,7 @@ impl ChainStore {
             publisher_admission_nonce_lock: Arc::new(std::sync::Mutex::new(())),
             transparency_log_lock: Arc::new(std::sync::Mutex::new(())),
             store_mutation_lock: Arc::new(StoreMutationMutex::default()),
+            read_only: true,
             #[cfg(test)]
             reorg_begin_test_hook: Arc::new(Mutex::new(None)),
         };
@@ -974,57 +993,119 @@ impl ChainStore {
         )
     }
 
-    /// Migrate data from a legacy sled database into this RocksDB store.
-    /// Call once at startup if the sled directory still exists.
-    pub fn migrate_from_sled(&self, sled_dir: &Path) -> Result<u64> {
+    pub(crate) fn data_dir(&self) -> &Path {
+        self.data_dir.as_path()
+    }
+
+    /// Load the persistent publisher index without O(N) block replay when
+    /// already synchronized with the canonical chain tip; otherwise backfill
+    /// missing heights incrementally or migrate a legacy database in place.
+    pub fn load_or_sync_publisher_index(&self) -> Result<crate::publisher_index::PublisherIndex> {
+        let tip = self.tip_height()?;
+        let Some(cf_pub) = self.db.cf_handle(CF_PUBLISHER_INDEX) else {
+            let mut index = crate::publisher_index::PublisherIndex::new();
+            for h in 0..=tip {
+                if let Some(block) = self.get_block_by_height(h)? {
+                    index.apply_block(&block);
+                }
+            }
+            return Ok(index);
+        };
+
+        let indexed_tip = self
+            .db
+            .get_cf(&cf_pub, PUB_IDX_TIP_KEY)?
+            .and_then(|bytes| <[u8; 8]>::try_from(bytes.as_slice()).ok())
+            .map(u64::from_be_bytes);
+
+        if let Some(t) = indexed_tip.filter(|t| *t <= tip) {
+            let mut stats_map = HashMap::new();
+            for item in self
+                .db
+                .prefix_iterator_cf(&cf_pub, PUB_IDX_STATS_PREFIX.as_bytes())
+            {
+                let (key_bytes, val_bytes) = item?;
+                if !key_bytes.starts_with(PUB_IDX_STATS_PREFIX.as_bytes()) {
+                    break;
+                }
+                let pubkey = String::from_utf8(key_bytes[PUB_IDX_STATS_PREFIX.len()..].to_vec())
+                    .context("non-UTF-8 publisher stats key")?;
+                let stats: crate::publisher_index::PublisherStats =
+                    serde_json::from_slice(&val_bytes)?;
+                stats_map.insert(pubkey, stats);
+            }
+            let mut canon_map = HashMap::new();
+            for item in self
+                .db
+                .prefix_iterator_cf(&cf_pub, PUB_IDX_PKG_PREFIX.as_bytes())
+            {
+                let (key_bytes, val_bytes) = item?;
+                if !key_bytes.starts_with(PUB_IDX_PKG_PREFIX.as_bytes()) {
+                    break;
+                }
+                let canonical = String::from_utf8(key_bytes[PUB_IDX_PKG_PREFIX.len()..].to_vec())
+                    .context("non-UTF-8 publisher package key")?;
+                let pubkey = String::from_utf8(val_bytes.to_vec())
+                    .context("non-UTF-8 publisher package mapping value")?;
+                canon_map.insert(canonical, pubkey);
+            }
+            let mut index =
+                crate::publisher_index::PublisherIndex::from_parts(stats_map, canon_map);
+            if t < tip {
+                for h in (t + 1)..=tip {
+                    if let Some(block) = self.get_block_by_height(h)? {
+                        index.apply_block(&block);
+                    }
+                }
+                if !self.read_only {
+                    self.write_publisher_index_to_db(&index, tip)?;
+                }
+            }
+            return Ok(index);
+        }
+
+        let mut index = crate::publisher_index::PublisherIndex::new();
+        for h in 0..=tip {
+            if let Some(block) = self.get_block_by_height(h)? {
+                index.apply_block(&block);
+            }
+        }
+        if !self.read_only {
+            self.write_publisher_index_to_db(&index, tip)?;
+        }
+        Ok(index)
+    }
+
+    fn write_publisher_index_to_db(
+        &self,
+        index: &crate::publisher_index::PublisherIndex,
+        indexed_tip: u64,
+    ) -> Result<()> {
         let _mutation = self.ensure_no_active_reorg()?;
-        let sled_db_path = sled_dir.join("chain.db");
-        if !sled_db_path.exists() {
-            return Ok(0);
+        let cf_pub = self
+            .db
+            .cf_handle(CF_PUBLISHER_INDEX)
+            .context("cf publisher_index")?;
+        let mut batch = rocksdb::WriteBatch::default();
+        let stale_keys: Vec<Box<[u8]>> = self
+            .db
+            .iterator_cf(&cf_pub, rocksdb::IteratorMode::Start)
+            .filter_map(|item| item.ok().map(|(k, _)| k))
+            .collect();
+        for k in stale_keys {
+            batch.delete_cf(&cf_pub, k);
         }
-        tracing::info!("Migrating data from sled → RocksDB ...");
-
-        let sled_db = sled::open(&sled_db_path).context("open legacy sled DB")?;
-        let mut migrated = 0u64;
-
-        // Migrate blocks_by_hash
-        if let Ok(tree) = sled_db.open_tree("blocks_by_hash") {
-            let cf = self
-                .db
-                .cf_handle(CF_BLOCKS_BY_HASH)
-                .context("cf blocks_by_hash")?;
-            for item in tree.iter() {
-                let (k, v) = item?;
-                self.db.put_cf(&cf, &k, &v)?;
-                migrated += 1;
-            }
+        for (pubkey, stats) in index.stats_entries() {
+            let key = format!("{PUB_IDX_STATS_PREFIX}{pubkey}");
+            batch.put_cf(&cf_pub, key.as_bytes(), &serde_json::to_vec(stats)?);
         }
-
-        // Migrate blocks_by_height
-        if let Ok(tree) = sled_db.open_tree("blocks_by_height") {
-            let cf = self
-                .db
-                .cf_handle(CF_BLOCKS_BY_HEIGHT)
-                .context("cf blocks_by_height")?;
-            for item in tree.iter() {
-                let (k, v) = item?;
-                self.db.put_cf(&cf, &k, &v)?;
-                migrated += 1;
-            }
+        for (canonical, pubkey) in index.canonical_mappings() {
+            let key = format!("{PUB_IDX_PKG_PREFIX}{canonical}");
+            batch.put_cf(&cf_pub, key.as_bytes(), pubkey.as_bytes());
         }
-
-        // Migrate packages
-        if let Ok(tree) = sled_db.open_tree("packages") {
-            let cf = self.db.cf_handle(CF_PACKAGES).context("cf packages")?;
-            for item in tree.iter() {
-                let (k, v) = item?;
-                self.db.put_cf(&cf, &k, &v)?;
-                migrated += 1;
-            }
-        }
-
-        tracing::info!("Migrated {} records from sled → RocksDB", migrated);
-        Ok(migrated)
+        batch.put_cf(&cf_pub, PUB_IDX_TIP_KEY, indexed_tip.to_be_bytes());
+        self.db.write_opt(batch, &Self::reorg_write_options())?;
+        Ok(())
     }
 
     // ── Block operations ─────────────────────────────────────────────────────
@@ -1228,6 +1309,10 @@ impl ChainStore {
             .db
             .cf_handle(CF_PUBLISHER_ROTATION)
             .context("cf publisher_rotation")?;
+        let cf_pub_index = self
+            .db
+            .cf_handle(CF_PUBLISHER_INDEX)
+            .context("cf publisher_index")?;
         // Clear the existing index.
         let keys: Vec<Box<[u8]>> = self
             .db
@@ -1261,6 +1346,7 @@ impl ChainStore {
             &cf_applied_publisher_authorization_nonces,
             &cf_namespace_delegations,
             &cf_publisher_rotation,
+            &cf_pub_index,
         ] {
             let keys: Vec<Box<[u8]>> = self
                 .db
@@ -1436,10 +1522,29 @@ impl ChainStore {
             .db
             .cf_handle(CF_PUBLISHER_ROTATION)
             .context("cf publisher_rotation")?;
+        let cf_pub_index = self
+            .db
+            .cf_handle(CF_PUBLISHER_INDEX)
+            .context("cf publisher_index")?;
+        let existing_indexed_tip = self
+            .db
+            .get_cf(&cf_pub_index, PUB_IDX_TIP_KEY)?
+            .and_then(|bytes| <[u8; 8]>::try_from(bytes.as_slice()).ok())
+            .map(u64::from_be_bytes);
+        let should_update_pub_index = existing_at_height.is_none()
+            || existing_indexed_tip.is_none()
+            || existing_indexed_tip.is_some_and(|t| block.header.height > t);
 
         // Use a WriteBatch for atomicity.
         let mut batch = rocksdb::WriteBatch::default();
         let mut lifecycle_nonces_in_block = HashSet::new();
+        let mut pkg_overlay: HashMap<String, ChainRecord> = HashMap::new();
+        let mut pub_stats_overlay: HashMap<String, crate::publisher_index::PublisherStats> =
+            HashMap::new();
+        let mut pub_canon_overlay: HashMap<String, String> = HashMap::new();
+        let mut pub_stats_deleted: HashSet<String> = HashSet::new();
+        let mut namespace_controllers_in_block: HashSet<String> = HashSet::new();
+
         // Preserve the first accepted encoding. A decoded/re-encoded block can
         // differ in JSON map order or carry a different valid PBFT quorum
         // subset/order; payload equality above makes that an idempotent replay
@@ -1449,7 +1554,7 @@ impl ChainStore {
         }
         batch.put_cf(&cf_height, height_key, hash.as_bytes());
 
-        // Index every Publish transaction into the package tree.
+        // Index every Publish, Revoke, Slash, and Rotate transaction atomically.
         for tx in &block.transactions {
             // A finalized block is the acknowledgement boundary for durable
             // work. Include this delete in the same RocksDB WriteBatch as the
@@ -1459,36 +1564,120 @@ impl ChainStore {
                 // Update block_hash to the real finalized hash before persisting.
                 let mut rec = record.clone();
                 rec.block_hash = hash.clone();
+                let canonical = rec.id.canonical();
                 let rec_bytes = serde_json::to_vec(&rec)?;
-                batch.put_cf(&cf_pkg, rec.id.canonical().as_bytes(), &rec_bytes);
+                batch.put_cf(&cf_pkg, canonical.as_bytes(), &rec_bytes);
+                if should_update_pub_index {
+                    let pubkey = rec.publisher_pubkey.clone();
+                    pub_canon_overlay.insert(canonical.clone(), pubkey.clone());
+                    let mut stats = if let Some(s) = pub_stats_overlay.get(&pubkey) {
+                        s.clone()
+                    } else if !pub_stats_deleted.contains(&pubkey) {
+                        let key = format!("{PUB_IDX_STATS_PREFIX}{pubkey}");
+                        self.db
+                            .get_cf(&cf_pub_index, key.as_bytes())?
+                            .and_then(|b| serde_json::from_slice(&b).ok())
+                            .unwrap_or_else(|| crate::publisher_index::PublisherStats {
+                                pubkey: pubkey.clone(),
+                                ..Default::default()
+                            })
+                    } else {
+                        crate::publisher_index::PublisherStats {
+                            pubkey: pubkey.clone(),
+                            ..Default::default()
+                        }
+                    };
+                    pub_stats_deleted.remove(&pubkey);
+                    stats.total_packages += 1;
+                    stats.verified_count += 1;
+                    if stats.first_seen_at.is_none() {
+                        stats.first_seen_at = Some(block.header.timestamp);
+                    }
+                    stats.first_seen_days = stats.account_age_days_at(block.header.timestamp);
+                    pub_stats_overlay.insert(pubkey, stats);
+                }
                 if matches!(tx, common::Transaction::Publish(_)) {
                     let namespace = common::package_namespace_prefix(&rec.id);
-                    if self
-                        .db
-                        .get_cf(&cf_namespace_controllers, namespace.as_bytes())?
-                        .is_none()
+                    if !namespace_controllers_in_block.contains(&namespace)
+                        && self
+                            .db
+                            .get_cf(&cf_namespace_controllers, namespace.as_bytes())?
+                            .is_none()
                     {
                         batch.put_cf(
                             &cf_namespace_controllers,
                             namespace.as_bytes(),
                             rec.publisher_pubkey.as_bytes(),
                         );
+                        namespace_controllers_in_block.insert(namespace);
+                    }
+                }
+                pkg_overlay.insert(canonical, rec);
+            }
+            if let Some((package_canonical, reason, _, _)) = tx.revocation_target() {
+                let existing_rec = if let Some(rec) = pkg_overlay.get(package_canonical) {
+                    Some(rec.clone())
+                } else {
+                    self.db
+                        .get_cf(&cf_pkg, package_canonical.as_bytes())?
+                        .and_then(|existing| serde_json::from_slice::<ChainRecord>(&existing).ok())
+                };
+                if let Some(mut rec) = existing_rec {
+                    rec.status = PackageStatus::Revoked {
+                        reason: reason.to_string(),
+                    };
+                    let updated = serde_json::to_vec(&rec)?;
+                    batch.put_cf(&cf_pkg, package_canonical.as_bytes(), &updated);
+                    pkg_overlay.insert(package_canonical.to_string(), rec);
+                }
+                if should_update_pub_index {
+                    let mapped_pubkey = if let Some(pk) = pub_canon_overlay.get(package_canonical) {
+                        Some(pk.clone())
+                    } else {
+                        let key = format!("{PUB_IDX_PKG_PREFIX}{package_canonical}");
+                        self.db
+                            .get_cf(&cf_pub_index, key.as_bytes())?
+                            .and_then(|v| String::from_utf8(v.to_vec()).ok())
+                    };
+                    if let Some(pubkey) = mapped_pubkey {
+                        let existing_stats = if let Some(s) = pub_stats_overlay.get(&pubkey) {
+                            Some(s.clone())
+                        } else if !pub_stats_deleted.contains(&pubkey) {
+                            let key = format!("{PUB_IDX_STATS_PREFIX}{pubkey}");
+                            self.db
+                                .get_cf(&cf_pub_index, key.as_bytes())?
+                                .and_then(|b| serde_json::from_slice(&b).ok())
+                        } else {
+                            None
+                        };
+                        if let Some(mut stats) = existing_stats {
+                            stats.verified_count = stats.verified_count.saturating_sub(1);
+                            stats.revoked_count += 1;
+                            pub_stats_overlay.insert(pubkey, stats);
+                        }
                     }
                 }
             }
-            if let common::Transaction::Revoke {
-                package_canonical,
-                reason,
+            if let common::Transaction::Slash {
+                validator_id,
+                amount,
                 ..
             } = tx
             {
-                if let Some(existing) = self.db.get_cf(&cf_pkg, package_canonical.as_bytes())? {
-                    if let Ok(mut rec) = serde_json::from_slice::<ChainRecord>(&existing) {
-                        rec.status = PackageStatus::Revoked {
-                            reason: reason.clone(),
-                        };
-                        let updated = serde_json::to_vec(&rec)?;
-                        batch.put_cf(&cf_pkg, package_canonical.as_bytes(), &updated);
+                if should_update_pub_index {
+                    let existing_stats = if let Some(s) = pub_stats_overlay.get(validator_id) {
+                        Some(s.clone())
+                    } else if !pub_stats_deleted.contains(validator_id) {
+                        let key = format!("{PUB_IDX_STATS_PREFIX}{validator_id}");
+                        self.db
+                            .get_cf(&cf_pub_index, key.as_bytes())?
+                            .and_then(|b| serde_json::from_slice(&b).ok())
+                    } else {
+                        None
+                    };
+                    if let Some(mut stats) = existing_stats {
+                        stats.stake_wei = stats.stake_wei.saturating_sub(*amount);
+                        pub_stats_overlay.insert(validator_id.clone(), stats);
                     }
                 }
             }
@@ -1507,12 +1696,28 @@ impl ChainStore {
                     if !key_bytes.starts_with(prefix) {
                         break;
                     }
-                    if let Ok(mut rec) = serde_json::from_slice::<ChainRecord>(&val_bytes) {
-                        if rec.publisher_pubkey == *old_pubkey {
-                            rec.publisher_pubkey = new_pubkey.clone();
-                            if let Ok(updated) = serde_json::to_vec(&rec) {
-                                batch.put_cf(&cf_pkg, &*key_bytes, &updated);
+                    if let Ok(key_str) = std::str::from_utf8(&key_bytes) {
+                        if pkg_overlay.contains_key(key_str) {
+                            continue;
+                        }
+                        if let Ok(mut rec) = serde_json::from_slice::<ChainRecord>(&val_bytes) {
+                            if rec.publisher_pubkey == *old_pubkey {
+                                rec.publisher_pubkey = new_pubkey.clone();
+                                if let Ok(updated) = serde_json::to_vec(&rec) {
+                                    batch.put_cf(&cf_pkg, &*key_bytes, &updated);
+                                }
+                                pkg_overlay.insert(key_str.to_string(), rec);
                             }
+                        }
+                    }
+                }
+                for (canonical, rec) in pkg_overlay.iter_mut() {
+                    if canonical.starts_with(canonical_prefix)
+                        && rec.publisher_pubkey == *old_pubkey
+                    {
+                        rec.publisher_pubkey = new_pubkey.clone();
+                        if let Ok(updated) = serde_json::to_vec(rec) {
+                            batch.put_cf(&cf_pkg, canonical.as_bytes(), &updated);
                         }
                     }
                 }
@@ -1527,6 +1732,48 @@ impl ChainStore {
                         canonical_prefix.as_bytes(),
                         new_pubkey.as_bytes(),
                     );
+                }
+                if should_update_pub_index {
+                    let idx_prefix = format!("{PUB_IDX_PKG_PREFIX}{canonical_prefix}");
+                    for item in self
+                        .db
+                        .prefix_iterator_cf(&cf_pub_index, idx_prefix.as_bytes())
+                    {
+                        let (key_bytes, val_bytes) = item?;
+                        if !key_bytes.starts_with(idx_prefix.as_bytes()) {
+                            break;
+                        }
+                        if let Ok(canonical) =
+                            std::str::from_utf8(&key_bytes[PUB_IDX_PKG_PREFIX.len()..])
+                        {
+                            if !pub_canon_overlay.contains_key(canonical)
+                                && val_bytes.as_ref() == old_pubkey.as_bytes()
+                            {
+                                pub_canon_overlay.insert(canonical.to_string(), new_pubkey.clone());
+                            }
+                        }
+                    }
+                    for (canonical, pubkey) in pub_canon_overlay.iter_mut() {
+                        if canonical.starts_with(canonical_prefix) && pubkey == old_pubkey {
+                            *pubkey = new_pubkey.clone();
+                        }
+                    }
+                    let old_stats = if let Some(stats) = pub_stats_overlay.remove(old_pubkey) {
+                        Some(stats)
+                    } else if !pub_stats_deleted.contains(old_pubkey) {
+                        let key = format!("{PUB_IDX_STATS_PREFIX}{old_pubkey}");
+                        self.db
+                            .get_cf(&cf_pub_index, key.as_bytes())?
+                            .and_then(|b| serde_json::from_slice(&b).ok())
+                    } else {
+                        None
+                    };
+                    if let Some(mut stats) = old_stats {
+                        pub_stats_deleted.insert(old_pubkey.clone());
+                        pub_stats_deleted.remove(new_pubkey);
+                        stats.pubkey = new_pubkey.clone();
+                        pub_stats_overlay.insert(new_pubkey.clone(), stats);
+                    }
                 }
                 let record = PublisherRotationIndex {
                     nonce: *nonce,
@@ -1608,6 +1855,21 @@ impl ChainStore {
         }
         for key in namespace_effects.lifecycle_nonce_keys {
             batch.put_cf(&cf_applied_namespace_lifecycle_nonces, key.as_bytes(), b"");
+        }
+        if should_update_pub_index {
+            for pubkey in pub_stats_deleted {
+                let key = format!("{PUB_IDX_STATS_PREFIX}{pubkey}");
+                batch.delete_cf(&cf_pub_index, key.as_bytes());
+            }
+            for (pubkey, stats) in pub_stats_overlay {
+                let key = format!("{PUB_IDX_STATS_PREFIX}{pubkey}");
+                batch.put_cf(&cf_pub_index, key.as_bytes(), &serde_json::to_vec(&stats)?);
+            }
+            for (canonical, pubkey) in pub_canon_overlay {
+                let key = format!("{PUB_IDX_PKG_PREFIX}{canonical}");
+                batch.put_cf(&cf_pub_index, key.as_bytes(), pubkey.as_bytes());
+            }
+            batch.put_cf(&cf_pub_index, PUB_IDX_TIP_KEY, height_key);
         }
 
         // Inclusion and queue acknowledgement share one synchronous commit.
@@ -3612,6 +3874,7 @@ mod tests {
                 trust_root_sha256: "c".repeat(64),
             }],
             policy_source_verified: true,
+            validator_set_bootstrap: None,
         };
         store
             .configure_namespace_consensus(config.clone())
@@ -4485,5 +4748,107 @@ mod tests {
                 .kind,
             "revocation"
         );
+    }
+
+    #[test]
+    fn publisher_index_hydrates_incrementally_and_supports_read_only() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let pubkey = "11".repeat(32);
+        let owner_key = common::crypto::SigningKey::from_ed25519_seed(&[11u8; 32]);
+        let owner_pub = owner_key.public_key().to_hex();
+        assert_eq!(owner_pub.len(), 64);
+
+        {
+            let store = ChainStore::open(dir.path()).expect("open rw");
+            let genesis = store.get_block_by_height(0).unwrap().unwrap();
+            let pkg1 = common::PackageId::new("npm", "idx-a", "1.0.0");
+            let rec1 = ChainRecord {
+                id: pkg1.clone(),
+                content_hash: "a".repeat(64),
+                ipfs_cid: "cid-a".into(),
+                publisher_pubkey: owner_pub.clone(),
+                published_at: DateTime::from_timestamp(1_700_000_005, 0).unwrap(),
+                status: PackageStatus::Verified,
+                ..Default::default()
+            };
+            let mut revoke_req = common::SignedRevocationRequest {
+                chain_id: "creg-test".into(),
+                genesis_hash: genesis.hash(),
+                package_canonical: pkg1.canonical(),
+                reason: "bad release".into(),
+                revoker_pubkey: owner_pub.clone(),
+                signature: String::new(),
+                signature_version: 1,
+            };
+            revoke_req.signature = owner_key
+                .sign(revoke_req.signing_message().as_bytes())
+                .to_hex();
+            let b1_txs = vec![Transaction::Publish(rec1)];
+            let b1 = Block {
+                header: common::BlockHeader {
+                    height: 1,
+                    prev_hash: genesis.hash(),
+                    merkle_root: common::merkle_root(&b1_txs),
+                    proposer_id: "v1".into(),
+                    timestamp: genesis.header.timestamp + chrono::Duration::seconds(10),
+                    validator_set_hash: genesis.header.validator_set_hash.clone(),
+                    vrf_output: None,
+                    vrf_proof: None,
+                    view_number: 0,
+                    view_change_certificate: Vec::new(),
+                },
+                transactions: b1_txs,
+                pbft_signatures: vec![],
+            };
+            store.insert_block(&b1).expect("insert b1");
+
+            let b2_txs = vec![Transaction::RevokeV2 {
+                request: revoke_req,
+                evidence_hash: pubkey.clone(),
+            }];
+            let b2 = Block {
+                header: common::BlockHeader {
+                    height: 2,
+                    prev_hash: b1.hash(),
+                    merkle_root: common::merkle_root(&b2_txs),
+                    proposer_id: "v1".into(),
+                    timestamp: genesis.header.timestamp + chrono::Duration::seconds(20),
+                    validator_set_hash: genesis.header.validator_set_hash,
+                    vrf_output: None,
+                    vrf_proof: None,
+                    view_number: 0,
+                    view_change_certificate: Vec::new(),
+                },
+                transactions: b2_txs,
+                pbft_signatures: vec![],
+            };
+            store.insert_block(&b2).expect("insert b2");
+            let cf_pub = store.db.cf_handle(CF_PUBLISHER_INDEX).unwrap();
+            let tip_val = store.db.get_cf(&cf_pub, PUB_IDX_TIP_KEY).unwrap().unwrap();
+            assert_eq!(u64::from_be_bytes(tip_val.try_into().unwrap()), 2);
+        }
+
+        // Read-only handle works and reads persisted publisher index at tip 2.
+        {
+            let ro = ChainStore::open_read_only(dir.path()).expect("open ro");
+            let idx = ro.load_or_sync_publisher_index().expect("load ro index");
+            let st = idx.get(&owner_pub).expect("stats present");
+            assert_eq!(st.total_packages, 1);
+            assert_eq!(st.verified_count, 0);
+            assert_eq!(st.revoked_count, 1);
+        }
+
+        // Simulate restart with missing indexed_tip (legacy backfill) and verify recovery.
+        {
+            let store = ChainStore::open(dir.path()).expect("reopen rw");
+            let cf_pub = store.db.cf_handle(CF_PUBLISHER_INDEX).unwrap();
+            store.db.delete_cf(&cf_pub, PUB_IDX_TIP_KEY).unwrap();
+            let idx = store.load_or_sync_publisher_index().expect("backfill");
+            let st = idx.get(&owner_pub).expect("stats present after backfill");
+            assert_eq!(st.total_packages, 1);
+            assert_eq!(st.revoked_count, 1);
+            let tip_val = store.db.get_cf(&cf_pub, PUB_IDX_TIP_KEY).unwrap().unwrap();
+            assert_eq!(u64::from_be_bytes(tip_val.try_into().unwrap()), 2);
+        }
     }
 }

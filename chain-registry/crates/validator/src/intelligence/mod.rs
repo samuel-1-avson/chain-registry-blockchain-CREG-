@@ -7,9 +7,6 @@ use common::{
     AgentStep, ChainRecord, ConsensusAdvisorySnapshot, Finding, IntelligenceSections,
     IntelligenceStatus, PackageIntelligenceReport, INTELLIGENCE_SCHEMA_V1,
 };
-use flate2::read::GzDecoder;
-use std::io::Read;
-use tar::Archive;
 
 use crate::llm::{self, RiskTier};
 
@@ -132,43 +129,27 @@ fn trace_step(
 }
 
 fn explore_tarball(tarball: &[u8], record: &ChainRecord) -> String {
-    let mut decoder = GzDecoder::new(tarball);
-    let mut decoded = Vec::new();
-    if decoder.read_to_end(&mut decoded).is_err() {
-        return format!(
-            "Could not decompress tarball for {}; using manifest metadata only",
-            record.id.canonical()
-        );
-    }
-
-    let mut archive = Archive::new(&decoded[..]);
-    let mut entries = match archive.entries() {
-        Ok(entries) => entries,
-        Err(_) => {
-            return "Invalid tar archive".into();
+    let unpacked = match creg_unpack::unpack_tarball(tarball) {
+        Ok(u) => u,
+        Err(err) => {
+            return format!(
+                "Could not unpack tarball for {} ({err}); using manifest metadata only",
+                record.id.canonical()
+            );
         }
     };
 
-    let mut file_count = 0usize;
-    let mut total_bytes = 0usize;
     let mut top_dirs = std::collections::BTreeSet::new();
-
-    while let Some(Ok(entry)) = entries.next() {
-        if let Ok(path) = entry.path() {
-            file_count += 1;
-            if let Ok(meta) = entry.header().size() {
-                total_bytes = total_bytes.saturating_add(meta as usize);
-            }
-            if let Some(first) = path.components().next() {
-                top_dirs.insert(first.as_os_str().to_string_lossy().to_string());
-            }
+    for file in &unpacked.files {
+        if let Some(first) = file.path.split('/').next() {
+            top_dirs.insert(first.to_string());
         }
     }
 
     format!(
         "{} files (~{} KB), top-level: [{}]",
-        file_count,
-        total_bytes / 1024,
+        unpacked.files.len(),
+        unpacked.total_uncompressed_bytes / 1024,
         top_dirs.into_iter().take(8).collect::<Vec<_>>().join(", ")
     )
 }

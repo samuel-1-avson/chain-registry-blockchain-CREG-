@@ -70,45 +70,6 @@ fn adopt_or_reject_spec_contract(
 }
 
 #[derive(Debug, Clone)]
-pub enum NodeMode {
-    /// Full mode: Store everything (500GB+, 16GB RAM)
-    Full,
-    /// Pruned mode: Store last 30 days (200GB, 8GB RAM)
-    Pruned,
-    /// Light mode: Current state only (100GB, 4-8GB RAM)
-    Light,
-}
-
-impl Default for NodeMode {
-    fn default() -> Self {
-        NodeMode::Pruned
-    }
-}
-
-#[derive(Debug, Clone)]
-pub struct PruningConfig {
-    /// Keep packages for X days, then archive to IPFS
-    pub package_retention_days: u32,
-    /// Keep full block history or just headers
-    pub keep_full_blocks: bool,
-    /// Prune interval (every X blocks)
-    pub prune_interval: u64,
-    /// Max database size before forced pruning (GB)
-    pub max_db_size_gb: u32,
-}
-
-impl Default for PruningConfig {
-    fn default() -> Self {
-        Self {
-            package_retention_days: 30,
-            keep_full_blocks: false,
-            prune_interval: 1000,
-            max_db_size_gb: 150,
-        }
-    }
-}
-
-#[derive(Debug, Clone)]
 pub struct CorsConfig {
     pub allowed_origins: Vec<String>,
     pub allowed_methods: Vec<String>,
@@ -213,7 +174,7 @@ impl CorsConfig {
     }
 }
 
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone)]
 pub struct NodeConfig {
     /// Logical chain identifier (e.g. "creg-testnet-1"). Used as part of the
     /// network identity hash so a node configured for one chain cannot
@@ -232,8 +193,20 @@ pub struct NodeConfig {
     pub namespace_authority_policy_source_verified: bool,
     /// Retains fail-closed parsing errors instead of silently disabling CR-07.
     pub namespace_authority_config_errors: Vec<String>,
+    /// Retains fail-closed secrets backend / Vault exclusivity errors (`VNA-25`).
+    pub secrets_config_errors: Vec<String>,
     /// HTTP bind address for the REST API.
     pub listen_addr: String,
+    /// Optional dedicated loopback/admin bind address for `/metrics`,
+    /// `/api-docs`, and operator routes (`VNA-32`).
+    pub admin_listen_addr: Option<String>,
+    /// Whether `/metrics`, `/api-docs`, and `/v1/openapi.json` are served
+    /// unauthenticated on the primary public HTTP port (`VNA-32`).
+    pub expose_public_metrics_docs: bool,
+    /// Whether the gRPC service is enabled (`CREG_GRPC_ENABLED`, default false; `VNA-04`).
+    pub grpc_enabled: bool,
+    /// gRPC bind address (`CREG_GRPC_LISTEN`, default `127.0.0.1:50051`; `VNA-04`).
+    pub grpc_listen_addr: String,
     /// Persistent data directory (chain + pending pool).
     pub data_dir: PathBuf,
     /// P2P listen address (Multiaddr format).
@@ -259,13 +232,10 @@ pub struct NodeConfig {
     pub pinning_rewards_addr: Option<String>,
     /// Unique ID for this node (hex-encoded public key in production).
     pub node_id: String,
-    /// This node's Ed25519 private key (hex). Used to sign validator votes.
-    pub validator_privkey: Option<String>,
-    /// Separate secp256k1 private key for Ethereum bridge operations.
-    /// If unset, falls back to `validator_privkey` (legacy single-key mode).
-    /// Setting a dedicated bridge key reduces blast radius: compromise of
-    /// one key does not affect the other. (I4 improvement)
-    pub bridge_privkey: Option<String>,
+    /// This node's Ed25519 private key (hex), zeroizing & redacted in `Debug` (`VNA-25`).
+    pub validator_privkey: Option<chain_registry_secrets::SecretString>,
+    /// Separate secp256k1 private key for Ethereum bridge operations, zeroizing & redacted (`VNA-25`).
+    pub bridge_privkey: Option<chain_registry_secrets::SecretString>,
     /// Whether this node is a validator (votes on packages).
     pub is_validator: bool,
     /// Peer node URLs for gossip and consensus message forwarding.
@@ -280,10 +250,6 @@ pub struct NodeConfig {
     pub pg_url: String,
     /// The set of active validators (JSON-encoded).
     pub validator_set: common::ValidatorSet,
-    /// Node operation mode (Full/Pruned/Light)
-    pub mode: NodeMode,
-    /// Pruning configuration
-    pub pruning: PruningConfig,
     /// Max peers for low-bandwidth environments
     pub max_peers: usize,
     /// Browser CORS policy for the REST API.
@@ -301,23 +267,53 @@ pub struct NodeConfig {
     pub threshold_encryption: bool,
 }
 
+impl Default for NodeConfig {
+    fn default() -> Self {
+        Self {
+            chain_id: String::new(),
+            network_genesis_hash: String::new(),
+            namespace_authority_activation_height: None,
+            namespace_authority_policies: Vec::new(),
+            namespace_authority_policy_source_verified: false,
+            namespace_authority_config_errors: Vec::new(),
+            secrets_config_errors: Vec::new(),
+            listen_addr: String::new(),
+            admin_listen_addr: None,
+            expose_public_metrics_docs: true,
+            grpc_enabled: false,
+            grpc_listen_addr: "127.0.0.1:50051".to_string(),
+            data_dir: PathBuf::new(),
+            p2p_listen: String::new(),
+            p2p_seeds: Vec::new(),
+            eth_rpc_url: String::new(),
+            registry_addr: String::new(),
+            governance_addr: String::new(),
+            token_addr: String::new(),
+            staking_addr: String::new(),
+            validator_rewards_addr: String::new(),
+            treasury_addr: None,
+            pinning_rewards_addr: None,
+            node_id: String::new(),
+            validator_privkey: None,
+            bridge_privkey: None,
+            is_validator: false,
+            peers: Vec::new(),
+            block_interval_secs: 0,
+            vote_timeout_secs: 0,
+            ipfs_url: String::new(),
+            pg_url: String::new(),
+            validator_set: common::ValidatorSet::default(),
+            max_peers: 0,
+            cors: CorsConfig::default(),
+            is_testnet: false,
+            zk_validation: false,
+            threshold_encryption: false,
+        }
+    }
+}
+
 impl NodeConfig {
     pub async fn load() -> Self {
-        let mode = match env("CREG_NODE_MODE", "pruned").as_str() {
-            "full" => NodeMode::Full,
-            "light" => NodeMode::Light,
-            _ => NodeMode::Pruned,
-        };
-
-        let pruning = PruningConfig {
-            package_retention_days: env("CREG_PACKAGE_RETENTION_DAYS", "30")
-                .parse()
-                .unwrap_or(30),
-            keep_full_blocks: env("CREG_KEEP_FULL_BLOCKS", "false") == "true",
-            prune_interval: env("CREG_PRUNE_INTERVAL", "1000").parse().unwrap_or(1000),
-            max_db_size_gb: env("CREG_MAX_DB_SIZE_GB", "150").parse().unwrap_or(150),
-        };
-
         let max_peers = env("CREG_MAX_PEERS", "15").parse().unwrap_or(15);
 
         let mut namespace_authority_config_errors = Vec::new();
@@ -354,6 +350,14 @@ impl NodeConfig {
                 }
             };
 
+        let admin_listen_addr = nonempty_env("CREG_ADMIN_LISTEN");
+        let expose_public_metrics_docs = match nonempty_env("CREG_EXPOSE_PUBLIC_METRICS_DOCS") {
+            Some(raw) => common::is_truthy_flag(&raw),
+            None => !creg_public_validator() && admin_listen_addr.is_none(),
+        };
+        let grpc_enabled = common::parse_env_bool("CREG_GRPC_ENABLED");
+        let grpc_listen_addr = env("CREG_GRPC_LISTEN", "127.0.0.1:50051");
+
         let mut config = Self {
             chain_id: env("CREG_CHAIN_ID", ""),
             network_genesis_hash: env("CREG_GENESIS_HASH", "")
@@ -364,12 +368,17 @@ impl NodeConfig {
             namespace_authority_policies,
             namespace_authority_policy_source_verified: false,
             namespace_authority_config_errors,
+            secrets_config_errors: Vec::new(),
             listen_addr: env("CREG_LISTEN", "0.0.0.0:8080"),
+            admin_listen_addr,
+            expose_public_metrics_docs,
+            grpc_enabled,
+            grpc_listen_addr,
             data_dir: PathBuf::from(env("CREG_DATA_DIR", "./data")),
             node_id: env("CREG_NODE_ID", &Uuid::new_v4().to_string()),
-            validator_privkey: std::env::var("CREG_VALIDATOR_KEY").ok(),
+            validator_privkey: None,
             bridge_privkey: None,
-            is_validator: env("CREG_IS_VALIDATOR", "false") == "true",
+            is_validator: common::parse_env_bool("CREG_IS_VALIDATOR"),
             peers: std::env::var("CREG_PEERS")
                 .unwrap_or_default()
                 .split(',')
@@ -410,31 +419,43 @@ impl NodeConfig {
             pg_url: env("CREG_PG_URL", ""),
             validator_set: serde_json::from_str(&env("CREG_VALIDATOR_SET", "{\"validators\":[]}"))
                 .unwrap_or_else(|_| common::ValidatorSet::new(vec![])),
-            mode,
-            pruning,
             max_peers,
             cors: CorsConfig::from_env(),
-            is_testnet: env("CREG_TESTNET", "false") == "true",
+            is_testnet: common::parse_env_bool("CREG_TESTNET"),
             zk_validation: false,
             threshold_encryption: false,
         };
 
-        if let Ok(secrets) = chain_registry_secrets::SecretsProvider::from_env() {
-            if let Ok(Some(bk)) = secrets
-                .try_secp256k1_signing_key_hex(chain_registry_secrets::HotKeyRole::Bridge)
-                .await
-            {
-                config.bridge_privkey = Some(bk);
-            }
-            if config.validator_privkey.is_none() {
-                if let Ok(Some(vk)) = secrets
-                    .try_secp256k1_signing_key_hex(
-                        chain_registry_secrets::HotKeyRole::ValidatorEd25519,
-                    )
+        match chain_registry_secrets::SecretsProvider::from_env() {
+            Ok(secrets) => {
+                config.secrets_config_errors.extend(
+                    chain_registry_secrets::validate_vault_exclusivity(secrets.backend()),
+                );
+                match secrets
+                    .try_signing_key_secret(chain_registry_secrets::HotKeyRole::Bridge)
                     .await
                 {
-                    config.validator_privkey = Some(vk);
+                    Ok(Some(bk)) => config.bridge_privkey = Some(bk),
+                    Ok(None) => {}
+                    Err(err) => config.secrets_config_errors.push(format!(
+                        "failed to load bridge key from secrets backend: {err}"
+                    )),
                 }
+                match secrets
+                    .try_signing_key_secret(chain_registry_secrets::HotKeyRole::ValidatorEd25519)
+                    .await
+                {
+                    Ok(Some(vk)) => config.validator_privkey = Some(vk),
+                    Ok(None) => {}
+                    Err(err) => config.secrets_config_errors.push(format!(
+                        "failed to load validator key from secrets backend: {err}"
+                    )),
+                }
+            }
+            Err(err) => {
+                config
+                    .secrets_config_errors
+                    .push(format!("CREG_SECRETS_BACKEND initialization failed: {err}"));
             }
         }
 
@@ -445,6 +466,7 @@ impl NodeConfig {
     /// Call this at startup before opening any resources.
     pub fn validate(&self) -> Vec<String> {
         let mut errors = self.namespace_authority_config_errors.clone();
+        errors.extend(self.secrets_config_errors.iter().cloned());
 
         let is_zero_like = |value: &str| {
             let trimmed = value.trim();
@@ -505,7 +527,10 @@ impl NodeConfig {
 
         // Validate the key is proper hex if set (strip optional 0x prefix).
         if let Some(key) = &self.validator_privkey {
-            let raw = key.strip_prefix("0x").unwrap_or(key.as_str());
+            let raw = key
+                .expose_secret()
+                .strip_prefix("0x")
+                .unwrap_or(key.expose_secret());
             match hex::decode(raw) {
                 Ok(bytes) if bytes.len() == 32 => {}
                 Ok(bytes) => errors.push(format!(
@@ -518,7 +543,10 @@ impl NodeConfig {
 
         // Validate the dedicated bridge key if set (I4). Strip optional 0x prefix.
         if let Some(key) = &self.bridge_privkey {
-            let raw = key.strip_prefix("0x").unwrap_or(key.as_str());
+            let raw = key
+                .expose_secret()
+                .strip_prefix("0x")
+                .unwrap_or(key.expose_secret());
             match hex::decode(raw) {
                 Ok(bytes) if bytes.len() == 32 => {}
                 Ok(bytes) => errors.push(format!(
@@ -605,6 +633,34 @@ impl NodeConfig {
             errors.push("CREG_BLOCK_INTERVAL must be > 0 seconds".into());
         }
 
+        if self.grpc_enabled {
+            match self.grpc_listen_addr.parse::<std::net::SocketAddr>() {
+                Ok(addr) => {
+                    if creg_public_validator()
+                        && !addr.ip().is_loopback()
+                        && !common::parse_env_bool("CREG_GRPC_ALLOW_PUBLIC")
+                    {
+                        errors.push(format!(
+                            "CREG_GRPC_LISTEN={} exposes plaintext gRPC on a public validator; bind to 127.0.0.1 or set CREG_GRPC_ALLOW_PUBLIC=true behind mTLS",
+                            self.grpc_listen_addr
+                        ));
+                    }
+                }
+                Err(err) => errors.push(format!(
+                    "CREG_GRPC_LISTEN is invalid ({}): {err}",
+                    self.grpc_listen_addr
+                )),
+            }
+        }
+
+        if let Some(ref admin_addr) = self.admin_listen_addr {
+            if let Err(err) = admin_addr.parse::<std::net::SocketAddr>() {
+                errors.push(format!(
+                    "CREG_ADMIN_LISTEN is invalid ({admin_addr}): {err}"
+                ));
+            }
+        }
+
         // Validator-set pubkey sanity. An entry with an empty / zero pubkey can
         // never have its votes verified, so it would silently disable quorum
         // for that validator and skew the active count. Reject at boot.
@@ -633,12 +689,11 @@ impl NodeConfig {
             }
         }
 
-        if let Some(error) = zk_validator::ZkValidator::production_missing_package_keys_error(
-            self.zk_validation,
-            zk_validator::production_guard_active(),
-            &zk_validator::ZkValidator::keys_dir(),
-        ) {
-            errors.push(error);
+        if self.zk_validation {
+            errors.push(
+                "zk_validation is retired (ADR-018 / VNA-22) and cannot be enabled in node runtime"
+                    .to_string(),
+            );
         }
 
         errors
@@ -689,7 +744,7 @@ impl NodeConfig {
 
         let mut errors = Vec::new();
 
-        if std::env::var("CREG_DEV_SANDBOX").as_deref() == Ok("true") {
+        if common::parse_env_bool("CREG_DEV_SANDBOX") {
             errors.push(
                 "CREG_DEV_SANDBOX=true is not allowed when CREG_TESTNET=false — \
                  behavioural sandbox bypass must not run on production networks."
@@ -697,7 +752,7 @@ impl NodeConfig {
             );
         }
 
-        if std::env::var("CREG_PBFT_ALLOW_SMALL_CLUSTER_QUORUM").as_deref() == Ok("true") {
+        if common::parse_env_bool("CREG_PBFT_ALLOW_SMALL_CLUSTER_QUORUM") {
             errors.push(
                 "CREG_PBFT_ALLOW_SMALL_CLUSTER_QUORUM=true is not allowed when CREG_TESTNET=false — \
                  relaxed PBFT quorum weakens BFT guarantees. Use a full validator set or enable testnet mode."
@@ -909,24 +964,16 @@ fn parse_csv(raw: &str) -> Vec<String> {
 }
 
 fn env_flag_true(name: &str) -> bool {
-    std::env::var(name)
-        .ok()
-        .map(|value| {
-            matches!(
-                value.trim().to_ascii_lowercase().as_str(),
-                "1" | "true" | "yes" | "on"
-            )
-        })
-        .unwrap_or(false)
+    common::parse_env_bool(name)
+        || std::env::var(name)
+            .ok()
+            .is_some_and(|v| v.trim().eq_ignore_ascii_case("on"))
 }
 
-/// Matches `validator::sandbox` (`true` / `1` / `TRUE`) so MAL-001 cannot be
-/// skipped by a truthy spelling the sandbox crate already honors.
+/// Matches `common::parse_env_bool` so MAL-001 and production checks accept
+/// identical truthy spellings (`true`, `1`, `yes` case-insensitively).
 fn env_flag_sandbox(name: &str) -> bool {
-    matches!(
-        std::env::var(name).as_deref(),
-        Ok("true") | Ok("1") | Ok("TRUE")
-    )
+    common::parse_env_bool(name)
 }
 
 pub(crate) fn creg_public_validator() -> bool {
@@ -971,19 +1018,20 @@ fn env(key: &str, default: &str) -> String {
 }
 
 #[cfg(test)]
+pub(crate) fn global_test_env_lock() -> &'static tokio::sync::Mutex<()> {
+    static GLOBAL_ENV_LOCK: std::sync::OnceLock<tokio::sync::Mutex<()>> =
+        std::sync::OnceLock::new();
+    GLOBAL_ENV_LOCK.get_or_init(|| tokio::sync::Mutex::new(()))
+}
+
+#[cfg(test)]
 mod tests {
     use super::*;
 
-    /// Tests that change process-global environment variables must not run at
-    /// the same time: two of them toggling CREG_PUBLIC_VALIDATOR made
-    /// `mal001_public_validator_accepts_sandbox_truthy_spellings` fail
-    /// intermittently. Hold this guard for the whole test.
-    static ENV_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
-
-    fn env_guard() -> std::sync::MutexGuard<'static, ()> {
-        ENV_LOCK
-            .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner())
+    /// Hold the crate-wide env mutex from sync tests so env-mutating unit tests
+    /// in `config`, `api`, and `package_admission` never race across threads.
+    fn env_guard() -> tokio::sync::MutexGuard<'static, ()> {
+        super::global_test_env_lock().blocking_lock()
     }
 
     fn base_config() -> NodeConfig {
@@ -994,7 +1042,12 @@ mod tests {
             namespace_authority_policies: vec![],
             namespace_authority_policy_source_verified: false,
             namespace_authority_config_errors: vec![],
+            secrets_config_errors: vec![],
             listen_addr: "127.0.0.1:8080".into(),
+            admin_listen_addr: None,
+            expose_public_metrics_docs: true,
+            grpc_enabled: false,
+            grpc_listen_addr: "127.0.0.1:50051".into(),
             data_dir: PathBuf::from("./data"),
             p2p_listen: "/ip4/0.0.0.0/tcp/4001".into(),
             p2p_seeds: vec![],
@@ -1016,8 +1069,6 @@ mod tests {
             ipfs_url: "http://127.0.0.1:5001".into(),
             pg_url: String::new(),
             validator_set: common::ValidatorSet::new(vec![]),
-            mode: NodeMode::Pruned,
-            pruning: PruningConfig::default(),
             max_peers: 15,
             cors: CorsConfig::default(),
             is_testnet: true,
@@ -1523,17 +1574,20 @@ mod tests {
 
     #[test]
     fn production_zk_validation_requires_package_key_files() {
-        let dir = std::env::temp_dir().join(format!("creg-node-issue-005-{}", std::process::id()));
-        std::fs::create_dir_all(&dir).expect("temp dir");
-        let missing =
-            zk_validator::ZkValidator::production_missing_package_keys_error(true, true, &dir)
-                .expect("missing keys must fail closed");
-        assert!(missing.contains("CREG_PRODUCTION=true but ZK package key files are missing"));
+        let mut cfg = base_config();
+        assert!(cfg
+            .validate()
+            .iter()
+            .all(|e| !e.contains("zk_validation is retired")));
+        cfg.zk_validation = true;
+        let errors = cfg.validate();
         assert!(
-            zk_validator::ZkValidator::production_missing_package_keys_error(false, true, &dir)
-                .is_none()
+            errors
+                .iter()
+                .any(|e| e.contains("zk_validation is retired")),
+            "retired zk_validation must fail closed, got {:?}",
+            errors
         );
-        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]
@@ -1729,6 +1783,88 @@ mod tests {
                 .all(|error| !error.contains("dialable P2P seed")),
             "observers may start with empty seeds, got {:?}",
             cfg.validate()
+        );
+    }
+
+    #[test]
+    fn production_security_rejects_numeric_and_uppercase_truthy_bypass_spellings() {
+        let _env = env_guard();
+        std::env::set_var("CREG_DEV_SANDBOX", "1");
+        std::env::set_var("CREG_PBFT_ALLOW_SMALL_CLUSTER_QUORUM", "YES");
+        std::env::set_var("CREG_SECRETS_BACKEND", "vault");
+
+        let mut prod = base_config();
+        prod.is_testnet = false;
+        let errors = prod.validate_production_security();
+
+        std::env::remove_var("CREG_DEV_SANDBOX");
+        std::env::remove_var("CREG_PBFT_ALLOW_SMALL_CLUSTER_QUORUM");
+        std::env::remove_var("CREG_SECRETS_BACKEND");
+
+        assert!(errors.iter().any(|e| e.contains("CREG_DEV_SANDBOX")));
+        assert!(errors
+            .iter()
+            .any(|e| e.contains("CREG_PBFT_ALLOW_SMALL_CLUSTER_QUORUM")));
+    }
+
+    #[test]
+    fn node_config_debug_redacts_secrets_and_rejects_public_grpc_without_allow() {
+        let _env = env_guard();
+        let mut cfg = validator_config_with_key();
+        cfg.bridge_privkey =
+            Some("bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb".into());
+        let debug = format!("{cfg:?}");
+        assert!(!debug.contains("aaaaaaaaaaaaaaaa"));
+        assert!(!debug.contains("bbbbbbbbbbbbbbbb"));
+        assert!(debug.contains("[REDACTED]"));
+
+        std::env::set_var("CREG_PUBLIC_VALIDATOR", "true");
+        cfg.grpc_enabled = true;
+        cfg.grpc_listen_addr = "0.0.0.0:50051".into();
+        let errors = cfg.validate();
+        std::env::remove_var("CREG_PUBLIC_VALIDATOR");
+        assert!(
+            errors.iter().any(|e| e.contains("CREG_GRPC_LISTEN")),
+            "expected public gRPC bind error, got {errors:?}"
+        );
+    }
+
+    #[tokio::test]
+    async fn load_fails_closed_when_vault_backend_has_plaintext_env_override() {
+        let _env = super::global_test_env_lock().lock().await;
+        let prev_backend = std::env::var("CREG_SECRETS_BACKEND").ok();
+        let prev_key = std::env::var("CREG_VALIDATOR_KEY").ok();
+        let prev_addr = std::env::var("VAULT_ADDR").ok();
+        let prev_tok = std::env::var("VAULT_TOKEN").ok();
+
+        std::env::set_var("CREG_SECRETS_BACKEND", "vault");
+        std::env::set_var("VAULT_ADDR", "http://127.0.0.1:18200");
+        std::env::set_var("VAULT_TOKEN", "test-token");
+        std::env::set_var("CREG_VALIDATOR_KEY", &"11".repeat(32));
+
+        let loaded = NodeConfig::load().await;
+        let errors = loaded.validate();
+
+        match prev_backend {
+            Some(v) => std::env::set_var("CREG_SECRETS_BACKEND", v),
+            None => std::env::remove_var("CREG_SECRETS_BACKEND"),
+        }
+        match prev_key {
+            Some(v) => std::env::set_var("CREG_VALIDATOR_KEY", v),
+            None => std::env::remove_var("CREG_VALIDATOR_KEY"),
+        }
+        match prev_addr {
+            Some(v) => std::env::set_var("VAULT_ADDR", v),
+            None => std::env::remove_var("VAULT_ADDR"),
+        }
+        match prev_tok {
+            Some(v) => std::env::set_var("VAULT_TOKEN", v),
+            None => std::env::remove_var("VAULT_TOKEN"),
+        }
+
+        assert!(
+            errors.iter().any(|e| e.contains("CREG_VALIDATOR_KEY")),
+            "expected Vault exclusivity error, got {errors:?}"
         );
     }
 }

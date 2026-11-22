@@ -34,7 +34,6 @@ validator = { path = "../validator" }
 ml-validator = { path = "../ml-validator" }
 consensus = { path = "../consensus" }
 resolver  = { path = "../resolver" }
-zk-validator = { path = "../zk-validator" }
 db-sync   = { path = "../db-sync" }
 threshold-encryption = { path = "../threshold-encryption" }
 
@@ -42,6 +41,8 @@ tokio        = { workspace = true }
 serde        = { workspace = true }
 serde_json   = { workspace = true }
 anyhow       = { workspace = true }
+subtle       = "=2.6.1"
+zeroize      = "=1.8.2"
 tracing      = { workspace = true }
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 chrono       = { workspace = true }
@@ -49,8 +50,8 @@ uuid         = { workspace = true }
 sha2         = { workspace = true }
 hex          = { workspace = true }
 reqwest      = { workspace = true }
-sled         = { workspace = true }
 rocksdb      = { workspace = true }
+arc-swap     = "=1.9.1"
 ed25519-dalek = { workspace = true }
 rand         = { workspace = true }
 

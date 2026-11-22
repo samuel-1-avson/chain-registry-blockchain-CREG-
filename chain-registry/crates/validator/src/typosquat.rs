@@ -151,6 +151,12 @@ async fn fetch_and_merge(url: &str) -> Option<TyposquatDataset> {
 /// Failures log a warning but do **not** return an error — the compile-time
 /// baseline is always available as a fallback.  This is called once per
 /// validation run from the validator pipeline.
+/// Refresh the runtime typosquat dataset from a remote HTTP URL (off-chain tooling only).
+/// Consensus validation MUST use the pinned offline snapshot (`CREG_TYPOSQUAT_SNAPSHOT_PATH`)
+/// or the compile-time baseline (`VNA-20`).
+#[deprecated(
+    note = "Live HTTP typosquat refresh removed from consensus hot path; use pinned CREG_TYPOSQUAT_SNAPSHOT_PATH"
+)]
 pub async fn maybe_refresh() {
     let url = match std::env::var("CREG_TYPOSQUAT_URL") {
         Ok(v) if !v.is_empty() => v,
@@ -180,10 +186,41 @@ pub async fn maybe_refresh() {
     // If fetch failed, keep the previous dataset (or None → fall back to BASELINE).
 }
 
-/// Borrow the active dataset.  Uses the runtime-fetched dataset when available,
-/// otherwise falls back to the compile-time baseline.
+/// Borrow the active dataset. Checks pinned offline `CREG_TYPOSQUAT_SNAPSHOT_PATH`
+/// when configured, otherwise falls back to runtime-refreshed / compile-time baseline.
 fn active_packages() -> std::sync::MutexGuard<'static, RuntimeState> {
     RUNTIME.lock().unwrap_or_else(|e| e.into_inner())
+}
+
+/// Loads a pinned offline typosquat snapshot from `CREG_TYPOSQUAT_SNAPSHOT_PATH`
+/// merged onto the compile-time baseline (deterministic for consensus, `VNA-20`).
+fn load_pinned_snapshot_if_configured() -> Option<TyposquatDataset> {
+    let path = std::env::var("CREG_TYPOSQUAT_SNAPSHOT_PATH").ok()?;
+    let trimmed = path.trim();
+    if trimmed.is_empty() {
+        return None;
+    }
+    let raw = std::fs::read(trimmed).ok()?;
+    let remote = serde_json::from_slice::<TyposquatDataset>(&raw).ok()?;
+    let mut merged = BASELINE.clone();
+    merged.merge_from(&remote);
+    Some(merged)
+}
+
+/// Deterministic SHA-256 digest of the active pinned offline typosquat dataset.
+pub fn dataset_digest() -> String {
+    let ds = load_pinned_snapshot_if_configured();
+    let active = ds.as_ref().unwrap_or(&*BASELINE);
+    let mut keys: Vec<_> = active.packages.keys().cloned().collect();
+    keys.sort();
+    let mut canonical = Vec::new();
+    for eco in keys {
+        let mut names = active.packages[&eco].clone();
+        names.sort();
+        canonical.push((eco, names));
+    }
+    let bytes = serde_json::to_vec(&(&active.version, &canonical)).unwrap_or_default();
+    common::sha256_hex(&bytes)
 }
 
 /// Result of a typosquat check.
@@ -210,8 +247,12 @@ fn normalise(name: &str) -> String {
 /// Prefers the runtime-refreshed dataset when one has been loaded; falls back
 /// to the compile-time baseline automatically.
 pub fn check(name: &str, ecosystem: &str) -> Option<TyposquatMatch> {
+    let pinned = load_pinned_snapshot_if_configured();
     let guard = active_packages();
-    let dataset = guard.dataset.as_ref().unwrap_or(&*BASELINE);
+    let dataset = pinned
+        .as_ref()
+        .or(guard.dataset.as_ref())
+        .unwrap_or(&*BASELINE);
     let candidates = dataset.packages.get(ecosystem)?;
 
     let normalised = normalise(name);

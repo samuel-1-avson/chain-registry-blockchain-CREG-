@@ -595,27 +595,7 @@ fn parse_json_content(content: &str) -> Result<serde_json::Value> {
 
 // ── Entropy Scanning ─────────────────────────────────────────────────────────
 
-/// Extract all text files from a gzip+tar tarball as (path, content_bytes).
-fn extract_tarball(tarball: &[u8]) -> HashMap<String, Vec<u8>> {
-    let mut files = HashMap::new();
-    let gz = flate2::read::GzDecoder::new(tarball);
-    let mut archive = tar::Archive::new(gz);
-    let Ok(entries) = archive.entries() else {
-        return files;
-    };
-    for mut entry in entries.flatten() {
-        // Extract path first (borrows header) before doing anything else with entry.
-        let path_str = match entry.header().path() {
-            Ok(p) => p.display().to_string(),
-            Err(_) => continue,
-        };
-        let mut content = Vec::new();
-        if std::io::Read::read_to_end(&mut entry, &mut content).is_ok() {
-            files.insert(path_str, content);
-        }
-    }
-    files
-}
+// Legacy extract_tarball removed by ADR-018 Inc 2 (VNA-11): use creg_unpack via context::EvidencePacketBuilder.
 
 /// Returns true for files that are likely source code (text files).
 fn is_text_file(path: &str) -> bool {
@@ -1162,24 +1142,13 @@ pub async fn review_package(
     prior_findings: &[Finding],
     content_hash_str: &str,
 ) -> LlmReview {
-    let packet = EvidencePacketBuilder::build(tarball, prior_findings);
-
-    if !packet.entropy_alerts.is_empty() {
-        tracing::info!(
-            "[{}] Entropy scan: {} files above threshold ({:.2} bits/byte)",
-            pkg_id.canonical(),
-            packet.entropy_alerts.len(),
-            entropy_threshold_file(),
-        );
-    }
-
-    // Check review cache (keyed by content_hash so identical tarballs skip re-analysis)
+    // Check review cache and LLM gate BEFORE unpacking tarball bytes (VNA-11).
     if let Some(cached) = SemanticCache::get_review(content_hash_str) {
         tracing::debug!("[{}] LLM review cache hit", pkg_id.canonical());
         return cached;
     }
 
-    if let Err(review) = LlmEscalationGate::ensure_package_enabled(packet.entropy_alerts.clone()) {
+    if let Err(review) = LlmEscalationGate::ensure_package_enabled(Vec::new()) {
         tracing::debug!(
             "[{}] {}",
             pkg_id.canonical(),
@@ -1189,6 +1158,17 @@ pub async fn review_package(
                 .unwrap_or("LLM stage skipped")
         );
         return review;
+    }
+
+    let packet = EvidencePacketBuilder::build(tarball, prior_findings);
+
+    if !packet.entropy_alerts.is_empty() {
+        tracing::info!(
+            "[{}] Entropy scan: {} files above threshold ({:.2} bits/byte)",
+            pkg_id.canonical(),
+            packet.entropy_alerts.len(),
+            entropy_threshold_file(),
+        );
     }
 
     if let Err(review) = LlmEscalationGate::reserve_package_call(packet.entropy_alerts.clone()) {

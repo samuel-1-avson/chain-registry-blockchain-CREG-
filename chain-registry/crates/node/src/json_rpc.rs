@@ -263,6 +263,9 @@ mod tests {
             publisher_index: PublisherIndex::new(),
             validator_set_bootstrap: common::ValidatorSet::default(),
             validator_set: common::ValidatorSet::default(),
+            validator_set_snapshot: Arc::new(crate::state::ArcSwap::from_pointee(
+                common::ValidatorSet::default(),
+            )),
             package_rounds: HashMap::new(),
             package_committees: HashMap::new(),
             config: NodeConfig {

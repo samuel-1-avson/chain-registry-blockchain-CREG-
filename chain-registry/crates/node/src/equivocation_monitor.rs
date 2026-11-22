@@ -90,14 +90,18 @@ impl EquivocationMonitor {
         }
     }
 
-    /// Build from `CREG_EQUIVOCATION_DETECTION` and reload saved evidence.
+    /// Build from `CREG_EQUIVOCATION_DETECTION` (enabled by default; set to
+    /// `false`/`0`/`no`/`off` to disable) and reload saved evidence.
     pub fn from_env(data_dir: &Path) -> Self {
         let enabled = std::env::var(ENABLE_ENV)
             .map(|value| {
                 let value = value.trim();
-                value == "1" || value.eq_ignore_ascii_case("true")
+                !matches!(
+                    value.to_ascii_lowercase().as_str(),
+                    "0" | "false" | "no" | "off"
+                )
             })
-            .unwrap_or(false);
+            .unwrap_or(true);
         if !enabled {
             return Self::disabled();
         }
@@ -346,11 +350,21 @@ impl EquivocationMonitor {
             return;
         };
         let result = (|| -> anyhow::Result<()> {
+            use std::io::Write;
             std::fs::create_dir_all(dir)?;
             let path = dir.join(format!("{}.json", evidence.evidence_id));
             let temp = dir.join(format!("{}.json.tmp", evidence.evidence_id));
-            std::fs::write(&temp, serde_json::to_vec_pretty(evidence)?)?;
-            std::fs::rename(&temp, &path)?;
+            let encoded = serde_json::to_vec_pretty(evidence)?;
+            let mut file = std::fs::File::create(&temp)?;
+            file.write_all(&encoded)?;
+            file.sync_all()?;
+            drop(file);
+            if let Err(error) = std::fs::rename(&temp, &path) {
+                let _ = std::fs::remove_file(&temp);
+                return Err(error.into());
+            }
+            #[cfg(unix)]
+            std::fs::File::open(dir)?.sync_all()?;
             Ok(())
         })();
         if let Err(error) = result {

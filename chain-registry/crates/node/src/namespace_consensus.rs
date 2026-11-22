@@ -11,7 +11,7 @@ use common::{
     NamespaceLifecycleAction, PublisherAuthorizationV1, Transaction,
 };
 use serde::{Deserialize, Serialize};
-use std::collections::{BTreeMap, BTreeSet, HashSet};
+use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 
 use crate::chain_store::ChainStore;
 
@@ -23,6 +23,7 @@ pub struct NamespaceConsensusConfig {
     pub activation_height: Option<u64>,
     pub authority_policies: Vec<NamespaceAuthorityPolicySpec>,
     pub policy_source_verified: bool,
+    pub validator_set_bootstrap: Option<common::ValidatorSet>,
 }
 
 impl NamespaceConsensusConfig {
@@ -34,6 +35,7 @@ impl NamespaceConsensusConfig {
             activation_height: config.namespace_authority_activation_height,
             authority_policies: config.namespace_authority_policies.clone(),
             policy_source_verified: config.namespace_authority_policy_source_verified,
+            validator_set_bootstrap: Some(config.validator_set.clone()),
         }
     }
 
@@ -165,34 +167,52 @@ pub fn validate_block(
     let reference_time = block.header.timestamp.timestamp();
     let mut effects = NamespaceBlockEffects::default();
     let mut loaded_controllers = BTreeMap::<String, Option<NamespaceControllerState>>::new();
+    let mut in_block_published = HashMap::<String, String>::new();
     let mut publisher_nonces = HashSet::new();
     let mut lifecycle_nonces = HashSet::new();
 
     for (index, transaction) in block.transactions.iter().enumerate() {
         let outcome = match transaction {
-            Transaction::Publish(_) if active => Err(anyhow::anyhow!(
-                "legacy publish transaction after activation"
-            )),
+            Transaction::Publish(record) if active => {
+                let _ = record;
+                Err(anyhow::anyhow!(
+                    "legacy publish transaction after activation"
+                ))
+            }
+            Transaction::Publish(record) => {
+                in_block_published.insert(record.id.canonical(), record.publisher_pubkey.clone());
+                Ok(())
+            }
             Transaction::NamespaceLifecycle(_) if active => Err(anyhow::anyhow!(
                 "legacy namespace lifecycle transaction after activation"
             )),
             Transaction::RotatePublisherKey { .. } if active => Err(anyhow::anyhow!(
                 "legacy publisher-key rotation transaction after activation"
             )),
+            Transaction::Revoke { .. } if active => Err(anyhow::anyhow!(
+                "legacy revocation transaction after activation"
+            )),
             Transaction::PublishAuthorizedV1 {
                 record,
                 authorization,
-            } => validate_authorized_publish(
-                chain,
-                block,
-                config,
-                record,
-                authorization,
-                reference_time,
-                &mut loaded_controllers,
-                &mut publisher_nonces,
-                &mut effects,
-            ),
+            } => {
+                let result = validate_authorized_publish(
+                    chain,
+                    block,
+                    config,
+                    record,
+                    authorization,
+                    reference_time,
+                    &mut loaded_controllers,
+                    &mut publisher_nonces,
+                    &mut effects,
+                );
+                if result.is_ok() {
+                    in_block_published
+                        .insert(record.id.canonical(), record.publisher_pubkey.clone());
+                }
+                result
+            }
             Transaction::NamespaceLifecycleV2(event) => validate_lifecycle_v2(
                 chain,
                 block,
@@ -204,11 +224,116 @@ pub fn validate_block(
                 &mut lifecycle_nonces,
                 &mut effects,
             ),
+            Transaction::RevokeV2 { request, .. } => validate_revoke_v2(
+                chain,
+                block,
+                config,
+                active,
+                request,
+                &in_block_published,
+                &loaded_controllers,
+                &effects,
+            ),
             _ => Ok(()),
         };
         outcome.with_context(|| format!("invalid CR-07 transaction at block index {}", index))?;
     }
     Ok(effects)
+}
+
+#[allow(clippy::too_many_arguments)]
+fn validate_revoke_v2(
+    chain: &ChainStore,
+    block: &common::Block,
+    config: &NamespaceConsensusConfig,
+    active: bool,
+    request: &common::SignedRevocationRequest,
+    in_block_published: &HashMap<String, String>,
+    loaded_controllers: &BTreeMap<String, Option<NamespaceControllerState>>,
+    effects: &NamespaceBlockEffects,
+) -> Result<()> {
+    request.verify_signature()?;
+    if active && request.signature_version != 1 {
+        anyhow::bail!("legacy revocation signature version is retired after activation");
+    }
+    if request.signature_version == 1 {
+        if !config.chain_id.is_empty() && request.chain_id != config.chain_id {
+            anyhow::bail!("revocation targets another chain_id");
+        }
+        if !config.genesis_hash.is_empty() && request.genesis_hash != config.genesis_hash {
+            anyhow::bail!("revocation targets another genesis_hash");
+        }
+    }
+
+    if let Some(owner_pubkey) = in_block_published.get(&request.package_canonical) {
+        if owner_pubkey.eq_ignore_ascii_case(&request.revoker_pubkey) {
+            return Ok(());
+        }
+    } else if let Some(record) = chain.get_package(&request.package_canonical)? {
+        if record
+            .publisher_pubkey
+            .eq_ignore_ascii_case(&request.revoker_pubkey)
+        {
+            return Ok(());
+        }
+    }
+
+    if let Some((prefix, version)) = request.package_canonical.rsplit_once('@') {
+        let legacy_ns = format!("{prefix}@");
+        let auth_ns = prefix
+            .split_once(':')
+            .and_then(|(eco, name)| {
+                let pkg = common::PackageId::new(eco, name, version);
+                common::authoritative_package_namespace(&pkg).ok()
+            })
+            .unwrap_or_else(|| legacy_ns.clone());
+        for ns in [&auth_ns, &legacy_ns] {
+            if let Some(state) = effects.controllers.get(ns.as_str()) {
+                if state
+                    .root_ed25519_pubkey
+                    .eq_ignore_ascii_case(&request.revoker_pubkey)
+                {
+                    return Ok(());
+                }
+            } else if let Some(Some(state)) = loaded_controllers.get(ns.as_str()) {
+                if state
+                    .root_ed25519_pubkey
+                    .eq_ignore_ascii_case(&request.revoker_pubkey)
+                {
+                    return Ok(());
+                }
+            } else if let Some(state) = chain.namespace_controller_state(ns)? {
+                if state
+                    .root_ed25519_pubkey
+                    .eq_ignore_ascii_case(&request.revoker_pubkey)
+                {
+                    return Ok(());
+                }
+            }
+        }
+        if let Some(legacy_owner) = chain.publisher_for_prefix(&legacy_ns) {
+            if legacy_owner.eq_ignore_ascii_case(&request.revoker_pubkey) {
+                return Ok(());
+            }
+        }
+    }
+
+    if let Some(bootstrap) = config.validator_set_bootstrap.as_ref() {
+        let authority = crate::validator_set_history::verification_set_at(
+            chain.data_dir(),
+            block.header.height,
+            bootstrap,
+        )
+        .map_err(anyhow::Error::msg)?;
+        if authority.validators.iter().any(|v| {
+            common::validator_status_is_active(&v.status)
+                && v.pubkey.eq_ignore_ascii_case(&request.revoker_pubkey)
+        }) {
+            return Ok(());
+        }
+    }
+
+    anyhow::bail!("revocation signer is not an authorized owner, controller, or active validator")
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -638,6 +763,175 @@ mod tests {
         assert_eq!(
             error.to_string(),
             "namespace authority certificate context is invalid"
+        );
+    }
+
+    #[test]
+    fn revoke_v2_allows_owner_and_active_validator_and_rejects_forged_unauthorized_or_legacy() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let chain = ChainStore::open(dir.path()).expect("open chain");
+        let genesis = chain
+            .get_block_by_height(0)
+            .expect("get genesis")
+            .expect("genesis");
+
+        let owner_key = common::crypto::SigningKey::from_ed25519_seed(&[11u8; 32]);
+        let owner_pubkey = owner_key.public_key().to_hex();
+        let validator_key = common::crypto::SigningKey::from_ed25519_seed(&[22u8; 32]);
+        let validator_pubkey = validator_key.public_key().to_hex();
+        let outsider_key = common::crypto::SigningKey::from_ed25519_seed(&[33u8; 32]);
+        let outsider_pubkey = outsider_key.public_key().to_hex();
+
+        let pkg = common::PackageId::new("npm", "revoke-v2-pkg", "1.0.0");
+        let record = common::ChainRecord {
+            id: pkg.clone(),
+            content_hash: "a".repeat(64),
+            ipfs_cid: "bafytestrevokepkg".into(),
+            publisher_pubkey: owner_pubkey.clone(),
+            block_hash: String::new(),
+            published_at: DateTime::from_timestamp(1_700_000_005, 0).expect("ts"),
+            status: common::PackageStatus::Verified,
+            ..Default::default()
+        };
+        let b1_txs = vec![Transaction::Publish(record)];
+        let b1 = common::Block {
+            header: common::BlockHeader {
+                height: 1,
+                prev_hash: genesis.hash(),
+                merkle_root: common::merkle_root(&b1_txs),
+                proposer_id: "validator-1".into(),
+                timestamp: genesis.header.timestamp + chrono::Duration::seconds(10),
+                validator_set_hash: genesis.header.validator_set_hash.clone(),
+                vrf_output: None,
+                vrf_proof: None,
+                view_number: 0,
+                view_change_certificate: Vec::new(),
+            },
+            transactions: b1_txs,
+            pbft_signatures: Vec::new(),
+        };
+        chain.insert_block(&b1).expect("insert block 1");
+
+        let config = NamespaceConsensusConfig {
+            chain_id: "creg-testnet-1".into(),
+            genesis_hash: genesis.hash(),
+            staking_contract: "0x1111111111111111111111111111111111111111".into(),
+            activation_height: Some(2),
+            authority_policies: vec![NamespaceAuthorityPolicySpec {
+                authority: common::OwnershipAuthority::NpmTrustedPublisher,
+                adapter_id: "creg-npm-authority".into(),
+                adapter_version: "1.0.0".into(),
+                verifier_sha256: "e".repeat(64),
+                policy_sha256: "f".repeat(64),
+                trust_root_sha256: "0".repeat(64),
+            }],
+            policy_source_verified: true,
+            validator_set_bootstrap: Some(common::ValidatorSet::new(vec![common::Validator {
+                id: "validator-1".into(),
+                pubkey: validator_pubkey.clone(),
+                status: "active".into(),
+                stake: 100,
+                ..Default::default()
+            }])),
+        };
+
+        let make_block2 = |tx: Transaction| -> common::Block {
+            let txs = vec![tx];
+            common::Block {
+                header: common::BlockHeader {
+                    height: 2,
+                    prev_hash: b1.hash(),
+                    merkle_root: common::merkle_root(&txs),
+                    proposer_id: "validator-1".into(),
+                    timestamp: genesis.header.timestamp + chrono::Duration::seconds(20),
+                    validator_set_hash: genesis.header.validator_set_hash.clone(),
+                    vrf_output: None,
+                    vrf_proof: None,
+                    view_number: 0,
+                    view_change_certificate: Vec::new(),
+                },
+                transactions: txs,
+                pbft_signatures: Vec::new(),
+            }
+        };
+
+        let sign_revoke = |key: &common::crypto::SigningKey, pubkey: &str, reason: &str| {
+            let mut req = common::SignedRevocationRequest {
+                chain_id: config.chain_id.clone(),
+                genesis_hash: config.genesis_hash.clone(),
+                package_canonical: pkg.canonical(),
+                reason: reason.into(),
+                revoker_pubkey: pubkey.to_string(),
+                signature: String::new(),
+                signature_version: 1,
+            };
+            req.signature = key.sign(req.signing_message().as_bytes()).to_hex();
+            req
+        };
+
+        // 1. Package owner allowed
+        let owner_req = sign_revoke(&owner_key, &owner_pubkey, "owner yanked release");
+        validate_block(
+            &chain,
+            &make_block2(Transaction::RevokeV2 {
+                request: owner_req.clone(),
+                evidence_hash: "1".repeat(64),
+            }),
+            &config,
+        )
+        .expect("package owner RevokeV2 should validate");
+
+        // 2. Active validator allowed
+        let val_req = sign_revoke(&validator_key, &validator_pubkey, "quorum malware finding");
+        validate_block(
+            &chain,
+            &make_block2(Transaction::RevokeV2 {
+                request: val_req,
+                evidence_hash: "2".repeat(64),
+            }),
+            &config,
+        )
+        .expect("active validator RevokeV2 should validate");
+
+        // 3. Forged / tampered reason rejected
+        let mut forged_req = owner_req;
+        forged_req.reason = "tampered reason".into();
+        assert!(validate_block(
+            &chain,
+            &make_block2(Transaction::RevokeV2 {
+                request: forged_req,
+                evidence_hash: "3".repeat(64),
+            }),
+            &config,
+        )
+        .is_err());
+
+        // 4. Unauthorized signer rejected
+        let outsider_req = sign_revoke(&outsider_key, &outsider_pubkey, "unauthorized");
+        assert!(validate_block(
+            &chain,
+            &make_block2(Transaction::RevokeV2 {
+                request: outsider_req,
+                evidence_hash: "4".repeat(64),
+            }),
+            &config,
+        )
+        .is_err());
+
+        // 5. Legacy Transaction::Revoke rejected post-activation
+        let legacy_err = validate_block(
+            &chain,
+            &make_block2(Transaction::Revoke {
+                package_canonical: pkg.canonical(),
+                reason: "legacy".into(),
+                revoked_by: "validator-1".into(),
+                evidence_hash: "5".repeat(64),
+            }),
+            &config,
+        )
+        .expect_err("legacy Revoke must be rejected post-activation");
+        assert!(
+            format!("{legacy_err:#}").contains("legacy revocation transaction after activation")
         );
     }
 }

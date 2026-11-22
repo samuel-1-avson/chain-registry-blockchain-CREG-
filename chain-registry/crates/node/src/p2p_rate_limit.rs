@@ -166,9 +166,16 @@ impl P2PRateLimiter {
     /// Calculate the rate limit multiplier based on the peer's validator stake.
     /// Active validators get at least a 5x multiplier, scaled higher for larger stakes.
     /// Non-validators get a 1.0x multiplier.
-    fn get_multiplier(&self, peer: PeerId, validators: &[(String, u64)]) -> (f64, bool) {
-        let peer_str = peer.to_string();
-        if let Some((_, stake)) = validators.iter().find(|(id, _)| id == &peer_str) {
+    fn get_multiplier(
+        &self,
+        peer: PeerId,
+        authenticated_validator_id: Option<&str>,
+        validators: &[(String, u64)],
+    ) -> (f64, bool) {
+        let lookup_id = authenticated_validator_id
+            .map(str::to_owned)
+            .unwrap_or_else(|| peer.to_string());
+        if let Some((_, stake)) = validators.iter().find(|(id, _)| id == &lookup_id) {
             // Validator: base multiplier of 5.0, scaled by stake relative to 100
             let multiplier = ((*stake as f64) / 100.0).max(5.0);
             (multiplier, true)
@@ -180,6 +187,15 @@ impl P2PRateLimiter {
     /// Check if a vote message is allowed from this peer.
     /// Returns true if allowed, false if rate limited.
     pub fn check_vote(&self, peer: PeerId, validators: &[(String, u64)]) -> bool {
+        self.check_vote_for_validator(peer, None, validators)
+    }
+
+    pub fn check_vote_for_validator(
+        &self,
+        peer: PeerId,
+        authenticated_validator_id: Option<&str>,
+        validators: &[(String, u64)],
+    ) -> bool {
         let mut peers = lock_peers(&self.peers);
         let bucket = peers.entry(peer).or_insert_with(PeerBucket::new);
 
@@ -188,7 +204,8 @@ impl P2PRateLimiter {
             return false;
         }
 
-        let (multiplier, is_validator) = self.get_multiplier(peer, validators);
+        let (multiplier, is_validator) =
+            self.get_multiplier(peer, authenticated_validator_id, validators);
         let allowed = bucket.vote_bucket.check_and_consume(
             self.config.vote_limit,
             self.config.window,
@@ -213,6 +230,15 @@ impl P2PRateLimiter {
     /// Check if a block announcement is allowed from this peer.
     /// Returns true if allowed, false if rate limited.
     pub fn check_block(&self, peer: PeerId, validators: &[(String, u64)]) -> bool {
+        self.check_block_for_validator(peer, None, validators)
+    }
+
+    pub fn check_block_for_validator(
+        &self,
+        peer: PeerId,
+        authenticated_validator_id: Option<&str>,
+        validators: &[(String, u64)],
+    ) -> bool {
         let mut peers = lock_peers(&self.peers);
         let bucket = peers.entry(peer).or_insert_with(PeerBucket::new);
 
@@ -221,7 +247,8 @@ impl P2PRateLimiter {
             return false;
         }
 
-        let (multiplier, is_validator) = self.get_multiplier(peer, validators);
+        let (multiplier, is_validator) =
+            self.get_multiplier(peer, authenticated_validator_id, validators);
         let allowed = bucket.block_bucket.check_and_consume(
             self.config.block_limit,
             self.config.window,
@@ -245,6 +272,15 @@ impl P2PRateLimiter {
     /// Check if a general message is allowed from this peer.
     /// Returns true if allowed, false if rate limited.
     pub fn check_general(&self, peer: PeerId, validators: &[(String, u64)]) -> bool {
+        self.check_general_for_validator(peer, None, validators)
+    }
+
+    pub fn check_general_for_validator(
+        &self,
+        peer: PeerId,
+        authenticated_validator_id: Option<&str>,
+        validators: &[(String, u64)],
+    ) -> bool {
         let mut peers = lock_peers(&self.peers);
         let bucket = peers.entry(peer).or_insert_with(PeerBucket::new);
 
@@ -253,7 +289,8 @@ impl P2PRateLimiter {
             return false;
         }
 
-        let (multiplier, is_validator) = self.get_multiplier(peer, validators);
+        let (multiplier, is_validator) =
+            self.get_multiplier(peer, authenticated_validator_id, validators);
         let allowed = bucket.general_bucket.check_and_consume(
             self.config.general_limit,
             self.config.window,

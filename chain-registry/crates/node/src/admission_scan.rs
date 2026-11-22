@@ -50,62 +50,16 @@ fn ipfs_timeout_secs() -> u64 {
 
 async fn fetch_ipfs_payload(cid: &str, ipfs_url: &str) -> Result<Vec<u8>, AdmissionScanError> {
     let limit = max_scan_bytes();
-    let url = format!("{}/api/v0/cat?arg={}", ipfs_url.trim_end_matches('/'), cid);
-    let client = reqwest::Client::builder()
-        .timeout(std::time::Duration::from_secs(ipfs_timeout_secs()))
-        .build()
-        .map_err(|source| AdmissionScanError::IpfsFetch {
-            cid: cid.to_string(),
-            source: source.into(),
-        })?;
-
-    let response =
-        client
-            .post(&url)
-            .send()
-            .await
-            .map_err(|source| AdmissionScanError::IpfsFetch {
-                cid: cid.to_string(),
-                source: source.into(),
-            })?;
-
-    if !response.status().is_success() {
-        let status = response.status();
-        let body = response.text().await.unwrap_or_default();
-        return Err(AdmissionScanError::IpfsFetch {
-            cid: cid.to_string(),
-            source: anyhow::anyhow!("HTTP {}: {}", status, body),
-        });
-    }
-
-    if let Some(size) = response.content_length() {
-        if size > limit {
-            return Err(AdmissionScanError::PayloadTooLarge {
-                cid: cid.to_string(),
-                size,
-                limit,
-            });
+    match crate::ipfs_fetch::fetch_ipfs_bounded(cid, ipfs_url, limit, ipfs_timeout_secs()).await {
+        Ok(bytes) => Ok(bytes),
+        Err(crate::ipfs_fetch::IpfsFetchError::PayloadTooLarge { cid, size, limit }) => {
+            Err(AdmissionScanError::PayloadTooLarge { cid, size, limit })
         }
-    }
-
-    let payload = response
-        .bytes()
-        .await
-        .map_err(|source| AdmissionScanError::IpfsFetch {
+        Err(err) => Err(AdmissionScanError::IpfsFetch {
             cid: cid.to_string(),
-            source: source.into(),
-        })?;
-
-    let size = payload.len() as u64;
-    if size > limit {
-        return Err(AdmissionScanError::PayloadTooLarge {
-            cid: cid.to_string(),
-            size,
-            limit,
-        });
+            source: err.into(),
+        }),
     }
-
-    Ok(payload.to_vec())
 }
 
 pub async fn run_pre_mempool_yara_gate(

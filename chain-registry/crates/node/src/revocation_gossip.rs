@@ -1,6 +1,5 @@
 //! Durable propagation of actual publisher/validator revocation proofs.
 use anyhow::{Context, Result};
-use common::crypto::{PublicKey, Signature, SignatureScheme, VerifyMode};
 use common::{PackageStatus, SignedRevocationRequest, Transaction};
 use std::{
     io::Write,
@@ -15,36 +14,14 @@ fn directory(data_dir: &Path) -> PathBuf {
 }
 
 pub fn transaction(request: &SignedRevocationRequest, content_hash: &str) -> Transaction {
-    Transaction::Revoke {
-        package_canonical: request.package_canonical.clone(),
-        reason: request.reason.clone(),
-        revoked_by: request.revoker_pubkey.clone(),
+    Transaction::RevokeV2 {
+        request: request.clone(),
         evidence_hash: content_hash.to_owned(),
     }
 }
 
-fn verify_signature(request: &SignedRevocationRequest) -> Result<()> {
-    anyhow::ensure!(
-        request.signature_version <= 1,
-        "unsupported revocation signature version"
-    );
-    anyhow::ensure!(
-        !request.reason.is_empty()
-            && request.reason.len() <= 4096
-            && request.package_canonical.len() <= 256
-            && request.revoker_pubkey.len() == 64
-            && request.signature.len() == 128,
-        "invalid revocation proof bounds"
-    );
-    let key = hex::decode(&request.revoker_pubkey)?;
-    let key = PublicKey::from_bytes(SignatureScheme::Ed25519, &key)?;
-    let signature = hex::decode(&request.signature)?;
-    key.verify(
-        request.signing_message().as_bytes(),
-        &Signature::from_bytes(SignatureScheme::Ed25519, &signature)?,
-        VerifyMode::Permissive,
-    )?;
-    Ok(())
+pub(crate) fn verify_signature(request: &SignedRevocationRequest) -> Result<()> {
+    request.verify_signature()
 }
 
 fn persist(data_dir: &Path, id: &str, request: &SignedRevocationRequest) -> Result<()> {
@@ -202,5 +179,28 @@ pub async fn run(state: crate::SharedState, handle: crate::p2p::P2PHandle) {
                 tracing::warn!(%error, "Revocation propagation deferred; proof retained");
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::verify_signature;
+    use common::SignedRevocationRequest;
+
+    #[test]
+    fn revocation_signature_verification_is_strict() {
+        // Small-order Ed25519 identity pubkey + all-zero signature fails VerifyMode::Strict
+        let mut id_pk = [0u8; 32];
+        id_pk[0] = 1;
+        let req = SignedRevocationRequest {
+            chain_id: "creg-test-1".into(),
+            genesis_hash: "aa".repeat(32),
+            package_canonical: "npm:test@1.0.0".into(),
+            reason: "malicious".into(),
+            revoker_pubkey: hex::encode(id_pk),
+            signature: "00".repeat(64),
+            signature_version: 1,
+        };
+        assert!(verify_signature(&req).is_err());
     }
 }

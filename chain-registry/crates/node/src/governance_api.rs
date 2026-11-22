@@ -310,7 +310,7 @@ async fn prepare_write(state: &SharedState) -> Result<WriteContext, Response> {
             ))
         }
     };
-    let signer = match load_governance_signer() {
+    let signer = match load_governance_signer().await {
         Ok(signer) => signer,
         Err(response) => return Err(response),
     };
@@ -321,54 +321,68 @@ async fn prepare_write(state: &SharedState) -> Result<WriteContext, Response> {
     })
 }
 
-fn load_governance_signer() -> Result<PrivateKeySigner, Response> {
-    let raw = match configured_governance_key() {
-        Some(value) => value,
-        None => {
+async fn load_governance_signer() -> Result<PrivateKeySigner, Response> {
+    let secrets = match chain_registry_secrets::SecretsProvider::from_env() {
+        Ok(provider) => provider,
+        Err(err) => {
+            return Err(write_error(
+                StatusCode::SERVICE_UNAVAILABLE,
+                "governance_signer_unavailable",
+                format!("Secrets backend failed for Governance.sol signer: {err}"),
+            ))
+        }
+    };
+    let vault_conflicts = chain_registry_secrets::validate_vault_exclusivity(secrets.backend());
+    if !vault_conflicts.is_empty() {
+        return Err(write_error(
+            StatusCode::SERVICE_UNAVAILABLE,
+            "governance_signer_unavailable",
+            vault_conflicts.join("; "),
+        ));
+    }
+
+    let secret = match secrets
+        .try_signing_key_secret(chain_registry_secrets::HotKeyRole::Governance)
+        .await
+    {
+        Ok(Some(value)) => value,
+        Ok(None) => {
             return Err(write_error(
                 StatusCode::SERVICE_UNAVAILABLE,
                 "governance_signer_unconfigured",
                 format!(
-                    "Set {GOVERNANCE_KEY_ENV} to a Governance.sol signer private key (32 bytes / 64 hex chars). \
+                    "Set {GOVERNANCE_KEY_ENV} (or configure HashiCorp Vault role Governance) to a Governance.sol signer private key (32 bytes / 64 hex chars). \
                      CREG_BRIDGE_KEY and CREG_OPERATOR_API_KEY cannot submit or vote."
                 ),
             ))
         }
-    };
-    let normalized = match normalize_governance_key(&raw) {
-        Ok(value) => value,
-        Err(message) => {
+        Err(err) => {
+            let msg = err.to_string();
+            if msg.contains("not valid hex") || msg.contains("must be 32 bytes") {
+                return Err(write_error(
+                    StatusCode::BAD_REQUEST,
+                    "invalid_governance_key",
+                    format!("{GOVERNANCE_KEY_ENV} must be 32 bytes (64 hex chars), optional 0x prefix."),
+                ));
+            }
             return Err(write_error(
-                StatusCode::BAD_REQUEST,
-                "invalid_governance_key",
-                message,
-            ))
+                StatusCode::SERVICE_UNAVAILABLE,
+                "governance_signer_unavailable",
+                format!("Failed to load {GOVERNANCE_KEY_ENV}: {err}"),
+            ));
         }
     };
-    normalized.parse::<PrivateKeySigner>().map_err(|_| {
-        write_error(
-            StatusCode::BAD_REQUEST,
-            "invalid_governance_key",
-            format!("{GOVERNANCE_KEY_ENV} is not a valid secp256k1 private key."),
-        )
-    })
-}
 
-fn configured_governance_key() -> Option<String> {
-    std::env::var(GOVERNANCE_KEY_ENV)
-        .ok()
-        .map(|value| value.trim().to_string())
-        .filter(|value| !value.is_empty())
-}
-
-fn normalize_governance_key(raw: &str) -> Result<String, String> {
-    let hex_part = raw.strip_prefix("0x").unwrap_or(raw);
-    if hex_part.len() != 64 || !hex_part.bytes().all(|b| b.is_ascii_hexdigit()) {
-        return Err(format!(
-            "{GOVERNANCE_KEY_ENV} must be 32 bytes (64 hex chars), optional 0x prefix."
-        ));
-    }
-    Ok(format!("0x{hex_part}"))
+    secret
+        .expose_secret()
+        .parse::<PrivateKeySigner>()
+        .map_err(|_| {
+            write_error(
+                StatusCode::BAD_REQUEST,
+                "invalid_governance_key",
+                format!("{GOVERNANCE_KEY_ENV} is not a valid secp256k1 private key."),
+            )
+        })
 }
 
 fn parse_submit_body(
@@ -822,12 +836,16 @@ mod tests {
 
     #[test]
     fn governance_key_must_be_64_hex_chars() {
-        assert!(normalize_governance_key("not-a-key").is_err());
-        assert!(normalize_governance_key(&"ab".repeat(31)).is_err());
-        let ok = normalize_governance_key(&"ab".repeat(32)).expect("hex key");
-        assert_eq!(ok, format!("0x{}", "ab".repeat(32)));
+        use chain_registry_secrets::{normalize_signing_key_secret, HotKeyRole};
+
+        assert!(normalize_signing_key_secret("not-a-key", HotKeyRole::Governance).is_err());
+        assert!(normalize_signing_key_secret(&"ab".repeat(31), HotKeyRole::Governance).is_err());
+        let ok = normalize_signing_key_secret(&"ab".repeat(32), HotKeyRole::Governance)
+            .expect("hex key");
+        assert_eq!(ok.expose_secret(), format!("0x{}", "ab".repeat(32)));
         let prefixed =
-            normalize_governance_key(&format!("0x{}", "cd".repeat(32))).expect("prefixed");
-        assert_eq!(prefixed, format!("0x{}", "cd".repeat(32)));
+            normalize_signing_key_secret(&format!("0x{}", "cd".repeat(32)), HotKeyRole::Governance)
+                .expect("prefixed");
+        assert_eq!(prefixed.expose_secret(), format!("0x{}", "cd".repeat(32)));
     }
 }

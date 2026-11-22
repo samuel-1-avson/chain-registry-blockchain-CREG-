@@ -41,9 +41,7 @@ impl LlmEscalationGate {
 }
 
 fn llm_enabled() -> bool {
-    std::env::var("CREG_LLM_ENABLED")
-        .map(|value| value.eq_ignore_ascii_case("true") || value == "1")
-        .unwrap_or(false)
+    common::parse_env_bool("CREG_LLM_ENABLED")
 }
 
 fn disabled_reason() -> String {

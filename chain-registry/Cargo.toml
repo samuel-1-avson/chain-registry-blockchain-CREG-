@@ -17,6 +17,7 @@ members = [
     "crates/faucet",
     "crates/relayer",
     "crates/secrets",
+    "crates/unpack",
 ]
 resolver = "2"
 

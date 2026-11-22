@@ -141,7 +141,7 @@ async fn start_test_node() -> (String, tokio::task::JoinHandle<()>) {
         listen_addr: "127.0.0.1:0".into(), // OS assigns a port
         data_dir: dir.path().to_path_buf(),
         node_id: "e2e-node".into(),
-        validator_privkey: Some(validator_privkey_hex),
+        validator_privkey: Some(validator_privkey_hex.into()),
         is_validator: true,
         peers: vec![],
         block_interval_secs: 1,
@@ -180,6 +180,7 @@ async fn start_test_node() -> (String, tokio::task::JoinHandle<()>) {
         pending_pool: PendingPool::new(),
         publisher_index: PublisherIndex::new(),
         validator_set_bootstrap: validator_set.clone(),
+        validator_set_snapshot: Arc::new(node::state::ArcSwap::from_pointee(validator_set.clone())),
         validator_set,
         package_rounds: std::collections::HashMap::new(),
         package_committees: std::collections::HashMap::new(),

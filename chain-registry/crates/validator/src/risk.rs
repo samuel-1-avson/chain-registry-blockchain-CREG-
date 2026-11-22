@@ -179,11 +179,9 @@ impl RiskAggregator {
         let llm_review_recommended = !llm_review_used
             && deterministic_score.max(advisory_score) >= self.llm_review_threshold;
 
-        let advisory_review = advisory_score >= self.review_threshold;
-
         let disposition = if deterministic_block {
             RiskDisposition::Block
-        } else if score >= self.review_threshold || high_findings > 0 || advisory_review {
+        } else if score >= self.review_threshold || high_findings > 0 {
             RiskDisposition::Review
         } else {
             RiskDisposition::Accept
@@ -258,9 +256,7 @@ fn env_u8(key: &str, default: u8) -> u8 {
 }
 
 fn env_truthy(key: &str) -> bool {
-    std::env::var(key)
-        .map(|value| value == "1" || value.eq_ignore_ascii_case("true"))
-        .unwrap_or(false)
+    common::parse_env_bool(key)
 }
 
 fn allow_testnet_dev_sandbox_bypass() -> bool {
@@ -278,7 +274,10 @@ fn is_deterministic_finding(id: &str) -> bool {
     if id.starts_with("OSV") {
         return id == "OSV002" && ml_validator::osv_block_critical_enabled();
     }
-    !matches!(id, "SA011" | "SA012") && !id.starts_with("LLM")
+    !matches!(
+        id,
+        "SA011" | "SA012" | "SB010" | "SB012" | "SB013" | "DF005" | "DF006" | "DF007"
+    ) && !id.starts_with("LLM")
 }
 
 fn build_reasons(findings: &[&Finding], reputation_delta: i32) -> Vec<String> {
@@ -423,7 +422,8 @@ mod tests {
         assert!(!summary.deterministic_block);
         assert_eq!(summary.deterministic_findings, 0);
         assert_eq!(summary.advisory_findings, 1);
-        assert_eq!(summary.disposition, RiskDisposition::Review);
+        assert_eq!(summary.disposition, RiskDisposition::Accept);
+        assert!(summary.llm_review_recommended);
     }
 
     #[test]
@@ -542,5 +542,48 @@ mod tests {
 
         assert!(!summary.deterministic_block);
         assert_eq!(summary.disposition, RiskDisposition::Review);
+    }
+
+    #[test]
+    fn sandbox_engine_findings_and_advisory_scores_do_not_perturb_evidence_digest() {
+        let _guard = ENV_LOCK.lock().unwrap();
+        let aggregator = RiskAggregator::default();
+        let pkg = PackageId::new("npm", "pkg", "1.0.0");
+        let bundles = AnalysisBundleSet::default();
+        let base_findings = vec![finding("SA005", FindingSeverity::Low)];
+        let base = aggregator.summarize(
+            &pkg,
+            &base_findings,
+            12.0,
+            5.0,
+            10.0,
+            None,
+            &bundles,
+            &reputation(0),
+        );
+
+        let mixed_findings = vec![
+            finding("SA005", FindingSeverity::Low),
+            finding("SB010", FindingSeverity::Medium),
+            finding("SB012", FindingSeverity::High),
+            finding("SB013", FindingSeverity::Low),
+            finding("DF005", FindingSeverity::High),
+            finding("LLM001", FindingSeverity::High),
+        ];
+        let mixed = aggregator.summarize(
+            &pkg,
+            &mixed_findings,
+            12.0,
+            95.0,
+            85.0,
+            None,
+            &bundles,
+            &reputation(0),
+        );
+
+        assert_eq!(base.evidence_digest, mixed.evidence_digest);
+        assert_eq!(base.disposition, mixed.disposition);
+        assert_eq!(base.score, mixed.score);
+        assert_eq!(base.band, mixed.band);
     }
 }

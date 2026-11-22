@@ -55,6 +55,9 @@ use utoipa_swagger_ui::SwaggerUi;
 pub(crate) use crate::package_admission::verify_publish_sig;
 
 const VALIDATOR_TRANSITION_MAX_BODY_BYTES: usize = 1024 * 1024;
+const SMALL_MUTATING_BODY_BYTES: usize = 64 * 1024;
+const OPERATOR_MAX_BODY_BYTES: usize = 128 * 1024;
+const PUBLIC_MAX_BODY_BYTES: usize = 2 * 1024 * 1024;
 
 #[cfg(test)]
 #[derive(Clone)]
@@ -104,6 +107,19 @@ pub fn router(
 ) -> Router {
     let sse_bus = Arc::clone(&event_bus);
     let ws_bus = Arc::clone(&event_bus);
+    let expose_public_metrics_docs = state
+        .try_read()
+        .map(|s| s.config.expose_public_metrics_docs)
+        .unwrap_or(true);
+
+    let metrics_and_docs: Router<SharedState> = Router::new()
+        .route("/metrics", get(prometheus_metrics))
+        .merge(SwaggerUi::new("/api-docs").url("/v1/openapi.json", ApiDoc::openapi()));
+    let metrics_and_docs = if expose_public_metrics_docs {
+        metrics_and_docs
+    } else {
+        metrics_and_docs.layer(axum::middleware::from_fn(private_api_acl_middleware))
+    };
 
     Router::new()
         .merge(public_routes(Arc::clone(&sse_bus), Arc::clone(&ws_bus)))
@@ -112,12 +128,41 @@ pub fn router(
         .merge(operator_routes())
         .merge(internal_routes())
         .merge(legacy_routes(sse_bus, ws_bus))
-        // OpenAPI spec + Swagger UI. SwaggerUi serves both /api-docs (HTML)
-        // and /v1/openapi.json (the JSON the explorer's `gen-types` consumes).
-        .merge(SwaggerUi::new("/api-docs").url("/v1/openapi.json", ApiDoc::openapi()))
+        .merge(metrics_and_docs)
         .fallback(api_fallback)
         .layer(TraceLayer::new_for_http())
-        .layer(RequestBodyLimitLayer::new(50 * 1024 * 1024))
+        .layer(RequestBodyLimitLayer::new(PUBLIC_MAX_BODY_BYTES))
+        .layer(axum::middleware::from_fn(rate_limit_middleware))
+        .layer(axum::extract::Extension(limiter))
+        .layer(axum::extract::Extension(admission_store))
+        .layer(axum::extract::Extension(event_bus))
+        .layer(axum::extract::Extension(tx_sender))
+        .layer(axum::extract::Extension(p2p_handle))
+        .layer(build_cors_layer(&cors_config))
+        .with_state(state)
+}
+
+/// Dedicated admin / observability router bound when `CREG_ADMIN_LISTEN` is
+/// configured (`VNA-32`). Keeps `/metrics` and OpenAPI docs off public interfaces
+/// while preserving `private_api_acl_middleware` on operator & internal routes.
+pub fn admin_router(
+    state: SharedState,
+    event_bus: EventBus,
+    limiter: RateLimiter,
+    admission_store: Arc<AttestationStore>,
+    cors_config: crate::config::CorsConfig,
+    tx_sender: FinalizedTxSender,
+    p2p_handle: crate::p2p::P2PHandle,
+) -> Router {
+    Router::new()
+        .route("/metrics", get(prometheus_metrics))
+        .route("/v1/public/health", get(health))
+        .route("/v1/health", get(health))
+        .merge(SwaggerUi::new("/api-docs").url("/v1/openapi.json", ApiDoc::openapi()))
+        .merge(operator_routes())
+        .merge(internal_routes())
+        .layer(TraceLayer::new_for_http())
+        .layer(RequestBodyLimitLayer::new(OPERATOR_MAX_BODY_BYTES))
         .layer(axum::middleware::from_fn(rate_limit_middleware))
         .layer(axum::extract::Extension(limiter))
         .layer(axum::extract::Extension(admission_store))
@@ -206,9 +251,12 @@ fn publisher_routes() -> Router<SharedState> {
         .route("/v1/publisher/packages", post(submit_package))
         .route(
             "/v1/publisher/packages/:canonical/revoke",
-            post(revoke_package),
+            post(revoke_package).layer(RequestBodyLimitLayer::new(SMALL_MUTATING_BODY_BYTES)),
         )
-        .route("/v1/publisher/rotate-key", post(rotate_publisher_key))
+        .route(
+            "/v1/publisher/rotate-key",
+            post(rotate_publisher_key).layer(RequestBodyLimitLayer::new(SMALL_MUTATING_BODY_BYTES)),
+        )
         .route(
             "/v1/publisher/namespaces/lifecycle",
             post(submit_namespace_lifecycle),
@@ -237,19 +285,26 @@ fn validator_routes() -> Router<SharedState> {
             "/v1/validator/namespace-authority/certificates",
             post(assemble_namespace_authority_certificate),
         )
+        .route(
+            "/v1/validator/registrations/:evm_address",
+            delete(delete_validator_registration),
+        )
         .layer(axum::middleware::from_fn(private_api_acl_middleware));
 
     Router::new()
-        .route("/v1/validator/register", post(register_validator_identity))
+        .route(
+            "/v1/validator/register",
+            post(register_validator_identity)
+                .layer(RequestBodyLimitLayer::new(SMALL_MUTATING_BODY_BYTES)),
+        )
         .route(
             "/v1/validator/registrations",
             get(list_validator_registrations),
         )
         .route(
-            "/v1/validator/registrations/:evm_address",
-            delete(delete_validator_registration),
+            "/v1/validator/consensus/vote",
+            post(receive_vote).layer(RequestBodyLimitLayer::new(SMALL_MUTATING_BODY_BYTES)),
         )
-        .route("/v1/validator/consensus/vote", post(receive_vote))
         .route("/v1/validator/consensus/state", get(consensus_state))
         .route("/v1/validator/consensus/pbft", get(consensus_pbft))
         .route(
@@ -284,6 +339,7 @@ fn operator_routes() -> Router<SharedState> {
             "/v1/operator/governance/proposals/:id/execute",
             post(governance_execute),
         )
+        .layer(RequestBodyLimitLayer::new(OPERATOR_MAX_BODY_BYTES))
         .layer(axum::middleware::from_fn(private_api_acl_middleware))
 }
 
@@ -298,6 +354,7 @@ fn internal_routes() -> Router<SharedState> {
             post(receive_admission_attestation),
         )
         .route("/v1/internal/appeals/:id/audit", post(submit_audit))
+        .layer(RequestBodyLimitLayer::new(SMALL_MUTATING_BODY_BYTES))
         .layer(axum::middleware::from_fn(private_api_acl_middleware))
 }
 
@@ -310,18 +367,25 @@ fn legacy_public_routes(sse_bus: EventBus, ws_bus: EventBus) -> Router<SharedSta
         // Health & chain
         .route("/v1/health", get(health))
         .route("/health", get(health))
-        .route("/metrics", get(prometheus_metrics))
-        .route("/rpc", post(crate::json_rpc::handle))
-        .route("/jsonrpc", post(crate::json_rpc::handle))
+        .route(
+            "/rpc",
+            post(crate::json_rpc::handle)
+                .layer(RequestBodyLimitLayer::new(SMALL_MUTATING_BODY_BYTES)),
+        )
+        .route(
+            "/jsonrpc",
+            post(crate::json_rpc::handle)
+                .layer(RequestBodyLimitLayer::new(SMALL_MUTATING_BODY_BYTES)),
+        )
         .route("/v1/chain/stats", get(chain_stats))
-        .route("/v1/validators/register", post(register_validator_identity))
+        .route(
+            "/v1/validators/register",
+            post(register_validator_identity)
+                .layer(RequestBodyLimitLayer::new(SMALL_MUTATING_BODY_BYTES)),
+        )
         .route(
             "/v1/validators/registrations",
             get(list_validator_registrations),
-        )
-        .route(
-            "/v1/validators/registrations/:evm_address",
-            delete(delete_validator_registration),
         )
         .route("/v1/bridge/status", get(bridge_status))
         .route("/v1/bridge/anchors", get(bridge_anchors))
@@ -335,7 +399,10 @@ fn legacy_public_routes(sse_bus: EventBus, ws_bus: EventBus) -> Router<SharedSta
             "/v1/packages/:canonical/committee",
             get(get_package_committee),
         )
-        .route("/v1/packages/:canonical/revoke", post(revoke_package))
+        .route(
+            "/v1/packages/:canonical/revoke",
+            post(revoke_package).layer(RequestBodyLimitLayer::new(SMALL_MUTATING_BODY_BYTES)),
+        )
         .route("/v1/packages/:canonical/proof", get(get_proof))
         .route("/v1/transparency/:log_id/head", get(get_transparency_head))
         .route(
@@ -375,10 +442,16 @@ fn legacy_public_routes(sse_bus: EventBus, ws_bus: EventBus) -> Router<SharedSta
         // Validator detail
         .route("/v1/validators/:address", get(get_validator_profile))
         // Consensus
-        .route("/v1/consensus/vote", post(receive_vote))
+        .route(
+            "/v1/consensus/vote",
+            post(receive_vote).layer(RequestBodyLimitLayer::new(SMALL_MUTATING_BODY_BYTES)),
+        )
         .route("/v1/consensus/state", get(consensus_state))
         .route("/v1/consensus/pbft", get(consensus_pbft))
-        .route("/v1/publishers/rotate-key", post(rotate_publisher_key))
+        .route(
+            "/v1/publishers/rotate-key",
+            post(rotate_publisher_key).layer(RequestBodyLimitLayer::new(SMALL_MUTATING_BODY_BYTES)),
+        )
         .route(
             "/v1/publishers/namespaces/lifecycle",
             post(submit_namespace_lifecycle),
@@ -409,12 +482,17 @@ fn legacy_private_routes() -> Router<SharedState> {
         .route("/v1/p2p/status", get(p2p_status))
         .route("/v1/metrics/history", get(metrics_history))
         .route("/v1/pending", get(list_pending))
+        .route(
+            "/v1/validators/registrations/:evm_address",
+            delete(delete_validator_registration),
+        )
         .route("/v1/blocks/announce", post(receive_block_announcement))
         .route(
             "/v1/consensus/admission-attestation",
             post(receive_admission_attestation),
         )
         .route("/v1/appeals/:id/audit", post(submit_audit))
+        .layer(RequestBodyLimitLayer::new(OPERATOR_MAX_BODY_BYTES))
         .layer(axum::middleware::from_fn(private_api_acl_middleware))
 }
 
@@ -668,46 +746,67 @@ fn private_api_authorized(headers: &axum::http::HeaderMap, secret: &str) -> bool
 }
 
 fn constant_time_eq(left: &str, right: &str) -> bool {
-    let left = left.as_bytes();
-    let right = right.as_bytes();
-    if left.len() != right.len() {
-        return false;
-    }
+    use subtle::ConstantTimeEq;
 
-    let mut diff = 0u8;
-    for (a, b) in left.iter().zip(right.iter()) {
-        diff |= a ^ b;
-    }
-    diff == 0
+    // Hashing both inputs prevents secret-length timing side-channels (`VNA-08`).
+    let left_digest = common::sha256(left.as_bytes());
+    let right_digest = common::sha256(right.as_bytes());
+    bool::from(left_digest.ct_eq(&right_digest))
 }
 
 // ─── Handlers ────────────────────────────────────────────────────────────────
 
-async fn health(State(state): State<SharedState>) -> impl IntoResponse {
-    // MAL-001: surface the sandbox engine so operators/monitoring can verify
-    // public validators are not running with the dev bypass. Detection is
-    // cached after the first call. Read-only nodes (observer pool) proxy the
-    // validator fleet status from CREG_PEERS when they have no local engine.
-    let s = state.read().await;
+async fn health(
+    State(state): State<SharedState>,
+    health_rx: Option<
+        axum::extract::Extension<tokio::sync::watch::Receiver<crate::state::NodeHealthSnapshot>>,
+    >,
+) -> impl IntoResponse {
+    if let Some(axum::extract::Extension(rx)) = health_rx {
+        let snap = rx.borrow().clone();
+        return Json(serde_json::json!({
+            "status":  "ok",
+            "node_id": snap.node_id,
+            "is_validator": snap.is_validator,
+            "version": snap.version,
+            "validator_set_sync": snap.validator_set_sync,
+            "sandbox": snap.sandbox,
+            "sync": {
+                "lag_blocks": snap.sync_lag_blocks,
+                "max_peer_tip": snap.sync_max_peer_tip,
+                "healthy": snap.sync_lag_blocks <= 10,
+            },
+        }));
+    }
+    // Fallback path for router unit tests without background watcher layer.
+    let (node_id, is_validator, peers, validator_set_sync, sync_lag_blocks, sync_max_peer_tip) = {
+        let s = state.read().await;
+        (
+            s.config.node_id.clone(),
+            s.config.is_validator,
+            s.config.peers.clone(),
+            s.validator_set_sync.clone(),
+            s.sync_lag_blocks,
+            s.sync_max_peer_tip,
+        )
+    };
     let mut sandbox = validator::sandbox::engine_status().await;
-    if !s.config.is_validator && sandbox.engine == "none" {
-        if let Some(peer_sandbox) =
-            validator::sandbox::fleet_sandbox_from_peers(&s.config.peers).await
-        {
+    if !is_validator && sandbox.engine == "none" {
+        if let Some(peer_sandbox) = validator::sandbox::fleet_sandbox_from_peers(&peers).await {
             sandbox = peer_sandbox;
         }
     }
     Json(serde_json::json!({
         "status":  "ok",
-        "node_id": s.config.node_id,
-        "is_validator": s.config.is_validator,
+        "node_id": node_id,
+        "is_validator": is_validator,
         "version": env!("CARGO_PKG_VERSION"),
-        "validator_set_sync": s.validator_set_sync.clone(),
+        "validator_set_sync": validator_set_sync,
         "sandbox": sandbox,
         "sync": {
-            "lag_blocks": s.sync_lag_blocks,
-            "max_peer_tip": s.sync_max_peer_tip,
-            "healthy": s.sync_lag_blocks <= 10,
+            "lag_blocks": sync_lag_blocks,
+            "max_peer_tip": sync_max_peer_tip,
+            "healthy": sync_lag_blocks <= 10,
         },
     }))
 }
@@ -1064,7 +1163,7 @@ async fn runtime_config(State(state): State<SharedState>) -> impl IntoResponse {
             .last_finalized_source_block,
         node_id: s.config.node_id.clone(),
         validator_pubkey: s.config.validator_privkey.as_ref().and_then(|pk| {
-            let raw = pk.strip_prefix("0x").unwrap_or(pk.as_str());
+            let raw = pk.expose_secret().strip_prefix("0x").unwrap_or(pk.expose_secret());
             if let Ok(bytes) = hex::decode(raw) {
                 if let Ok(sk) = common::crypto::SigningKey::from_seed(
                     common::crypto::SignatureScheme::Ed25519,
@@ -1394,22 +1493,12 @@ async fn delete_validator_registration(
 
     let mut s = state.write().await;
     match s.validator_registrations.remove(&key) {
-        Some(removed) => {
-            // Evict the validator from the in-memory validator set so the
-            // delete is immediately visible to `/v1/nodes` consumers.
-            let identity = removed.identity.normalized();
-            s.validator_set.validators.retain(|v| {
-                v.id != identity.node_id
-                    && v.pubkey != identity.ed25519_pubkey
-                    && !v.eth_address.eq_ignore_ascii_case(&identity.evm_address)
-            });
-            Json(serde_json::json!({
-                "removed": true,
-                "evm_address": address,
-                "node_id": removed.identity.node_id,
-            }))
-            .into_response()
-        }
+        Some(removed) => Json(serde_json::json!({
+            "removed": true,
+            "evm_address": address,
+            "node_id": removed.identity.node_id,
+        }))
+        .into_response(),
         None => (
             StatusCode::NOT_FOUND,
             Json(ErrorResponse {
@@ -2646,7 +2735,7 @@ async fn revoke_package(
             .map_err(|_| anyhow::anyhow!("signature is not valid hex"))?;
         let sig = Signature::from_bytes(SignatureScheme::Ed25519, &sig_bytes)
             .map_err(|_| anyhow::anyhow!("signature is not a valid Ed25519 signature"))?;
-        vk.verify(sig_msg.as_bytes(), &sig, VerifyMode::Permissive)
+        vk.verify(sig_msg.as_bytes(), &sig, VerifyMode::Strict)
             .map_err(|_| anyhow::anyhow!("Signature verification failed"))
     })();
 
@@ -2695,12 +2784,7 @@ async fn revoke_package(
     // ── 3. Queue the revocation transaction ───────────────────────────────────
     match package_record {
         Some(record) => {
-            let tx = common::Transaction::Revoke {
-                package_canonical: canonical.clone(),
-                reason: req.reason.clone(),
-                revoked_by: req.revoker_pubkey.clone(),
-                evidence_hash: record.content_hash.clone(),
-            };
+            let tx = crate::revocation_gossip::transaction(&proof, &record.content_hash);
             match crate::revocation_gossip::admit(&state, &proof).await {
                 Ok(false) => {
                     return Json(serde_json::json!({ "status": "already_committed",
@@ -3050,6 +3134,7 @@ async fn get_transaction(
                 common::Transaction::Revoke {
                     package_canonical, ..
                 } => package_canonical.clone(),
+                common::Transaction::RevokeV2 { request, .. } => request.package_canonical.clone(),
                 common::Transaction::Slash { validator_id, .. } => validator_id.clone(),
                 common::Transaction::ValidatorJoin { validator_id, .. } => validator_id.clone(),
                 common::Transaction::ValidatorLeave { validator_id } => validator_id.clone(),
@@ -3110,7 +3195,7 @@ async fn receive_block_announcement(
             .map_err(|_| anyhow::anyhow!("signature is not valid hex"))?;
         let sig = Signature::from_bytes(SignatureScheme::Ed25519, &sig_bytes)
             .map_err(|_| anyhow::anyhow!("signature is not a valid Ed25519 signature"))?;
-        vk.verify(sig_msg.as_bytes(), &sig, VerifyMode::Permissive)
+        vk.verify(sig_msg.as_bytes(), &sig, VerifyMode::Strict)
             .map_err(|_| anyhow::anyhow!("Signature verification failed"))
     })();
 
@@ -3180,6 +3265,7 @@ fn tx_kind_label(tx: &Transaction) -> &'static str {
         Transaction::Publish(_) => "publish",
         Transaction::PublishAuthorizedV1 { .. } => "publish-authorized-v1",
         Transaction::Revoke { .. } => "revoke",
+        Transaction::RevokeV2 { .. } => "revoke-v2",
         Transaction::Slash { .. } => "slash",
         Transaction::ValidatorJoin { .. } => "validator-join",
         Transaction::ValidatorLeave { .. } => "validator-leave",
@@ -3196,6 +3282,7 @@ fn tx_canonical(tx: &Transaction) -> Option<String> {
         Transaction::Revoke {
             package_canonical, ..
         } => Some(package_canonical.clone()),
+        Transaction::RevokeV2 { request, .. } => Some(request.package_canonical.clone()),
         Transaction::RotatePublisherKey {
             canonical_prefix, ..
         } => Some(canonical_prefix.clone()),
@@ -3209,6 +3296,7 @@ fn tx_canonical(tx: &Transaction) -> Option<String> {
 fn tx_touches_address(tx: &Transaction, addr: &str) -> bool {
     match tx {
         Transaction::Revoke { revoked_by, .. } => revoked_by.to_ascii_lowercase() == addr,
+        Transaction::RevokeV2 { request, .. } => request.revoker_pubkey.eq_ignore_ascii_case(addr),
         Transaction::Slash { validator_id, .. } => validator_id.to_ascii_lowercase() == addr,
         Transaction::ValidatorJoin { validator_id, .. } => {
             validator_id.to_ascii_lowercase() == addr
@@ -5193,10 +5281,8 @@ mod tests {
     use tonic::{Code, Request as GrpcRequest};
     use tower::ServiceExt;
 
-    static API_ENV_LOCK: std::sync::OnceLock<Mutex<()>> = std::sync::OnceLock::new();
-
     fn api_env_lock() -> &'static Mutex<()> {
-        API_ENV_LOCK.get_or_init(|| Mutex::new(()))
+        crate::config::global_test_env_lock()
     }
 
     #[test]
@@ -5590,6 +5676,9 @@ mod tests {
             pending_pool: PendingPool::new(),
             publisher_index: PublisherIndex::new(),
             validator_set_bootstrap: common::ValidatorSet::default(),
+            validator_set_snapshot: Arc::new(crate::state::ArcSwap::from_pointee(
+                common::ValidatorSet::default(),
+            )),
             validator_set: common::ValidatorSet::default(),
             package_rounds: HashMap::new(),
             package_committees: HashMap::new(),
@@ -6776,15 +6865,13 @@ mod tests {
             .await
             .expect("revoke transaction should be queued");
         match queued_tx {
-            Transaction::Revoke {
-                package_canonical,
-                reason: queued_reason,
-                revoked_by,
+            Transaction::RevokeV2 {
+                request,
                 evidence_hash,
             } => {
-                assert_eq!(package_canonical, canonical);
-                assert_eq!(queued_reason, reason);
-                assert_eq!(revoked_by, publisher_pubkey);
+                assert_eq!(request.package_canonical, canonical);
+                assert_eq!(request.reason, reason);
+                assert_eq!(request.revoker_pubkey, publisher_pubkey);
                 assert_eq!(evidence_hash, record.content_hash);
             }
             other => panic!("expected revoke transaction, got {:?}", other),
@@ -7186,8 +7273,10 @@ mod tests {
 
         {
             let mut s = state.write().await;
-            s.validator_set =
-                common::ValidatorSet::new(vec![validator("node-1", &validator_pubkey)]);
+            s.set_validator_set(common::ValidatorSet::new(vec![validator(
+                "node-1",
+                &validator_pubkey,
+            )]));
         }
 
         let event_bus = new_event_bus();
@@ -7240,8 +7329,10 @@ mod tests {
 
         {
             let mut s = state.write().await;
-            s.validator_set =
-                common::ValidatorSet::new(vec![validator("node-1", &validator_pubkey)]);
+            s.set_validator_set(common::ValidatorSet::new(vec![validator(
+                "node-1",
+                &validator_pubkey,
+            )]));
         }
 
         let event_bus = new_event_bus();
@@ -7288,8 +7379,10 @@ mod tests {
 
         {
             let mut s = state.write().await;
-            s.validator_set =
-                common::ValidatorSet::new(vec![validator("node-1", &validator_pubkey)]);
+            s.set_validator_set(common::ValidatorSet::new(vec![validator(
+                "node-1",
+                &validator_pubkey,
+            )]));
         }
 
         let event_bus = new_event_bus();
@@ -7359,8 +7452,10 @@ mod tests {
 
         {
             let mut s = state.write().await;
-            s.validator_set =
-                common::ValidatorSet::new(vec![validator("node-1", &validator_pubkey)]);
+            s.set_validator_set(common::ValidatorSet::new(vec![validator(
+                "node-1",
+                &validator_pubkey,
+            )]));
             s.record_package_vote(
                 canonical,
                 common::ValidatorSignature {
@@ -7490,8 +7585,10 @@ mod tests {
 
         {
             let mut s = state.write().await;
-            s.validator_set =
-                common::ValidatorSet::new(vec![validator("node-1", &validator_pubkey)]);
+            s.set_validator_set(common::ValidatorSet::new(vec![validator(
+                "node-1",
+                &validator_pubkey,
+            )]));
             s.pending_pool.insert(req);
             s.record_package_vote(
                 &canonical,
@@ -7716,6 +7813,7 @@ mod tests {
     async fn governance_writes_reject_missing_and_wrong_operator_credentials() -> anyhow::Result<()>
     {
         let _env_lock = api_env_lock().lock().await;
+        let _backend = EnvRestore::remove("CREG_SECRETS_BACKEND");
         let _api_key = EnvRestore::set(OPERATOR_API_KEY_ENV, "gov-write-secret");
         let _gov_key = EnvRestore::set(
             crate::governance_api::GOVERNANCE_KEY_ENV,
@@ -7803,6 +7901,7 @@ mod tests {
     #[tokio::test]
     async fn public_and_legacy_governance_paths_do_not_accept_writes() -> anyhow::Result<()> {
         let _env_lock = api_env_lock().lock().await;
+        let _backend = EnvRestore::remove("CREG_SECRETS_BACKEND");
         let _api_key = EnvRestore::set(OPERATOR_API_KEY_ENV, "gov-write-secret");
         let _gov_key = EnvRestore::set(
             crate::governance_api::GOVERNANCE_KEY_ENV,
@@ -7842,6 +7941,7 @@ mod tests {
     async fn governance_writes_do_not_use_bridge_key_and_require_dedicated_signer(
     ) -> anyhow::Result<()> {
         let _env_lock = api_env_lock().lock().await;
+        let _backend = EnvRestore::remove("CREG_SECRETS_BACKEND");
         let _api_key = EnvRestore::set(OPERATOR_API_KEY_ENV, "gov-write-secret");
         let _gov_key = EnvRestore::remove(crate::governance_api::GOVERNANCE_KEY_ENV);
         let (state, _tempdir, p2p_handle, tx_sender, _tx_receiver) = make_test_state(0).await?;
@@ -7891,6 +7991,7 @@ mod tests {
     async fn authorized_governance_writes_reach_l1_and_do_not_look_unauthenticated(
     ) -> anyhow::Result<()> {
         let _env_lock = api_env_lock().lock().await;
+        let _backend = EnvRestore::remove("CREG_SECRETS_BACKEND");
         let _api_key = EnvRestore::set(OPERATOR_API_KEY_ENV, "gov-write-secret");
         let _gov_key = EnvRestore::set(
             crate::governance_api::GOVERNANCE_KEY_ENV,
@@ -7947,6 +8048,7 @@ mod tests {
     #[tokio::test]
     async fn governance_submit_rejects_invalid_payload_after_auth() -> anyhow::Result<()> {
         let _env_lock = api_env_lock().lock().await;
+        let _backend = EnvRestore::remove("CREG_SECRETS_BACKEND");
         let _api_key = EnvRestore::set(OPERATOR_API_KEY_ENV, "gov-write-secret");
         let _gov_key = EnvRestore::set(
             crate::governance_api::GOVERNANCE_KEY_ENV,
@@ -7969,6 +8071,139 @@ mod tests {
         let body_json: Value =
             serde_json::from_slice(&to_bytes(zero_target.into_body(), usize::MAX).await?)?;
         assert_eq!(body_json["error"], "invalid_governance_proposal");
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn unauthenticated_delete_registration_is_rejected_and_preserves_validator_set(
+    ) -> anyhow::Result<()> {
+        let _env_lock = api_env_lock().lock().await;
+        let _api_key = EnvRestore::set(OPERATOR_API_KEY_ENV, "reg-admin-secret");
+        let (state, _tempdir, p2p_handle, tx_sender, _tx_receiver) = make_test_state(0).await?;
+        let evm = "0x1111111111111111111111111111111111111111";
+        {
+            let mut s = state.write().await;
+            s.validator_set.validators.push(common::Validator {
+                id: "val-1".into(),
+                pubkey: "aa".repeat(32),
+                eth_address: evm.into(),
+                status: "online".into(),
+                ..Default::default()
+            });
+            s.validator_registrations.insert(
+                evm.into(),
+                ValidatorRegistrationStatus {
+                    alias: "val-1".into(),
+                    identity: ValidatorIdentity {
+                        evm_address: evm.into(),
+                        node_id: "val-1".into(),
+                        ed25519_pubkey: "aa".repeat(32),
+                    },
+                    registered_with_node: true,
+                    applied_on_chain: true,
+                    governance_approved: true,
+                    admitted_to_consensus: true,
+                    active: true,
+                    staking_state: "active".into(),
+                    status: "active".into(),
+                    stake: 100,
+                    reputation: 100,
+                    ..Default::default()
+                },
+            );
+        }
+
+        let app = router(
+            Arc::clone(&state),
+            new_event_bus(),
+            RateLimiter::new(RateLimitConfig::default()),
+            AttestationStore::new(),
+            crate::config::CorsConfig::default(),
+            tx_sender,
+            p2p_handle,
+        );
+
+        for path in [
+            format!("/v1/validator/registrations/{evm}"),
+            format!("/v1/validators/registrations/{evm}"),
+        ] {
+            let unauth = app
+                .clone()
+                .oneshot(Request::delete(&path).body(Body::empty())?)
+                .await?;
+            assert_eq!(unauth.status(), StatusCode::UNAUTHORIZED);
+        }
+        assert_eq!(state.read().await.validator_set.validators.len(), 1);
+        assert_eq!(state.read().await.validator_registrations.len(), 1);
+
+        let authed = app
+            .oneshot(
+                Request::delete(format!("/v1/validator/registrations/{evm}"))
+                    .header(OPERATOR_KEY_HEADER, "reg-admin-secret")
+                    .body(Body::empty())?,
+            )
+            .await?;
+        assert_eq!(authed.status(), StatusCode::OK);
+        assert!(state.read().await.validator_registrations.is_empty());
+        assert_eq!(
+            state.read().await.validator_set.validators.len(),
+            1,
+            "registration deletion must not directly mutate consensus validator_set"
+        );
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn public_validator_protects_metrics_docs_and_caps_rpc_body() -> anyhow::Result<()> {
+        let _env_lock = api_env_lock().lock().await;
+        let _api_key = EnvRestore::set(OPERATOR_API_KEY_ENV, "metrics-secret");
+        let (state, _tempdir, p2p_handle, tx_sender, _tx_receiver) = make_test_state(0).await?;
+        state.write().await.config.expose_public_metrics_docs = false;
+
+        let app = router(
+            state,
+            new_event_bus(),
+            RateLimiter::new(RateLimitConfig::default()),
+            AttestationStore::new(),
+            crate::config::CorsConfig::default(),
+            tx_sender,
+            p2p_handle,
+        );
+
+        let unauth_metrics = app
+            .clone()
+            .oneshot(Request::get("/metrics").body(Body::empty())?)
+            .await?;
+        assert_eq!(unauth_metrics.status(), StatusCode::UNAUTHORIZED);
+
+        let authed_metrics = app
+            .clone()
+            .oneshot(
+                Request::get("/metrics")
+                    .header(OPERATOR_KEY_HEADER, "metrics-secret")
+                    .body(Body::empty())?,
+            )
+            .await?;
+        assert_eq!(authed_metrics.status(), StatusCode::OK);
+
+        let unauth_docs = app
+            .clone()
+            .oneshot(Request::get("/v1/openapi.json").body(Body::empty())?)
+            .await?;
+        assert_eq!(unauth_docs.status(), StatusCode::UNAUTHORIZED);
+
+        let oversized_rpc = app
+            .oneshot(
+                Request::post("/rpc")
+                    .header("content-type", "application/json")
+                    .body(Body::from(vec![b' '; SMALL_MUTATING_BODY_BYTES + 1]))?,
+            )
+            .await?;
+        assert_eq!(oversized_rpc.status(), StatusCode::PAYLOAD_TOO_LARGE);
+
+        assert!(constant_time_eq("secret-1", "secret-1"));
+        assert!(!constant_time_eq("secret-1", "secret-2"));
+        assert!(!constant_time_eq("short", "longer-secret"));
         Ok(())
     }
 }
