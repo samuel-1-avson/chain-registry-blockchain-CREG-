@@ -1317,7 +1317,7 @@ fn verify_ed25519_identity_signature(
         .map_err(|error| format!("Invalid Ed25519 identity signature: {error}"))?;
 
     verifying_key
-        .verify(message.as_bytes(), &signature, VerifyMode::Permissive)
+        .verify(message.as_bytes(), &signature, VerifyMode::Strict)
         .map_err(|error| format!("Invalid Ed25519 identity signature: {error}"))
 }
 
@@ -3799,7 +3799,7 @@ async fn rotate_publisher_key(
             .map_err(|_| anyhow::anyhow!("bad pubkey"))?;
         let sig = Signature::from_bytes(SignatureScheme::Ed25519, &sig_bytes)
             .map_err(|_| anyhow::anyhow!("bad signature"))?;
-        vk.verify(msg.as_bytes(), &sig, VerifyMode::Permissive)
+        vk.verify(msg.as_bytes(), &sig, VerifyMode::Strict)
             .map_err(|_| anyhow::anyhow!("signature verification failed"))
     };
 
@@ -5097,10 +5097,7 @@ async fn receive_vote(
                 &vote_metadata,
             )
         };
-        if vk
-            .verify(msg.as_bytes(), &sig, VerifyMode::Permissive)
-            .is_err()
-        {
+        if vk.verify(msg.as_bytes(), &sig, VerifyMode::Strict).is_err() {
             return (
                 StatusCode::UNAUTHORIZED,
                 Json(ErrorResponse {

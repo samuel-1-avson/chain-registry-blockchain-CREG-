@@ -921,7 +921,7 @@ pub(crate) fn verify_publish_sig(req: &PublishRequest) -> anyhow::Result<()> {
         let sig = Signature::from_bytes(SignatureScheme::Ed25519, &sig_bytes)
             .map_err(|_| anyhow::anyhow!("Invalid Ed25519 signature"))?;
         return vk
-            .verify(msg.as_bytes(), &sig, VerifyMode::Permissive)
+            .verify(msg.as_bytes(), &sig, VerifyMode::Strict)
             .map_err(|_| anyhow::anyhow!("Signature verification failed"));
     }
 
@@ -961,10 +961,7 @@ pub(crate) fn verify_publish_sig(req: &PublishRequest) -> anyhow::Result<()> {
             Ok(s) => s,
             Err(_) => continue,
         };
-        if vk
-            .verify(msg.as_bytes(), &sig, VerifyMode::Permissive)
-            .is_ok()
-        {
+        if vk.verify(msg.as_bytes(), &sig, VerifyMode::Strict).is_ok() {
             valid += 1;
             if is_primary_pubkey {
                 primary_signed = true;

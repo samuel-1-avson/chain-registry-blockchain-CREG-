@@ -178,6 +178,7 @@ impl StructuredReviewer {
             analysis_duration_ms: duration_ms,
             degraded: false,
             degraded_reason: None,
+            agent_report: None,
         }
     }
 }

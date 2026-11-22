@@ -629,7 +629,7 @@ fn verify_publisher_signatures(
             return false;
         };
         pubkey
-            .verify(message.as_bytes(), &signature, VerifyMode::Permissive)
+            .verify(message.as_bytes(), &signature, VerifyMode::Strict)
             .is_ok()
     };
 

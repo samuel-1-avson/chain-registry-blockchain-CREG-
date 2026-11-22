@@ -861,7 +861,7 @@ impl AuthorityChallengeV1 {
             .verify(
                 self.signing_message().as_bytes(),
                 &signature,
-                VerifyMode::Permissive,
+                VerifyMode::Strict,
             )
             .map_err(|_| {
                 AuthorityAdapterError::InvalidRequest(

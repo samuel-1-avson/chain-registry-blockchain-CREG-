@@ -1,0 +1,65 @@
+# Chain Registry Validator AI Configuration (ADR-018 Layer 4)
+# Operators may point `CREG_AI_CONFIG` to a customized copy of this file.
+# Secrets MUST use `env:<VAR_NAME>` or `vault:<kv2_path>#<field>` references;
+# raw inline API keys are rejected fail-closed at startup.
+
+[agent]
+mode = "hybrid_escalate"         # "off" | "triage_only" | "hybrid_escalate" | "deep_all"
+shadow_mode = true               # Incremental shadow telemetry beside deterministic consensus
+triage_score_threshold = 20
+max_steps = 8
+max_sandbox_replays = 3
+max_total_tokens = 32000
+wall_timeout_secs = 45
+max_daily_api_spend_usd = 25.0
+
+[providers.local_ollama]
+kind = "ollama"
+base_url = "http://127.0.0.1:11434"
+model = "qwen2.5-coder:14b"
+model_family = "qwen"
+max_concurrent_requests = 2
+timeout_secs = 25
+
+[providers.local_vllm]
+kind = "vllm"                    # Also supports "llama_cpp" | "sglang" | "lm_studio" | "openai_compatible"
+base_url = "http://127.0.0.1:8000/v1"
+model = "Qwen/Qwen2.5-Coder-32B-Instruct-AWQ"
+model_family = "qwen"
+max_concurrent_requests = 4
+timeout_secs = 25
+
+[providers.gemini_api]
+kind = "gemini"
+model = "gemini-2.5-pro"
+model_family = "gemini"
+api_key_secret_ref = "vault:secret/data/creg/llm#gemini_api_key"
+max_concurrent_requests = 8
+timeout_secs = 30
+cost_per_1k_input_usd = 0.00125
+cost_per_1k_output_usd = 0.005
+
+[providers.anthropic_api]
+kind = "anthropic"
+model = "claude-sonnet-4-6"
+model_family = "claude"
+api_key_secret_ref = "vault:secret/data/creg/llm#anthropic_api_key"
+max_concurrent_requests = 8
+timeout_secs = 30
+cost_per_1k_input_usd = 0.003
+cost_per_1k_output_usd = 0.015
+
+[providers.openai_api]
+kind = "openai"
+model = "gpt-4o"
+model_family = "openai"
+api_key_secret_ref = "vault:secret/data/creg/llm#openai_api_key"
+max_concurrent_requests = 8
+timeout_secs = 30
+cost_per_1k_input_usd = 0.0025
+cost_per_1k_output_usd = 0.010
+
+[routing]
+tier_fast = "local_ollama"
+tier_deep = "local_vllm"
+tier_crosscheck = "gemini_api"

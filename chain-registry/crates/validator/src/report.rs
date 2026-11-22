@@ -207,6 +207,65 @@ impl ValidationReport {
             }
         }
 
+        if let Some(ref agent) = review.agent_report {
+            if !agent.injection_attempts_detected.is_empty() {
+                self.findings.push(Finding {
+                    id: "AI-PROMPT-INJECTION-ATTEMPT".into(),
+                    title: "Layer 4 prompt-injection attempt detected".into(),
+                    severity: FindingSeverity::High,
+                    description: format!(
+                        "Untrusted package data contained prompt-injection signatures ({}); disposition clamped to '{}'.",
+                        agent.injection_attempts_detected.join(", "),
+                        agent.disposition
+                    ),
+                    file: "ai-agent".into(),
+                    line: None,
+                });
+            }
+
+            if agent.disposition != crate::ai_agent::SemanticDisposition::Approve
+                || !agent.witnesses.is_empty()
+            {
+                let severity = if !agent.witnesses.is_empty()
+                    || agent.disposition == crate::ai_agent::SemanticDisposition::Reject
+                {
+                    FindingSeverity::Critical
+                } else {
+                    FindingSeverity::High
+                };
+                let prefix = if agent.shadow_mode {
+                    "Shadow Layer 4 Assessment"
+                } else {
+                    "Layer 4 Assessment"
+                };
+                self.findings.push(Finding {
+                    id: if agent.shadow_mode {
+                        "AI-SHADOW-001".into()
+                    } else {
+                        "AI-001".into()
+                    },
+                    title: format!(
+                        "{}: {} (score {}, witnesses {})",
+                        prefix,
+                        agent.disposition,
+                        agent.maliciousness_score,
+                        agent.witnesses.len()
+                    ),
+                    severity,
+                    description: format!(
+                        "Provider '{}' (family '{}') completed {} steps ({} tokens): {}",
+                        agent.provider_used,
+                        agent.model_family_used,
+                        agent.steps_taken,
+                        agent.total_tokens_used,
+                        agent.summary
+                    ),
+                    file: "ai-agent".into(),
+                    line: None,
+                });
+            }
+        }
+
         self.llm_review = Some(review);
     }
 
@@ -214,13 +273,23 @@ impl ValidationReport {
         self.deterministic_risk = Some(summary);
     }
 
+    fn is_shadow_ai_finding(&self, f: &Finding) -> bool {
+        f.id.starts_with("AI-")
+            && self
+                .llm_review
+                .as_ref()
+                .and_then(|r| r.agent_report.as_ref())
+                .is_some_and(|a| a.shadow_mode)
+    }
+
     /// True if any Critical or High findings were recorded.
     pub fn has_critical_findings(&self) -> bool {
         self.findings.iter().any(|f| {
-            matches!(
-                f.severity,
-                FindingSeverity::Critical | FindingSeverity::High
-            )
+            !self.is_shadow_ai_finding(f)
+                && matches!(
+                    f.severity,
+                    FindingSeverity::Critical | FindingSeverity::High
+                )
         })
     }
 
@@ -230,10 +299,11 @@ impl ValidationReport {
             .findings
             .iter()
             .filter(|f| {
-                matches!(
-                    f.severity,
-                    FindingSeverity::Critical | FindingSeverity::High
-                )
+                !self.is_shadow_ai_finding(f)
+                    && matches!(
+                        f.severity,
+                        FindingSeverity::Critical | FindingSeverity::High
+                    )
             })
             .collect();
         critical.sort_by(|a, b| {
@@ -262,6 +332,7 @@ fn max_deterministic_finding_score(findings: &[Finding]) -> f64 {
         .iter()
         .filter(|finding| {
             !finding.id.starts_with("LLM")
+                && !finding.id.starts_with("AI-")
                 && !matches!(
                     finding.id.as_str(),
                     "SA011" | "SA012" | "SB010" | "SB012" | "SB013" | "DF005" | "DF006" | "DF007"

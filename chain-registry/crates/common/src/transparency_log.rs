@@ -361,11 +361,7 @@ pub fn verify_signed_tree_head(signed: &SignedTreeHead, public_key_hex: &str) ->
         .context("invalid tree-head signature length")?;
     PublicKey::from_bytes(SignatureScheme::Ed25519, &key)
         .context("invalid log public key")?
-        .verify(
-            &signed.head.signing_bytes(),
-            &signature,
-            VerifyMode::Permissive,
-        )
+        .verify(&signed.head.signing_bytes(), &signature, VerifyMode::Strict)
         .context("tree-head signature verification failed")
 }
 
@@ -425,7 +421,7 @@ impl WitnessedTreeHead {
                 continue;
             };
             if PublicKey::from_bytes(SignatureScheme::Ed25519, &key)
-                .and_then(|key| key.verify(&payload, &signature, VerifyMode::Permissive))
+                .and_then(|key| key.verify(&payload, &signature, VerifyMode::Strict))
                 .is_ok()
             {
                 valid_witnesses += 1;

@@ -321,7 +321,7 @@ impl ChainSpec {
         );
 
         pubkey
-            .verify(message.as_bytes(), &signature, VerifyMode::Permissive)
+            .verify(message.as_bytes(), &signature, VerifyMode::Strict)
             .map_err(|_| anyhow::anyhow!("spec signature verification failed"))
     }
 

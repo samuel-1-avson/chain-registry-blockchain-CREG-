@@ -2137,6 +2137,7 @@ dependencies = [
  "reqwest 0.11.27",
  "serde",
  "serde_json",
+ "tokio",
  "tracing",
  "zeroize",
 ]
@@ -10835,6 +10836,7 @@ dependencies = [
  "anyhow",
  "base64 0.22.1",
  "bytes",
+ "chain-registry-secrets",
  "chrono",
  "common",
  "creg-unpack",

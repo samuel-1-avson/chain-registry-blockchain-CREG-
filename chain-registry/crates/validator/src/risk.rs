@@ -278,6 +278,7 @@ fn is_deterministic_finding(id: &str) -> bool {
         id,
         "SA011" | "SA012" | "SB010" | "SB012" | "SB013" | "DF005" | "DF006" | "DF007"
     ) && !id.starts_with("LLM")
+        && !id.starts_with("AI-")
 }
 
 fn build_reasons(findings: &[&Finding], reputation_delta: i32) -> Vec<String> {

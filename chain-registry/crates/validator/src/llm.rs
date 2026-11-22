@@ -128,6 +128,9 @@ pub struct LlmReview {
     pub degraded: bool,
     /// Reason for degraded mode, if applicable.
     pub degraded_reason: Option<String>,
+    /// Layer 4 bounded agentic investigation report (`ADR-018` Increment 5).
+    #[serde(default)]
+    pub agent_report: Option<crate::ai_agent::AgentInvestigationReport>,
 }
 
 impl LlmReview {
@@ -144,6 +147,7 @@ impl LlmReview {
             analysis_duration_ms: 0,
             degraded: true,
             degraded_reason: Some(reason.into()),
+            agent_report: None,
         }
     }
 }
@@ -1195,6 +1199,63 @@ pub async fn review_package(
 
     // Store in review cache
     SemanticCache::put_review(content_hash_str, &review);
+
+    review
+}
+
+/// Full Stage 4 entry point passing Layer 1–3 context (`AST`, binary inspection,
+/// initial `KernelBehaviorGraphV1`, and prior version artifacts) to the Layer 4
+/// bounded agentic orchestrator when enabled (`ADR-018` Increment 5).
+#[allow(clippy::too_many_arguments)]
+pub async fn review_package_with_context(
+    tarball: &[u8],
+    pkg_id: &PackageId,
+    manifest: &PackageManifest,
+    prior_findings: &[Finding],
+    content_hash_str: &str,
+    ast_index: Option<&ml_validator::ast_index::PackageAstIndexV1>,
+    binary_report: Option<&ml_validator::binary_inspect::BinaryInspectionReport>,
+    initial_kernel_graph: Option<&crate::kernel_sandbox::KernelBehaviorGraphV1>,
+    prev_manifest: Option<&PackageManifest>,
+    prev_sandbox: Option<&crate::sandbox::SandboxResult>,
+    policy_bundle_id: &str,
+) -> LlmReview {
+    let mut review =
+        review_package(tarball, pkg_id, manifest, prior_findings, content_hash_str).await;
+
+    if let Ok(ai_cfg) = crate::ai_agent::ValidatorAiConfig::from_env_or_file() {
+        if ai_cfg.agent.mode != crate::ai_agent::AgentMode::Off && !ai_cfg.providers.is_empty() {
+            let proxy = std::sync::Arc::new(crate::ai_agent::LlmProxy::new_http(ai_cfg));
+            let runner = crate::ai_agent::AgentRunner::new(proxy);
+            match runner
+                .investigate(crate::ai_agent::AgentInvestigationInput {
+                    pkg_id,
+                    content_hash: content_hash_str,
+                    tarball,
+                    manifest,
+                    report_findings: prior_findings,
+                    ast_index,
+                    binary_report,
+                    initial_kernel_graph,
+                    prev_manifest,
+                    prev_sandbox,
+                    policy_bundle_id,
+                })
+                .await
+            {
+                Ok(agent_report) => {
+                    review.agent_report = Some(agent_report);
+                }
+                Err(err) => {
+                    tracing::warn!(
+                        "[{}] Layer 4 AgentRunner failed (non-blocking shadow mode): {}",
+                        pkg_id.canonical(),
+                        err
+                    );
+                }
+            }
+        }
+    }
 
     review
 }

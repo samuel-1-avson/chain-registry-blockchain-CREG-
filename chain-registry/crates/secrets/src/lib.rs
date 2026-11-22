@@ -325,6 +325,85 @@ pub(crate) fn extract_vault_field(data: &serde_json::Value, role: HotKeyRole) ->
     None
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum SecretRefTarget<'a> {
+    Env(&'a str),
+    Vault { path: &'a str, field: &'a str },
+}
+
+fn validate_secret_ref_format(secret_ref: &str) -> Result<SecretRefTarget<'_>> {
+    let trimmed = secret_ref.trim();
+    if trimmed.is_empty() || trimmed != secret_ref {
+        bail!("secret reference must be non-empty and trimmed");
+    }
+    if trimmed.chars().any(char::is_control) {
+        bail!("secret reference must not contain control characters");
+    }
+    if let Some(var_name) = trimmed.strip_prefix("env:") {
+        let valid_var = !var_name.is_empty()
+            && var_name.len() <= 128
+            && var_name
+                .as_bytes()
+                .first()
+                .is_some_and(|b| b.is_ascii_uppercase())
+            && var_name
+                .bytes()
+                .all(|b| b.is_ascii_uppercase() || b.is_ascii_digit() || b == b'_');
+        if !valid_var {
+            bail!("invalid env: secret reference '{trimmed}'");
+        }
+        return Ok(SecretRefTarget::Env(var_name));
+    }
+    if let Some(rest) = trimmed.strip_prefix("vault:") {
+        let Some((path, field)) = rest.split_once('#') else {
+            bail!("vault: secret reference must use 'vault:<path>#<field>' syntax");
+        };
+        if path.is_empty()
+            || field.is_empty()
+            || path.contains("..")
+            || path.chars().any(char::is_whitespace)
+            || field.chars().any(char::is_whitespace)
+        {
+            bail!("invalid vault: secret reference '{trimmed}'");
+        }
+        return Ok(SecretRefTarget::Vault { path, field });
+    }
+    bail!("inline plaintext secrets are forbidden; use 'env:<VAR_NAME>' or 'vault:<path>#<field>'")
+}
+
+impl SecretsProvider {
+    /// Resolve an operator secret reference (`env:<VAR>` or `vault:<path>#<field>`)
+    /// into a zeroizing [`SecretString`] (`VNA-32`). Inline secret values are
+    /// always rejected.
+    pub async fn resolve_secret_ref(&self, secret_ref: &str) -> Result<SecretString> {
+        match validate_secret_ref_format(secret_ref)? {
+            SecretRefTarget::Env(var_name) => {
+                if self.backend == SecretsBackend::Vault && !common::parse_env_bool("CREG_TESTNET")
+                {
+                    bail!(
+                        "env: secret reference '{secret_ref}' is disallowed when CREG_SECRETS_BACKEND=vault and CREG_TESTNET=false"
+                    );
+                }
+                let val = std::env::var(var_name)
+                    .with_context(|| format!("missing secret environment variable '{var_name}'"))?;
+                let trimmed = val.trim();
+                if trimmed.is_empty() {
+                    bail!("secret environment variable '{var_name}' is empty");
+                }
+                Ok(SecretString::new(trimmed))
+            }
+            SecretRefTarget::Vault { path, field } => {
+                let vault = self.vault.as_ref().with_context(|| {
+                    format!(
+                        "vault: secret reference '{secret_ref}' requires CREG_SECRETS_BACKEND=vault"
+                    )
+                })?;
+                vault.read_kv2_field(path, field).await
+            }
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -386,5 +465,38 @@ mod tests {
         assert!(errs[0].contains("CREG_VALIDATOR_KEY"));
         assert!(errs[1].contains("CREG_GOVERNANCE_KEY"));
         assert!(validate_vault_exclusivity(SecretsBackend::Env).is_empty());
+    }
+
+    #[test]
+    fn resolve_secret_ref_enforces_schemes_and_custody() {
+        let _guard = ENV_LOCK.lock().unwrap();
+        std::env::set_var("CREG_TEST_LLM_TOKEN", "  secret-token-value  ");
+        std::env::remove_var("CREG_SECRETS_BACKEND");
+
+        let provider = SecretsProvider::from_env().unwrap();
+        let rt = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .unwrap();
+        let resolved = rt
+            .block_on(provider.resolve_secret_ref("env:CREG_TEST_LLM_TOKEN"))
+            .unwrap();
+        assert_eq!(resolved.expose_secret(), "secret-token-value");
+        assert_eq!(format!("{resolved:?}"), "[REDACTED]");
+
+        std::env::remove_var("CREG_TEST_LLM_TOKEN");
+
+        assert!(rt
+            .block_on(provider.resolve_secret_ref("sk-raw-inline-key"))
+            .is_err());
+        assert!(rt
+            .block_on(provider.resolve_secret_ref("env:lowercase_bad"))
+            .is_err());
+        assert!(rt
+            .block_on(provider.resolve_secret_ref("vault:secret/data/no_hash"))
+            .is_err());
+        assert!(rt
+            .block_on(provider.resolve_secret_ref("vault:secret/data/creg/llm#gemini_api_key"))
+            .is_err());
     }
 }

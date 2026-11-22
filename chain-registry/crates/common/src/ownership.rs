@@ -510,7 +510,7 @@ impl CertifiedNamespaceAuthority {
                 return Err("authority certificate signature is invalid");
             };
             if pubkey
-                .verify(message.as_bytes(), &signature, VerifyMode::Permissive)
+                .verify(message.as_bytes(), &signature, VerifyMode::Strict)
                 .is_err()
             {
                 return Err("authority certificate signature verification failed");
@@ -795,7 +795,7 @@ impl NamespaceLifecycleEventV2 {
                 .map_err(|_| "invalid controller public key")?;
             let signature = Signature::from_bytes(SignatureScheme::Ed25519, &signature)
                 .map_err(|_| "invalid controller signature")?;
-            key.verify(message.as_bytes(), &signature, VerifyMode::Permissive)
+            key.verify(message.as_bytes(), &signature, VerifyMode::Strict)
                 .map_err(|_| "controller signature verification failed")
         };
 
@@ -890,7 +890,7 @@ impl NamespaceLifecycleEvent {
                 .map_err(|_| "invalid controller public key")?;
             let signature = Signature::from_bytes(SignatureScheme::Ed25519, &signature)
                 .map_err(|_| "invalid controller signature")?;
-            key.verify(message.as_bytes(), &signature, VerifyMode::Permissive)
+            key.verify(message.as_bytes(), &signature, VerifyMode::Strict)
                 .map_err(|_| "controller signature verification failed")
         };
 

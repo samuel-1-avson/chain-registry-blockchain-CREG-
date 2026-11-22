@@ -11,6 +11,7 @@
 //   Stage 6 — Publisher Reputation(reputation.rs)
 //   [AAA]   — External AI Auditor (opt-in, post-rejection only)
 
+pub mod ai_agent;
 pub mod bundle;
 pub mod diff;
 pub mod intelligence;
@@ -77,14 +78,17 @@ pub async fn validate_package_with_reputation(
     // Offline pinned typosquat baseline/snapshot and on-chain reputation only
     // (zero live HTTP calls on consensus path; VNA-20).
     let static_result =
-        static_analysis::run_for_package(Some(&req.id), tarball, &req.manifest).await;
+        static_analysis::run_for_package(Some(&req.id), tarball, &req.manifest).await?;
+    let ast_index = static_result.ast_index.clone();
+    let binary_report = static_result.binary_report.clone();
     let rep = assess_publisher_from_snapshot(&req.publisher_pubkey, reputation_snapshot);
 
     let mut report = ValidationReport::new(req.id.clone());
-    report.apply_static(static_result?);
+    report.apply_static(static_result);
 
     // ── Stage 2 — Behavioral Sandbox ─────────────────────────────────────────
     let sandbox_result = sandbox::run(&req.id, tarball, &req.manifest).await?;
+    let initial_kernel_graph = sandbox_result.kernel_graph.clone();
     report.apply_sandbox(sandbox_result.clone());
 
     // Persist result for the next version's diff stage. This covers the common
@@ -113,12 +117,18 @@ pub async fn validate_package_with_reputation(
     //   - Entropy alerts (LLM-ENT) for high-entropy files
     //   - A skip notice (LLM-SKIP) when the stage is disabled
     tracing::info!("[{}] Stage 4 — LLM-assisted review", canonical);
-    let llm_review = llm::review_package(
+    let llm_review = llm::review_package_with_context(
         tarball,
         &req.id,
         &req.manifest,
         &report.findings,
         &req.content_hash,
+        ast_index.as_ref(),
+        binary_report.as_ref(),
+        initial_kernel_graph.as_ref(),
+        prev_manifest,
+        prev_sandbox,
+        &report.analysis_bundles.policy_bundle_id,
     )
     .await;
     report.apply_llm(llm_review);

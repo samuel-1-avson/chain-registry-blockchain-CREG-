@@ -544,7 +544,7 @@ fn verify_ed25519_signature(
     build_message(&mut msg);
 
     Ok(verifying_key
-        .verify(&msg, &signature, VerifyMode::Permissive)
+        .verify(&msg, &signature, VerifyMode::Strict)
         .is_ok())
 }
 

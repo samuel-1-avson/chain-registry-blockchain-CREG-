@@ -52,6 +52,19 @@ impl VaultSecretsBackend {
         normalize_signing_key_secret(&raw, role)
     }
 
+    /// Read an arbitrary named string field (such as an LLM API key for `creg-llm-proxy`)
+    /// from HashiCorp Vault KV v2 as a zeroizing `SecretString` (`VNA-32`).
+    pub async fn read_kv2_field(&self, path: &str, field: &str) -> Result<SecretString> {
+        let data = self.read_kv2_secret(path).await?;
+        let raw = data
+            .get(field)
+            .and_then(|v| v.as_str())
+            .map(str::trim)
+            .filter(|v| !v.is_empty())
+            .with_context(|| format!("Vault secret {path} missing non-empty field '{field}'"))?;
+        Ok(SecretString::new(raw))
+    }
+
     async fn read_kv2_secret(&self, path: &str) -> Result<serde_json::Value> {
         let path = path.trim().trim_start_matches('/');
         let url = format!("{}/v1/{}", self.addr.trim_end_matches('/'), path);
