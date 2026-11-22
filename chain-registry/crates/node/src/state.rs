@@ -633,6 +633,7 @@ mod tests {
             is_mandatory: false,
             evidence_digest: String::new(),
             deterministic_risk: common::DeterministicRiskSummary::default(),
+            ..Default::default()
         }
     }
 

@@ -350,6 +350,7 @@ mod tests {
             evidence_digest: common::sha256_hex(b"pipeline-test-evidence"),
             deterministic_risk: common::DeterministicRiskSummary::default(),
             is_mandatory: is_mand,
+            ..Default::default()
         }
     }
 
@@ -507,6 +508,7 @@ mod tests {
                     status: "online".into(),
                     performance_score: 500,
                     contribution_count: 0,
+                    pq_pubkey: None,
                 })
                 .collect(),
         );
@@ -568,6 +570,7 @@ mod tests {
                     evidence_digest: evidence_digest.clone(),
                     deterministic_risk: common::DeterministicRiskSummary::default(),
                     is_mandatory: true,
+                    ..Default::default()
                 }
             })
             .collect();

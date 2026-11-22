@@ -1334,12 +1334,18 @@ pub enum PackageStatus {
     /// Submitted but not yet through consensus — pending pool only.
     #[default]
     Pending,
+    /// Held out of Verified for Class C committee/appeal review (`ADR-018`);
+    /// expires fail-closed into `Revoked` after 72h.
+    Quarantined {
+        reason: String,
+        expires_at_unix: i64,
+    },
     /// Rejected by consensus or later found malicious.
     Revoked { reason: String },
 }
 
 /// A validator's signature over a package hash.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct ValidatorSignature {
     pub validator_id: String,
     pub validator_pubkey: String,
@@ -1363,6 +1369,16 @@ pub struct ValidatorSignature {
     // === HYBRID FIELDS ===
     #[serde(default)]
     pub is_mandatory: bool, // true if this validator was in the primary selected committee
+
+    // === ADR-017 / ADR-018 VOTE-V4 EXTENSIONS (PRE-ACTIVATION OMITTED) ===
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pq_signature: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub voter_key_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub semantic_vote: Option<crate::vote_v4::SemanticVoteV4>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub trigger_witness_digest: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]

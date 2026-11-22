@@ -20,6 +20,14 @@ path = "src/bin/dump_openapi.rs"
 name = "creg-indexer"
 path = "src/bin/creg_indexer.rs"
 
+[[bin]]
+name = "creg-consensusd"
+path = "src/bin/creg_consensusd.rs"
+
+[[bin]]
+name = "creg-node-supervisor"
+path = "src/bin/creg_node_supervisor.rs"
+
 
 # Test-only sidecar used to prove the cleared-environment private-temp launch
 # contract. It is not a production namespace-authority verifier.
@@ -36,6 +44,7 @@ consensus = { path = "../consensus" }
 resolver  = { path = "../resolver" }
 db-sync   = { path = "../db-sync" }
 threshold-encryption = { path = "../threshold-encryption" }
+zone-ipc  = { path = "../zone-ipc" }
 
 tokio        = { workspace = true }
 serde        = { workspace = true }

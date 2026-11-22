@@ -1301,6 +1301,7 @@ async fn produce_block(
                     validator_id: node_id.clone(),
                     pubkey: pubkey.clone(),
                     signature: prep_sig.clone(),
+                    pq_signature: None,
                 };
 
                 s.chain
@@ -1366,6 +1367,7 @@ async fn produce_block(
                         validator_id: node_id.clone(),
                         pubkey,
                         signature: commit_sig.clone(),
+                        pq_signature: None,
                     };
 
                     s.chain
@@ -1545,6 +1547,7 @@ mod tests {
                     evidence_digest,
                     deterministic_risk: DeterministicRiskSummary::default(),
                     is_mandatory: true,
+                    ..Default::default()
                 }
             })
             .collect();
@@ -1572,6 +1575,7 @@ mod tests {
                 status: "online".into(),
                 performance_score: 500,
                 contribution_count: 0,
+                pq_pubkey: None,
             },
             Validator {
                 id: secondary_id.into(),
@@ -1583,6 +1587,7 @@ mod tests {
                 status: "online".into(),
                 performance_score: 500,
                 contribution_count: 0,
+                pq_pubkey: None,
             },
         ];
 

@@ -1,0 +1,141 @@
+# Four-Zone Validator Deployment Composition (`ADR-018` Increment 6)
+# Strict UID, privilege, network, and secret isolation across the four zones:
+#   - Zone 1 (`creg-gateway`): UID 10001, public DMZ + loopback admin HTTP only
+#   - Zone 2 (`creg-consensusd`): UID 10002, P2P + PBFT consensus + signing identity
+#   - Zone 3 (`creg-sandboxd`): UID 10003, `network_mode: none`, KVM microVM/nsjail only
+#   - Zone 4 (`creg-agent-runner`): UID 10004, LLM API egress + Zone 3 IPC replay only
+
+services:
+  creg-gateway:
+    build:
+      context: .
+      target: creg-gateway
+    image: creg-validator-gateway:v2
+    user: "10001:10001"
+    read_only: true
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,size=64m
+    ports:
+      - "8080:8080"
+      - "127.0.0.1:18080:18080"
+    environment:
+      RUST_LOG: ${RUST_LOG:-info}
+      CREG_GATEWAY_PUBLIC_LISTEN: 0.0.0.0:8080
+      CREG_GATEWAY_ADMIN_LISTEN: 127.0.0.1:18080
+      CREG_GATEWAY_ADMIN_TOKEN: ${CREG_GATEWAY_ADMIN_TOKEN}
+      CREG_CONSENSUS_IPC_ADDR: unix:///run/creg-ipc/consensus.sock
+      CREG_ZONE_IPC_TOKEN: ${CREG_ZONE_IPC_TOKEN}
+    volumes:
+      - creg_zone_ipc:/run/creg-ipc:rw
+    networks:
+      - creg_zone_dmz
+    depends_on:
+      - creg-consensusd
+
+  creg-consensusd:
+    build:
+      context: .
+      target: creg-consensusd
+    image: creg-validator-consensusd:v2
+    user: "10002:10002"
+    read_only: true
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,size=128m
+    ports:
+      - "9000:9000"
+    environment:
+      RUST_LOG: ${RUST_LOG:-info}
+      CREG_DATA_DIR: /var/lib/creg
+      CREG_CHAIN_SPEC: /etc/creg/chain-spec.json
+      CREG_NODE_ID: ${CREG_NODE_ID:-validator-01}
+      CREG_P2P_LISTEN: 0.0.0.0:9000
+      CREG_CONSENSUS_IPC_ADDR: unix:///run/creg-ipc/consensus.sock
+      CREG_SANDBOX_IPC_ADDR: unix:///run/creg-ipc/sandbox.sock
+      CREG_AGENT_IPC_ADDR: unix:///run/creg-ipc/agent.sock
+      CREG_ZONE_IPC_TOKEN: ${CREG_ZONE_IPC_TOKEN}
+      CREG_VALIDATOR_PRIVKEY: ${CREG_VALIDATOR_PRIVKEY}
+      CREG_VALIDATOR_PQ_KEY: ${CREG_VALIDATOR_PQ_KEY}
+      VAULT_ADDR: ${VAULT_ADDR:-}
+      VAULT_TOKEN: ${VAULT_TOKEN:-}
+    volumes:
+      - creg_zone_ipc:/run/creg-ipc:rw
+      - creg_chain_data:/var/lib/creg:rw
+    networks:
+      - creg_zone_p2p
+    depends_on:
+      - creg-sandboxd
+      - creg-agent-runner
+
+  creg-sandboxd:
+    build:
+      context: .
+      target: creg-sandboxd
+    image: creg-validator-sandboxd:v2
+    user: "10003:10003"
+    read_only: true
+    network_mode: none
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    tmpfs:
+      - /tmp:rw,nosuid,nodev,size=512m
+    devices:
+      - /dev/kvm:/dev/kvm
+    environment:
+      RUST_LOG: ${RUST_LOG:-info}
+      CREG_SANDBOX_IPC_ADDR: unix:///run/creg-ipc/sandbox.sock
+      CREG_ZONE_IPC_TOKEN: ${CREG_ZONE_IPC_TOKEN}
+      CREG_SANDBOX_ROOTFS: /var/lib/creg-rootfs
+      CREG_SANDBOX_ENGINE: ${CREG_SANDBOX_ENGINE:-firecracker}
+    volumes:
+      - creg_zone_ipc:/run/creg-ipc:rw
+      - creg_rootfs:/var/lib/creg-rootfs:ro
+
+  creg-agent-runner:
+    build:
+      context: .
+      target: creg-agent-runner
+    image: creg-validator-agent-runner:v2
+    user: "10004:10004"
+    read_only: true
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,size=128m
+    environment:
+      RUST_LOG: ${RUST_LOG:-info}
+      CREG_AGENT_IPC_ADDR: unix:///run/creg-ipc/agent.sock
+      CREG_SANDBOX_IPC_ADDR: unix:///run/creg-ipc/sandbox.sock
+      CREG_ZONE_IPC_TOKEN: ${CREG_ZONE_IPC_TOKEN}
+      CREG_AI_CONFIG: ${CREG_AI_CONFIG:-/etc/creg/validator-ai.toml}
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+      GEMINI_API_KEY: ${GEMINI_API_KEY:-}
+      OLLAMA_HOST: ${OLLAMA_HOST:-}
+    volumes:
+      - creg_zone_ipc:/run/creg-ipc:rw
+    networks:
+      - creg_zone_agent_egress
+    depends_on:
+      - creg-sandboxd
+
+volumes:
+  creg_zone_ipc:
+  creg_chain_data:
+  creg_rootfs:
+
+networks:
+  creg_zone_dmz:
+  creg_zone_p2p:
+  creg_zone_agent_egress:

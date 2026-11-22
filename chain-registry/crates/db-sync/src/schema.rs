@@ -20,7 +20,7 @@ CREATE TABLE IF NOT EXISTS packages (
     ecosystem        TEXT NOT NULL,
     name             TEXT NOT NULL,
     version          TEXT NOT NULL,
-    status           TEXT NOT NULL CHECK (status IN ('verified', 'pending', 'revoked')),
+    status           TEXT NOT NULL CHECK (status IN ('verified', 'pending', 'quarantined', 'revoked')),
     content_hash     TEXT NOT NULL,
     ipfs_cid         TEXT NOT NULL,
     publisher_pubkey TEXT NOT NULL,

@@ -17,6 +17,7 @@ pub fn transaction(request: &SignedRevocationRequest, content_hash: &str) -> Tra
     Transaction::RevokeV2 {
         request: request.clone(),
         evidence_hash: content_hash.to_owned(),
+        witness: None,
     }
 }
 

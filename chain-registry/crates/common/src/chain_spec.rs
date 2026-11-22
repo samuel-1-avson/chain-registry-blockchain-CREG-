@@ -82,6 +82,21 @@ pub struct ConsensusParams {
     /// These pins are consensus data and therefore part of the genesis hash.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub namespace_authority_policies: Vec<NamespaceAuthorityPolicySpec>,
+    /// First canonical block height where `creg-vote-v4`, `TriggerWitnessV1`,
+    /// and ADR-017 `HybridEd25519MlDsa44V1` signatures become mandatory.
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        alias = "vote_v4_activation_height"
+    )]
+    pub hybrid_signature_activation_height: Option<u64>,
+}
+
+impl ConsensusParams {
+    pub fn vote_v4_active_at(&self, height: u64) -> bool {
+        self.hybrid_signature_activation_height
+            .is_some_and(|activation| height >= activation)
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -141,6 +156,8 @@ pub struct ValidatorSpecEntry {
     pub stake: u64,
     pub reputation: u32,
     pub status: String, // active | pending | jailed
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pq_pubkey: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -349,6 +366,7 @@ impl ChainSpec {
                 // Performance/resource proxy fields (default for spec-loaded sets)
                 performance_score: 500,
                 contribution_count: 0,
+                pq_pubkey: v.pq_pubkey.clone(),
             })
             .collect();
         crate::ValidatorSet::new(validators)
@@ -496,6 +514,7 @@ mod tests {
                 max_validators: 50,
                 namespace_authority_activation_height: None,
                 namespace_authority_policies: vec![],
+                hybrid_signature_activation_height: None,
             },
             feature_flags: FeatureFlags {
                 zk_validation: false,
@@ -544,6 +563,7 @@ mod tests {
                     stake: 100,
                     reputation: 100,
                     status: "active".into(),
+                    pq_pubkey: None,
                 }],
             },
             services: Services {

@@ -1,0 +1,21 @@
+[package]
+name = "creg-gateway"
+version = "0.1.0"
+edition = "2021"
+description = "Zone 1 unprivileged public & loopback-admin DMZ HTTP gateway (ADR-018)"
+
+[dependencies]
+zone-ipc = { path = "../zone-ipc" }
+tokio = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+anyhow = { workspace = true }
+subtle = "=2.6.1"
+tracing = { workspace = true }
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+axum = { version = "0.7", features = ["json"] }
+tower = { version = "0.4", features = ["util"] }
+tower-http = { version = "0.5", features = ["cors", "trace", "limit"] }
+
+[lints]
+workspace = true

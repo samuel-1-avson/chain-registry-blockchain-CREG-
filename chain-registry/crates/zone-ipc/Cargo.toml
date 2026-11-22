@@ -1,0 +1,19 @@
+[package]
+name = "zone-ipc"
+version = "0.1.0"
+edition = "2021"
+description = "Authenticated inter-zone IPC transport for CREG four-zone validator split (ADR-018)"
+
+[dependencies]
+tokio = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+anyhow = { workspace = true }
+sha2 = { workspace = true }
+hex = { workspace = true }
+subtle = "=2.6.1"
+tracing = { workspace = true }
+rand = { workspace = true }
+
+[lints]
+workspace = true

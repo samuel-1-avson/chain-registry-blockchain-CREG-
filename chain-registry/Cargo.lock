@@ -2100,6 +2100,7 @@ dependencies = [
  "windows-sys 0.61.2",
  "x25519-dalek",
  "zeroize",
+ "zone-ipc",
 ]
 
 [[package]]
@@ -2711,6 +2712,23 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "9481c1c90cbf2ac953f07c8d4a58aa3945c425b7185c9154d67a65e4230da511"
 dependencies = [
  "cfg-if",
+]
+
+[[package]]
+name = "creg-gateway"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "axum",
+ "serde",
+ "serde_json",
+ "subtle",
+ "tokio",
+ "tower 0.4.13",
+ "tower-http 0.5.2",
+ "tracing",
+ "tracing-subscriber 0.3.23",
+ "zone-ipc",
 ]
 
 [[package]]
@@ -10858,9 +10876,11 @@ dependencies = [
  "tokio",
  "toml",
  "tracing",
+ "tracing-subscriber 0.3.23",
  "uuid 1.22.0",
  "wasm-sandbox",
  "wat",
+ "zone-ipc",
 ]
 
 [[package]]
@@ -12462,6 +12482,21 @@ name = "zmij"
 version = "1.0.21"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "b8848ee67ecc8aedbaf3e4122217aff892639231befc6a1b58d29fff4c2cabaa"
+
+[[package]]
+name = "zone-ipc"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "hex",
+ "rand 0.8.5",
+ "serde",
+ "serde_json",
+ "sha2 0.10.9",
+ "subtle",
+ "tokio",
+ "tracing",
+]
 
 [[package]]
 name = "zopfli"

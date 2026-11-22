@@ -476,6 +476,7 @@ async fn process_package(
             evidence_digest: evidence_digest.clone(),
             deterministic_risk: deterministic_risk.clone(),
             is_mandatory: should_analyze, // in hybrid: true only for selected mandatory nodes
+            ..Default::default()
         }
     };
 
@@ -743,6 +744,7 @@ async fn process_package(
                 common::Transaction::RevokeV2 {
                     request,
                     evidence_hash: evidence_digest,
+                    witness: None,
                 },
                 "REJECTED",
             )

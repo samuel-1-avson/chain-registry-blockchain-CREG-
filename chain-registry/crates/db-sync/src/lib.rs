@@ -128,6 +128,7 @@ where
     let status_str = match &record.status {
         PackageStatus::Verified => "verified",
         PackageStatus::Pending => "pending",
+        PackageStatus::Quarantined { .. } => "quarantined",
         PackageStatus::Revoked { .. } => "revoked",
     };
     let findings_json = serde_json::to_value(&record.findings).unwrap_or_default();

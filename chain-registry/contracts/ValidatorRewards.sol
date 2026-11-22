@@ -59,6 +59,12 @@ contract ValidatorRewards {
     
     /// @notice Tracks incorrect votes by validator (validator => incorrect count)
     mapping(address => uint256) public incorrectVotes;
+
+    /// Share of discovery bounty awarded directly to the witness prover (25%).
+    uint256 public constant DISCOVERY_BOUNTY_PROVER_BPS = 2500;
+
+    /// Replay protection for proof-carrying TriggerWitnessV1 discovery bounties.
+    mapping(bytes32 => bool) public witnessBountyPaid;
     
     /// @notice Total rewards distributed
     uint256 public totalRewardsDistributed;
@@ -106,6 +112,16 @@ contract ValidatorRewards {
     error NotActiveValidator();
     error NoRewardsToClaim();
     error InvalidVoteDistribution();
+    error WitnessBountyAlreadyPaid();
+    error InvalidProver();
+
+    event DiscoveryBountyAwarded(
+        bytes32 indexed witnessDigest,
+        bytes32 indexed packageHash,
+        address indexed prover,
+        uint256 proverBonus,
+        uint256 committeeShare
+    );
     
     // ── Constructor ────────────────────────────────────────────────────────────
     
@@ -339,6 +355,38 @@ contract ValidatorRewards {
     
     // ── Claim Rewards ──────────────────────────────────────────────────────────
     
+    /// @notice Award a proof-carrying TriggerWitnessV1 discovery bounty.
+    /// The discovering validator receives `DISCOVERY_BOUNTY_PROVER_BPS` (25%) directly
+    /// while the remainder stays reserved for committee verification share.
+    function distributeDiscoveryBounty(
+        bytes32 witnessDigest,
+        string calldata packageCanonical,
+        address prover,
+        uint256 baseBounty
+    ) external {
+        if (msg.sender != governance && msg.sender != address(staking)) revert NotAuthorized();
+        if (prover == address(0) || !staking.isActiveValidator(prover)) revert InvalidProver();
+        if (baseBounty == 0) revert InvalidVoteDistribution();
+        if (witnessBountyPaid[witnessDigest]) revert WitnessBountyAlreadyPaid();
+
+        witnessBountyPaid[witnessDigest] = true;
+
+        uint256 proverBonus = (baseBounty * DISCOVERY_BOUNTY_PROVER_BPS) / 10_000;
+        uint256 committeeShare = baseBounty - proverBonus;
+
+        pendingRewards[prover] += proverBonus;
+        totalRewardsDistributed += proverBonus;
+        require(cregToken.transferFrom(treasury, address(this), proverBonus), "Treasury transfer failed");
+
+        emit DiscoveryBountyAwarded(
+            witnessDigest,
+            keccak256(bytes(packageCanonical)),
+            prover,
+            proverBonus,
+            committeeShare
+        );
+    }
+
     /// @notice Validators claim their accumulated rewards from verified work
     function claimRewards() external {
         uint256 amount = pendingRewards[msg.sender];

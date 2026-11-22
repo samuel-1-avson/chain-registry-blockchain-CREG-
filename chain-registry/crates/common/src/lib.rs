@@ -18,6 +18,7 @@ pub mod shielded_wire;
 pub mod transparency_log;
 pub mod validator_snapshot;
 pub mod verdict;
+pub mod vote_v4;
 
 /// gRPC and Protobuf definitions (Generated Choice)
 pub mod proto {
@@ -37,6 +38,7 @@ pub use shielded_wire::*;
 pub use transparency_log::*;
 pub use validator_snapshot::*;
 pub use verdict::*;
+pub use vote_v4::*;
 
 // ── Cryptographic helpers ─────────────────────────────────────────────────────
 
@@ -105,6 +107,10 @@ pub struct Validator {
     /// Number of packages this validator has contributed to (for averaging).
     #[serde(default)]
     pub contribution_count: u32,
+    /// Optional FIPS 204 ML-DSA-44 public key (2,624 lowercase hex chars = 1,312 bytes)
+    /// bound alongside the Ed25519 `pubkey` (`ADR-017`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pq_pubkey: Option<String>,
 }
 
 #[derive(serde::Serialize, serde::Deserialize, Clone, Debug, Default)]
@@ -128,7 +134,52 @@ impl Default for Validator {
             status: String::new(),
             performance_score: default_perf_score(),
             contribution_count: 0,
+            pq_pubkey: None,
         }
+    }
+}
+
+impl Validator {
+    /// Decode this validator's verifying key for either classical Ed25519
+    /// (`require_hybrid == false`) or ADR-017 Hybrid (`require_hybrid == true`).
+    pub fn verifying_key(&self, require_hybrid: bool) -> anyhow::Result<crate::crypto::PublicKey> {
+        let ed_clean = self
+            .pubkey
+            .trim()
+            .strip_prefix("0x")
+            .unwrap_or(self.pubkey.trim());
+        let ed_bytes = hex::decode(ed_clean).map_err(|e| {
+            anyhow::anyhow!("invalid Ed25519 public key hex for '{}': {e}", self.id)
+        })?;
+        if !require_hybrid {
+            return crate::crypto::PublicKey::from_bytes(
+                crate::crypto::SignatureScheme::Ed25519,
+                &ed_bytes,
+            )
+            .map_err(|e| anyhow::anyhow!("invalid Ed25519 public key for '{}': {e}", self.id));
+        }
+
+        let pq_hex = self
+            .pq_pubkey
+            .as_deref()
+            .ok_or_else(|| anyhow::anyhow!("validator '{}' missing required pq_pubkey", self.id))?;
+        let pq_clean = pq_hex.trim().strip_prefix("0x").unwrap_or(pq_hex.trim());
+        if pq_clean.len() != crate::vote_v4::MLDSA44_PUBLIC_KEY_HEX_LEN
+            || !pq_clean
+                .bytes()
+                .all(|b| b.is_ascii_hexdigit() && !b.is_ascii_uppercase())
+        {
+            anyhow::bail!(
+                "validator '{}' pq_pubkey must be {} lowercase hex chars",
+                self.id,
+                crate::vote_v4::MLDSA44_PUBLIC_KEY_HEX_LEN
+            );
+        }
+        let pq_bytes = hex::decode(pq_clean).map_err(|e| {
+            anyhow::anyhow!("invalid ML-DSA-44 public key hex for '{}': {e}", self.id)
+        })?;
+        crate::crypto::PublicKey::hybrid_from_parts(&ed_bytes, &pq_bytes)
+            .map_err(|e| anyhow::anyhow!("invalid hybrid public key for '{}': {e}", self.id))
     }
 }
 

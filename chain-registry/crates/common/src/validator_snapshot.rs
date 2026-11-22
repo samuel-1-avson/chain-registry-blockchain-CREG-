@@ -57,6 +57,9 @@ pub fn canonical_validator_set_hash(set: &ValidatorSet) -> String {
         }
         validator.eth_address = validator.eth_address.to_ascii_lowercase();
         validator.pubkey = validator.pubkey.to_ascii_lowercase();
+        if let Some(ref mut pq) = validator.pq_pubkey {
+            *pq = pq.trim().to_ascii_lowercase();
+        }
     }
     sha256_hex(&serde_json::to_vec(&validators).expect("validator set serializes"))
 }
@@ -148,6 +151,11 @@ pub fn validate_validator_identities(set: &ValidatorSet) -> Result<(), &'static 
         }
         if !pubkeys.insert(validator.pubkey.to_ascii_lowercase()) {
             return Err("validator set contains duplicate validator public keys");
+        }
+        if let Some(ref pq) = validator.pq_pubkey {
+            if !is_lower_hex(pq, crate::vote_v4::MLDSA44_PUBLIC_KEY_HEX_LEN) {
+                return Err("validator set contains a non-canonical ML-DSA-44 public key");
+            }
         }
     }
     Ok(())
@@ -277,6 +285,7 @@ mod tests {
             status: "online".into(),
             performance_score: 500,
             contribution_count: 0,
+            pq_pubkey: None,
         }
     }
 

@@ -876,6 +876,7 @@ mod tests {
             &make_block2(Transaction::RevokeV2 {
                 request: owner_req.clone(),
                 evidence_hash: "1".repeat(64),
+                witness: None,
             }),
             &config,
         )
@@ -888,6 +889,7 @@ mod tests {
             &make_block2(Transaction::RevokeV2 {
                 request: val_req,
                 evidence_hash: "2".repeat(64),
+                witness: None,
             }),
             &config,
         )
@@ -901,6 +903,7 @@ mod tests {
             &make_block2(Transaction::RevokeV2 {
                 request: forged_req,
                 evidence_hash: "3".repeat(64),
+                witness: None,
             }),
             &config,
         )
@@ -913,6 +916,7 @@ mod tests {
             &make_block2(Transaction::RevokeV2 {
                 request: outsider_req,
                 evidence_hash: "4".repeat(64),
+                witness: None,
             }),
             &config,
         )

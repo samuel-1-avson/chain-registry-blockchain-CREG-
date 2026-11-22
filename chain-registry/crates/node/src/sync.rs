@@ -1482,6 +1482,7 @@ mod tests {
             status: "online".into(),
             performance_score: 500,
             contribution_count: 0,
+            pq_pubkey: None,
         }
     }
 
@@ -1570,6 +1571,7 @@ mod tests {
             evidence_digest,
             deterministic_risk: DeterministicRiskSummary::default(),
             is_mandatory: true,
+            ..Default::default()
         }
     }
 
@@ -1629,6 +1631,7 @@ mod tests {
                     )
                     .to_bytes(),
                 ),
+                pq_signature: None,
             })
             .collect();
         block
@@ -1680,6 +1683,7 @@ mod tests {
                     )
                     .to_bytes(),
                 ),
+                pq_signature: None,
             })
             .collect();
         block

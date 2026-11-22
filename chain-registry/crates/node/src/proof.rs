@@ -32,7 +32,7 @@ pub fn build_proof(
     let package_status = match &record.status {
         PackageStatus::Verified => "verified",
         PackageStatus::Revoked { .. } => "revoked",
-        PackageStatus::Pending => return Ok(None),
+        PackageStatus::Quarantined { .. } | PackageStatus::Pending => return Ok(None),
     }
     .to_string();
 

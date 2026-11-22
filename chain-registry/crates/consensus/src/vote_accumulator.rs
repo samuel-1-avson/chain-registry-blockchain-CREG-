@@ -23,6 +23,7 @@
 
 use chrono::{DateTime, Utc};
 use common::crypto::{PublicKey, Signature, SignatureScheme, VerifyMode};
+pub use common::VOTE_V4_MESSAGE_DOMAIN;
 use common::{ValidatorSignature, ValidatorVote};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -478,6 +479,7 @@ impl PackageVoteState {
                 evidence_digest: v.evidence_digest.clone(),
                 deterministic_risk: common::DeterministicRiskSummary::default(),
                 is_mandatory: false, // default for accumulator path
+                ..Default::default()
             })
             .collect()
     }

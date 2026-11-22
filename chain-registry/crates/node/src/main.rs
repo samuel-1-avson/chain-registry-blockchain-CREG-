@@ -143,6 +143,7 @@ fn upsert_registered_validator(
         status: "online".to_string(),
         performance_score: 500,
         contribution_count: 0,
+        pq_pubkey: None,
     });
 }
 
@@ -758,6 +759,7 @@ async fn main() -> Result<()> {
                 validator_id: config.node_id.clone(),
                 pubkey: journal.validator_pubkey().to_owned(),
                 signature,
+                pq_signature: None,
             };
             pbft_engine
                 .commit(&block_hash, &config.node_id, vote)

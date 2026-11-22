@@ -17,9 +17,10 @@ pub use proxy::{
     ChatRole, LlmProxy, LlmRequest, LlmResponse, LlmTransport,
 };
 pub use runner::{
-    parse_turn_decision, replay_witness_without_llm, AgentInvestigationInput,
-    AgentInvestigationReport, AgentRunner, AgentStepTrace, AgentTurnDecision, RawSemanticFinding,
-    SemanticDisposition, SemanticFindingV1, TriggerWitnessDraftV1, MAX_WITNESS_WIRE_BYTES,
+    parse_turn_decision, replay_signed_witness_without_llm, replay_witness_without_llm,
+    AgentInvestigationInput, AgentInvestigationReport, AgentRunner, AgentStepTrace,
+    AgentTurnDecision, RawSemanticFinding, SemanticDisposition, SemanticFindingV1,
+    TriggerWitnessDraftV1, MAX_WITNESS_WIRE_BYTES,
 };
 pub use tools::{
     execute_tool, load_archive_bounded, DefaultSandboxReplayExecutor, DeobfuscationMode,
@@ -606,5 +607,137 @@ tier_fast = "local"
 
         assert_eq!(report.disposition, SemanticDisposition::Reject);
         assert!(report.maliciousness_score >= 92);
+    }
+
+    #[tokio::test]
+    async fn signed_wire_witness_roundtrip_and_zero_llm_replay() {
+        let tarball = build_tar_gz(&[("index.js", b"if (process.env.CI) { /* exfil */ }\n")]);
+        let (pkg_id, manifest) = test_pkg();
+        let content_hash = hex::encode(Sha256::digest(&tarball));
+        let manifest_sha256 = hex::encode(Sha256::digest(&serde_json::to_vec(&manifest).unwrap()));
+
+        let mut env = std::collections::BTreeMap::new();
+        env.insert("CI".into(), "true".into());
+        let trigger_spec = TriggerSpecV1 {
+            schema_version: 1,
+            env_overrides: env,
+            clock_offset_secs: 86_400 * 90,
+            entry_function: None,
+            args: Vec::new(),
+        };
+        let events = vec![RawKernelEvent::Network {
+            protocol: "tcp".into(),
+            destination: "198.51.100.42".into(),
+            port: 443,
+            sni: Some("drop.evil.invalid".into()),
+        }];
+        let graph = normalize_telemetry(
+            ExecutionTier::Tier1Firecracker,
+            &trigger_spec,
+            &manifest,
+            &HashSet::new(),
+            &events,
+            &[],
+            &[],
+            &[],
+        );
+        let draft = TriggerWitnessDraftV1 {
+            schema_version: 1,
+            package_canonical: pkg_id.canonical(),
+            content_hash: content_hash.clone(),
+            manifest_sha256,
+            sandbox_policy_bundle_id: "creg-policy-v1".into(),
+            trigger_spec: trigger_spec.clone(),
+            observed_violations: vec![KernelViolationCode::KbNetUndeclared],
+            graph_canonical_digest: graph.canonical_digest(),
+        };
+
+        // Pre-activation Ed25519 wire witness roundtrip & replay.
+        let ed_sk = common::crypto::SigningKey::from_ed25519_seed(&[21u8; 32]);
+        let pre_wire = draft.into_signed_wire("val-ed", &ed_sk).unwrap();
+        assert!(pre_wire.prover_pq_signature.is_none());
+        let pre_draft = TriggerWitnessDraftV1::from_wire(&pre_wire).unwrap();
+        assert_eq!(pre_draft, draft);
+
+        // Post-activation Hybrid Ed25519 + ML-DSA-44 wire witness roundtrip & replay.
+        let hyb_sk = common::crypto::SigningKey::hybrid_from_seeds(&[22u8; 32], &[23u8; 32]);
+        let post_wire = draft.into_signed_wire("val-hyb", &hyb_sk).unwrap();
+        assert!(post_wire.prover_pq_signature.is_some());
+
+        struct MockReplay(crate::kernel_sandbox::KernelBehaviorGraphV1);
+        impl SandboxReplayExecutor for MockReplay {
+            fn replay<'a>(
+                &'a self,
+                _pkg_id: &'a PackageId,
+                _tarball_bytes: &'a [u8],
+                _manifest: &'a PackageManifest,
+                _trigger_spec: &'a TriggerSpecV1,
+                _timeout_secs: u64,
+            ) -> Pin<Box<dyn Future<Output = Result<SandboxResult>> + Send + 'a>> {
+                let g = self.0.clone();
+                Box::pin(async move {
+                    Ok(SandboxResult {
+                        findings: g.into_findings(),
+                        observed_network_hosts: vec!["198.51.100.42".into()],
+                        observed_fs_writes: Vec::new(),
+                        observed_process_spawns: Vec::new(),
+                        kernel_graph: Some(g),
+                        metrics: SandboxMetrics {
+                            engine_used: "mock-firecracker".into(),
+                            wall_time_ms: 10,
+                            exit_code: 0,
+                            observations_count: 1,
+                            findings_count: 1,
+                        },
+                    })
+                })
+            }
+        }
+        let exec = MockReplay(graph);
+
+        assert!(replay_signed_witness_without_llm(
+            &exec,
+            &pkg_id,
+            &content_hash,
+            &tarball,
+            &manifest,
+            "creg-policy-v1",
+            &pre_wire,
+            &ed_sk.public_key(),
+            false,
+        )
+        .await
+        .unwrap());
+
+        assert!(replay_signed_witness_without_llm(
+            &exec,
+            &pkg_id,
+            &content_hash,
+            &tarball,
+            &manifest,
+            "creg-policy-v1",
+            &post_wire,
+            &hyb_sk.public_key(),
+            true,
+        )
+        .await
+        .unwrap());
+
+        // Stripped PQ signature must be rejected fail-closed BEFORE sandbox replay.
+        let mut stripped = post_wire.clone();
+        stripped.prover_pq_signature = None;
+        assert!(replay_signed_witness_without_llm(
+            &exec,
+            &pkg_id,
+            &content_hash,
+            &tarball,
+            &manifest,
+            "creg-policy-v1",
+            &stripped,
+            &hyb_sk.public_key(),
+            true,
+        )
+        .await
+        .is_err());
     }
 }

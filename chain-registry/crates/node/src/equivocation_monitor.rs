@@ -410,6 +410,7 @@ mod tests {
                 validator_id: "validator-1".into(),
                 pubkey: hex::encode(key.verifying_key().as_bytes()),
                 signature: hex::encode(key.sign(message.as_bytes()).to_bytes()),
+                pq_signature: None,
             },
         )
     }

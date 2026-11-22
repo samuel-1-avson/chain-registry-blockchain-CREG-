@@ -370,6 +370,7 @@ mod consensus_tests {
                 validator_id: self.id.clone(),
                 pubkey: self.pubkey_hex.clone(),
                 signature: hex::encode(signature.to_bytes()),
+                pq_signature: None,
             }
         }
     }

@@ -65,6 +65,7 @@ impl TestValidatorNode {
             validator_id: self.id.clone(),
             pubkey: self.pubkey_hex(),
             signature: hex::encode(signature.to_bytes()),
+            pq_signature: None,
         }
     }
 }

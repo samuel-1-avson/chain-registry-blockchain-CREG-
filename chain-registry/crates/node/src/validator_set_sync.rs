@@ -525,6 +525,7 @@ fn validator_from_registration(
         // New performance fields default for freshly synced validators
         performance_score: 500,
         contribution_count: 0,
+        pq_pubkey: None,
     })
 }
 
@@ -1675,6 +1676,7 @@ mod tests {
             status: "online".into(),
             performance_score: 500,
             contribution_count: 0,
+            pq_pubkey: None,
         }
     }
 

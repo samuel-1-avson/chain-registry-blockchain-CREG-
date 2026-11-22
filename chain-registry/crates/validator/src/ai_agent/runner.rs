@@ -123,6 +123,93 @@ impl TriggerWitnessDraftV1 {
         }
         Ok(())
     }
+
+    pub fn to_wire_unsigned(
+        &self,
+        witness_prover_id: impl Into<String>,
+        prover_key_id: impl Into<String>,
+    ) -> Result<common::TriggerWitnessV1> {
+        self.validate_wire_budget()?;
+        let wire = common::TriggerWitnessV1 {
+            schema_version: self.schema_version,
+            package_canonical: self.package_canonical.clone(),
+            content_hash: self.content_hash.clone(),
+            manifest_sha256: self.manifest_sha256.clone(),
+            sandbox_policy_bundle_id: self.sandbox_policy_bundle_id.clone(),
+            trigger_spec: common::TriggerSpecWireV1 {
+                schema_version: self.trigger_spec.schema_version,
+                env_overrides: self.trigger_spec.env_overrides.clone(),
+                clock_offset_secs: self.trigger_spec.clock_offset_secs,
+                entry_function: self.trigger_spec.entry_function.clone(),
+                args: self.trigger_spec.args.clone(),
+            },
+            observed_violations: self
+                .observed_violations
+                .iter()
+                .map(|code| code.as_str().to_string())
+                .collect(),
+            graph_canonical_digest: self.graph_canonical_digest.clone(),
+            witness_prover_id: witness_prover_id.into(),
+            prover_key_id: prover_key_id.into(),
+            prover_signature: String::new(),
+            prover_pq_signature: None,
+        };
+        Ok(wire)
+    }
+
+    pub fn into_signed_wire(
+        &self,
+        witness_prover_id: impl Into<String>,
+        key: &common::crypto::SigningKey,
+    ) -> Result<common::TriggerWitnessV1> {
+        let mut wire = self.to_wire_unsigned(witness_prover_id, key.key_id())?;
+        wire.sign_with(key)?;
+        Ok(wire)
+    }
+
+    pub fn from_wire(wire: &common::TriggerWitnessV1) -> Result<Self> {
+        wire.validate_wire_budget()?;
+        let mut observed_violations = Vec::with_capacity(wire.observed_violations.len());
+        for raw in &wire.observed_violations {
+            observed_violations.push(parse_kernel_violation_code(raw)?);
+        }
+        let draft = Self {
+            schema_version: wire.schema_version,
+            package_canonical: wire.package_canonical.clone(),
+            content_hash: wire.content_hash.clone(),
+            manifest_sha256: wire.manifest_sha256.clone(),
+            sandbox_policy_bundle_id: wire.sandbox_policy_bundle_id.clone(),
+            trigger_spec: TriggerSpecV1 {
+                schema_version: wire.trigger_spec.schema_version,
+                env_overrides: wire.trigger_spec.env_overrides.clone(),
+                clock_offset_secs: wire.trigger_spec.clock_offset_secs,
+                entry_function: wire.trigger_spec.entry_function.clone(),
+                args: wire.trigger_spec.args.clone(),
+            },
+            observed_violations,
+            graph_canonical_digest: wire.graph_canonical_digest.clone(),
+        };
+        draft.validate_wire_budget()?;
+        Ok(draft)
+    }
+}
+
+fn parse_kernel_violation_code(raw: &str) -> Result<KernelViolationCode> {
+    match raw.trim() {
+        "KB-CANARY-EXFIL" => Ok(KernelViolationCode::KbCanaryExfil),
+        "KB-MEMFD-EXEC" => Ok(KernelViolationCode::KbMemfdExec),
+        "KB-PTRACE-ESCAPE" => Ok(KernelViolationCode::KbPtraceEscape),
+        "KB-IOURING-EVASION" => Ok(KernelViolationCode::KbIouringEvasion),
+        "KB-NET-UNDECLARED" => Ok(KernelViolationCode::KbNetUndeclared),
+        "KB-FS-PERSIST" => Ok(KernelViolationCode::KbFsPersist),
+        "KB-SECCOMP-VIOLATION" => Ok(KernelViolationCode::KbSeccompViolation),
+        "KB-ROOTFS-DIGEST-MISMATCH" => Ok(KernelViolationCode::KbRootfsDigestMismatch),
+        "KB-PROC-UNDECLARED" => Ok(KernelViolationCode::KbProcUndeclared),
+        other => bail!(
+            "unknown KernelViolationCode '{}' in TriggerWitnessV1",
+            other
+        ),
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -678,6 +765,33 @@ pub async fn replay_witness_without_llm(
         .iter()
         .all(|expected| observed.contains(expected));
     Ok(all_present && !witness.observed_violations.is_empty())
+}
+
+/// Fail-closed pre-replay authentication + wire decoding + zero-LLM sandbox
+/// verification of a wire-signed `common::TriggerWitnessV1` (`INV-04`, `ADR-018`).
+pub async fn replay_signed_witness_without_llm(
+    executor: &dyn SandboxReplayExecutor,
+    pkg_id: &PackageId,
+    content_hash: &str,
+    tarball: &[u8],
+    manifest: &PackageManifest,
+    policy_bundle_id: &str,
+    witness: &common::TriggerWitnessV1,
+    prover_pubkey: &common::crypto::PublicKey,
+    require_hybrid: bool,
+) -> Result<bool> {
+    witness.verify(prover_pubkey, require_hybrid)?;
+    let draft = TriggerWitnessDraftV1::from_wire(witness)?;
+    replay_witness_without_llm(
+        executor,
+        pkg_id,
+        content_hash,
+        tarball,
+        manifest,
+        policy_bundle_id,
+        &draft,
+    )
+    .await
 }
 
 fn canonical_manifest_digest(manifest: &PackageManifest) -> String {

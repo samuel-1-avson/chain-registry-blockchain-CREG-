@@ -2204,6 +2204,7 @@ async fn list_packages(
                     status: match &r.status {
                         PackageStatus::Verified => "verified".into(),
                         PackageStatus::Pending => "pending".into(),
+                        PackageStatus::Quarantined { .. } => "quarantined".into(),
                         PackageStatus::Revoked { .. } => "revoked".into(),
                     },
                     publisher: r.publisher_pubkey.clone(),
@@ -2292,6 +2293,7 @@ fn derive_chain_status(
 ) -> &'static str {
     match record_status {
         Some(PackageStatus::Verified) => "verified",
+        Some(PackageStatus::Quarantined { .. }) => "quarantined",
         Some(PackageStatus::Revoked { .. }) => "rejected",
         Some(PackageStatus::Pending) => "pending",
         None if in_pending_pool => "pending",
@@ -3670,6 +3672,7 @@ async fn search_handler(
             let status_str = match &record.status {
                 PackageStatus::Verified => "verified",
                 PackageStatus::Pending => "pending",
+                PackageStatus::Quarantined { .. } => "quarantined",
                 PackageStatus::Revoked { .. } => "revoked",
             };
             matches.push(SearchMatch {
@@ -5127,6 +5130,7 @@ async fn receive_vote(
         evidence_digest: vote.evidence_digest.clone(),
         deterministic_risk: vote.deterministic_risk.clone(),
         is_mandatory: vote.is_mandatory,
+        ..Default::default()
     };
 
     s.record_package_vote(vote.consensus_subject.clone(), sig);
@@ -5402,6 +5406,7 @@ mod tests {
             status: "online".into(),
             performance_score: 500,
             contribution_count: 0,
+            pq_pubkey: None,
         }
     }
 
@@ -5744,6 +5749,7 @@ mod tests {
             status: "online".into(),
             performance_score: 500,
             contribution_count: 0,
+            pq_pubkey: None,
         };
         let validators = common::ValidatorSet::new(vec![validator]);
         let mut checkpoint = common::AuthenticatedValidatorSetSnapshot {
@@ -5800,6 +5806,7 @@ mod tests {
                     validator_id: "validator-1".into(),
                     pubkey: hex::encode(key.verifying_key().as_bytes()),
                     signature: hex::encode(key.sign(message.as_bytes()).to_bytes()),
+                    pq_signature: None,
                 };
                 s.observe_vote_for_equivocation(
                     consensus::slashing_relay::VotePhase::Prepare,
@@ -6865,6 +6872,7 @@ mod tests {
             Transaction::RevokeV2 {
                 request,
                 evidence_hash,
+                ..
             } => {
                 assert_eq!(request.package_canonical, canonical);
                 assert_eq!(request.reason, reason);
@@ -7466,6 +7474,7 @@ mod tests {
                     evidence_digest: "evidence-digest-1".into(),
                     deterministic_risk: deterministic_risk.clone(),
                     is_mandatory: true,
+                    ..Default::default()
                 },
             );
         }
@@ -7600,6 +7609,7 @@ mod tests {
                     evidence_digest: "evidence-digest-1".into(),
                     deterministic_risk: test_deterministic_risk(),
                     is_mandatory: true,
+                    ..Default::default()
                 },
             );
         }

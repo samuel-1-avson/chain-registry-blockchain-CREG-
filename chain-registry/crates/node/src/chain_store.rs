@@ -3308,6 +3308,7 @@ mod tests {
                 validator_id,
                 pubkey: hex::encode(key.verifying_key().as_bytes()),
                 signature: hex::encode(key.sign(block_hash.as_bytes()).to_bytes()),
+                pq_signature: None,
             })
             .collect()
     }
@@ -4805,6 +4806,7 @@ mod tests {
             let b2_txs = vec![Transaction::RevokeV2 {
                 request: revoke_req,
                 evidence_hash: pubkey.clone(),
+                witness: None,
             }];
             let b2 = Block {
                 header: common::BlockHeader {

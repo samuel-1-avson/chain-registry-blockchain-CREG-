@@ -230,6 +230,9 @@ pub struct BlockSignature {
     pub pubkey: String,
     /// Hex-encoded Ed25519 signature over the block hash.
     pub signature: String,
+    /// Optional hex-encoded FIPS 204 ML-DSA-44 signature component (`ADR-017`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pq_signature: Option<String>,
 }
 
 /// Every action recorded on the chain is a Transaction.
@@ -258,6 +261,8 @@ pub enum Transaction {
     RevokeV2 {
         request: SignedRevocationRequest,
         evidence_hash: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        witness: Option<crate::vote_v4::TriggerWitnessV1>,
     },
     /// A validator's stake was slashed for bad behaviour.
     Slash {
@@ -338,6 +343,7 @@ impl Transaction {
             Self::RevokeV2 {
                 request,
                 evidence_hash,
+                ..
             } => Some((
                 &request.package_canonical,
                 &request.reason,

@@ -172,6 +172,7 @@ async fn start_test_node() -> (String, tokio::task::JoinHandle<()>) {
         status: "online".into(),
         performance_score: 500,
         contribution_count: 0,
+        pq_pubkey: None,
     };
     let validator_set = common::ValidatorSet::new(vec![test_validator]);
 

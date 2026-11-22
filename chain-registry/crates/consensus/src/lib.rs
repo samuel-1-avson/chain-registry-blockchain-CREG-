@@ -26,4 +26,5 @@ pub use slashing_relay::{EquivocationDetector, EquivocationEvidence, SignedVote,
 pub use validator_set::ValidatorSet;
 
 pub mod vote_accumulator;
+pub mod vote_v4;
 pub use vote_accumulator::{CommitOutcome, IncomingVote, VoteAccumulator};

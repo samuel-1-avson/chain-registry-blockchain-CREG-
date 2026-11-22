@@ -846,6 +846,7 @@ mod tests {
             status: "online".into(),
             performance_score: 500,
             contribution_count: 0,
+            pq_pubkey: None,
         }
     }
 

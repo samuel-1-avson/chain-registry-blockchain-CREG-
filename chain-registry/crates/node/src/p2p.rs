@@ -160,6 +160,7 @@ fn validate_pbft_phase_message(
         validator_id: validator_id.to_string(),
         pubkey: validator.pubkey.clone(),
         signature: signature_hex.to_string(),
+        pq_signature: None,
     })
 }
 
@@ -251,6 +252,7 @@ async fn sign_and_record_commit(
         validator_id: validator_id.to_owned(),
         pubkey,
         signature: signature.clone(),
+        pq_signature: None,
     };
     let signing_message = consensus::pbft::pbft_signature_message("commit", block_hash);
     journal.record_decision(
@@ -428,6 +430,7 @@ fn vote_gossip_to_signature(vote: &crate::gossip::VoteGossip) -> common::Validat
         evidence_digest: vote.evidence_digest.clone(),
         deterministic_risk: vote.deterministic_risk.clone(),
         is_mandatory: vote.is_mandatory,
+        ..Default::default()
     }
 }
 
@@ -1726,7 +1729,7 @@ impl P2PNode {
                                                     if let Ok(pk_bytes) = hex::decode(our_privkey_hex) {
                                                         if let Ok(sk) = common::crypto::SigningKey::from_seed(common::crypto::SignatureScheme::Ed25519, &pk_bytes) {
                                                             let (signature, pubkey) = sign_pbft_phase(&sk, "prepare", &bh);
-                                                            let sig_obj = common::BlockSignature { validator_id: our_id.clone(), pubkey: pubkey.clone(), signature: signature.clone() };
+                                                            let sig_obj = common::BlockSignature { validator_id: our_id.clone(), pubkey: pubkey.clone(), signature: signature.clone(), pq_signature: None };
                                                             let signing_message = consensus::pbft::pbft_signature_message("prepare", &bh);
                                                             let durable = s.chain.pbft_safety_journal().and_then(|journal| {
                                                                 journal.record_decision(
@@ -2110,6 +2113,7 @@ mod tests {
             id: id.into(),
             alias: id.into(),
             pubkey: hex::encode(signing_key.verifying_key().as_bytes()),
+            pq_pubkey: None,
             eth_address: String::new(),
             stake: 100,
             reputation: 100,

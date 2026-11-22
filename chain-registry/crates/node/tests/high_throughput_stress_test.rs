@@ -132,6 +132,7 @@ fn test_1000_tps_admission_and_pbft_consensus_burst() {
             validator_id: format!("validator-node-{}", i + 1),
             pubkey: hex::encode(ed_key.verifying_key().as_bytes()),
             signature: hex::encode(sig.to_bytes()),
+            pq_signature: None,
         };
         if pbft
             .prepare(&b_hash, &format!("validator-node-{}", i + 1), prep_sig)
@@ -148,6 +149,7 @@ fn test_1000_tps_admission_and_pbft_consensus_burst() {
             validator_id: format!("validator-node-{}", i + 1),
             pubkey: hex::encode(ed_key.verifying_key().as_bytes()),
             signature: hex::encode(sig.to_bytes()),
+            pq_signature: None,
         };
         if pbft
             .commit(&b_hash, &format!("validator-node-{}", i + 1), commit_sig)

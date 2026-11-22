@@ -838,6 +838,7 @@ mod tests {
                 id: format!("val-{}", i),
                 alias: format!("val-{}", i),
                 pubkey: hex::encode(key.verifying_key().as_bytes()),
+                pq_pubkey: None,
                 eth_address: String::new(),
                 stake: 100,
                 reputation: 100,
@@ -877,6 +878,7 @@ mod tests {
                     validator_id: format!("val-{}", i),
                     pubkey: hex::encode(key.verifying_key().as_bytes()),
                     signature: hex::encode(signature.to_bytes()),
+                    pq_signature: None,
                 }
             })
             .collect();

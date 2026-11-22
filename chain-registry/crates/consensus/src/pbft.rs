@@ -1725,6 +1725,7 @@ mod tests {
             validator_id: validator_id.into(),
             pubkey: hex::encode(signing_key.verifying_key().as_bytes()),
             signature: hex::encode(signing_key.sign(message.as_bytes()).to_bytes()),
+            pq_signature: None,
         }
     }
 

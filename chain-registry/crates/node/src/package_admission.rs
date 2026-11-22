@@ -1501,6 +1501,7 @@ rule TestMaliciousPayload {{
             status: "active".into(),
             performance_score: 500,
             contribution_count: 0,
+            pq_pubkey: None,
         });
         vs
     }
@@ -1836,6 +1837,7 @@ rule TestMaliciousPayload {{
             status: "active".into(),
             performance_score: 500,
             contribution_count: 0,
+            pq_pubkey: None,
         });
         vs.validators.push(common::Validator {
             id: "v2".into(),
@@ -1847,6 +1849,7 @@ rule TestMaliciousPayload {{
             status: "active".into(),
             performance_score: 500,
             contribution_count: 0,
+            pq_pubkey: None,
         });
         let c1 = compute_analysis_committee_at_admission(&vs, "npm:t@1", "h1", "tip1".into(), None);
         let c2 = compute_analysis_committee_at_admission(
@@ -1878,6 +1881,7 @@ rule TestMaliciousPayload {{
                     status: "active".into(),
                     performance_score: 500,
                     contribution_count: 0,
+                    pq_pubkey: None,
                 })
                 .collect(),
         );
@@ -2020,6 +2024,7 @@ rule TestMaliciousPayload {{
                 status: "active".into(),
                 performance_score: 500,
                 contribution_count: 0,
+                pq_pubkey: None,
             })
             .collect();
         let validator_set = common::ValidatorSet::new(validators);
@@ -2056,6 +2061,7 @@ rule TestMaliciousPayload {{
                     status: "active".into(),
                     performance_score: 500,
                     contribution_count: 0,
+                    pq_pubkey: None,
                 })
                 .collect();
             let validator_set = common::ValidatorSet::new(validators);

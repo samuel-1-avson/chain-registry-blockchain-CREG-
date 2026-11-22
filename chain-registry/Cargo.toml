@@ -18,6 +18,8 @@ members = [
     "crates/relayer",
     "crates/secrets",
     "crates/unpack",
+    "crates/zone-ipc",
+    "crates/gateway",
 ]
 resolver = "2"
 

@@ -3,15 +3,25 @@ name    = "validator"
 version = "0.1.0"
 edition = "2021"
 
+[[bin]]
+name = "creg-sandboxd"
+path = "src/bin/creg_sandboxd.rs"
+
+[[bin]]
+name = "creg-agent-runner"
+path = "src/bin/creg_agent_runner.rs"
+
 [dependencies]
 common     = { path = "../common" }
 chain-registry-secrets = { path = "../secrets" }
+zone-ipc   = { path = "../zone-ipc" }
 tokio      = { workspace = true }
 serde      = { workspace = true }
 serde_json = { workspace = true }
 anyhow     = { workspace = true }
 thiserror  = { workspace = true }
 tracing    = { workspace = true }
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 chrono     = { workspace = true }
 hex        = { workspace = true }
 sha2       = { workspace = true }

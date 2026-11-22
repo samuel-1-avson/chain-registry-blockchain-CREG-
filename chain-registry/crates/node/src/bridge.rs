@@ -49,6 +49,16 @@ sol!(
 
         function vote(uint256 id, bool approve) external;
     }
+
+    #[sol(rpc)]
+    interface IValidatorRewards {
+        function distributeDiscoveryBounty(
+            bytes32 witnessDigest,
+            string calldata packageCanonical,
+            address prover,
+            uint256 baseBounty
+        ) external;
+    }
 );
 
 /// Trust-model label attached to the development-only legacy path.
@@ -313,4 +323,38 @@ fn merkle_root(leaves: &[[u8; 32]]) -> [u8; 32] {
         current = next;
     }
     current[0]
+}
+
+#[cfg(test)]
+mod tests {
+    use super::IValidatorRewards;
+    use alloy::primitives::{keccak256, Address, FixedBytes, U256};
+    use alloy::sol_types::SolCall;
+
+    #[test]
+    fn discovery_bounty_abi_selector_and_roundtrip() {
+        let expected_sig = keccak256("distributeDiscoveryBounty(bytes32,string,address,uint256)");
+        assert_eq!(
+            IValidatorRewards::distributeDiscoveryBountyCall::SELECTOR,
+            &expected_sig.0[..4]
+        );
+
+        let digest = FixedBytes::<32>::from([0xAB; 32]);
+        let prover = Address::from([0x11; 20]);
+        let call = IValidatorRewards::distributeDiscoveryBountyCall {
+            witnessDigest: digest,
+            packageCanonical: "npm:adv-ci-timebomb-canary@1.0.0".to_string(),
+            prover,
+            baseBounty: U256::from(1_000_000u64),
+        };
+        let encoded = call.abi_encode();
+        assert_eq!(&encoded[..4], &expected_sig.0[..4]);
+
+        let decoded = IValidatorRewards::distributeDiscoveryBountyCall::abi_decode(&encoded, true)
+            .expect("ABI decode distributeDiscoveryBounty");
+        assert_eq!(decoded.witnessDigest, digest);
+        assert_eq!(decoded.packageCanonical, "npm:adv-ci-timebomb-canary@1.0.0");
+        assert_eq!(decoded.prover, prover);
+        assert_eq!(decoded.baseBounty, U256::from(1_000_000u64));
+    }
 }
