@@ -48,7 +48,7 @@ jobs:
       - run: npm run lint
       - run: npm run check:firebase-app-check
       - run: npm test
-      - uses: actions/setup-java@v4
+      - uses: actions/setup-java@v6
         with:
           distribution: temurin
           java-version: "21"
