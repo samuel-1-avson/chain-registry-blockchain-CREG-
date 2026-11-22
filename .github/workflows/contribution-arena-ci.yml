@@ -63,7 +63,7 @@ jobs:
       - run: npm run test:a11y
       - run: npm run smoke:preview
       - run: npm sbom --omit=dev --sbom-format=cyclonedx > dist/arena-sbom.json
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: contribution-arena-dist-${{ github.sha }}
           path: CREG-Contribution-Arena/dist
