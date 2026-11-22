@@ -2,7 +2,10 @@
 FROM maven:3-eclipse-temurin-21-alpine AS base
 RUN apk add --no-cache ca-certificates && \
     rm -rf /var/cache/apk/* /tmp/* /root/.cache && \
-    adduser -D -u 99999 sandbox
+    adduser -D -u 99999 sandbox && \
+    mkdir -p /pkg /home/sandbox && \
+    chown 99999:99999 /pkg /home/sandbox && \
+    find / -xdev -perm /6000 -type f -exec chmod a-s {} + 2>/dev/null || true
 
 FROM scratch
 COPY --from=base / /

@@ -1,20 +1,23 @@
-// crates/validator/src/sandbox.rs
-// Stage 2: Behavioural analysis — installs the package in a locked-down
-// container and records what system calls it makes.
-//
-// Engine fallback chain:
-//   1. nsjail — kernel namespaces + seccomp-BPF (Linux only, strongest)
-//   2. gVisor (runsc) — userspace syscall interception (Linux, strong)
-//   3. Docker — OCI container isolation with seccomp profile
-//   4. WASM/WASI — cross-platform wasmtime sandbox (for -wasm packages)
-//   5. Dev bypass — CREG_DEV_SANDBOX=true in debug builds only
-//   6. No sandbox — SB011 CRITICAL finding
+//! Stage 2: 3-Tier Behavioral Kernel Sandbox (`VNA-14` – `VNA-17`).
+//!
+//! Engine waterfall:
+//!   1. Tier 1 — Firecracker microVM + `jailer` + in-guest eBPF CO-RE + host sinkhole (Linux `/dev/kvm`)
+//!   2. Tier 2 — Hardened `nsjail` + SHA-256 digest-pinned Alpine rootfs + required seccomp-BPF
+//!   3. Tier 3 — Standalone WASM/WASI only (`wasmtime >= 40`, 64 KiB stdio cap, fuel + epoch timeout)
+//!   4. Dev bypass — explicit `CREG_DEV_SANDBOX=true` + `CREG_TESTNET=true` (never public/production)
+//!   5. Fail closed — refuse to vote without isolated behavioral verification
 
+use crate::bundle::AnalysisBundleSet;
+use crate::kernel_sandbox::{
+    detect_firecracker_ready, detect_nsjail_ready, run_firecracker_sandbox,
+    run_nsjail_sandbox_strict, KernelBehaviorGraphV1, TriggerSpecV1,
+};
 use anyhow::Result;
 use common::{Finding, FindingSeverity, PackageManifest};
+use sha2::{Digest, Sha256};
 use std::collections::{HashMap, HashSet};
 use std::net::IpAddr;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use std::time::Instant;
 
 async fn command_ready(program: &str, args: &[&str]) -> bool {
@@ -43,35 +46,25 @@ async fn command_ready(program: &str, args: &[&str]) -> bool {
 
 // ── Public Types ────────────────────────────────────────────────────────────
 
-/// Reported sandbox engine status for health/runtime-config surfaces (MAL-001).
-///
-/// Mirrors the engine waterfall in [`run`] without executing a package, so
-/// operators and monitoring can verify which engine a validator will use
-/// before it ever votes.
+/// Reported sandbox engine status for health/runtime-config surfaces (`MAL-001`).
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct SandboxStatus {
     /// Engine that will be used for behavioural analysis:
-    /// "nsjail", "dev-bypass", "gvisor", "docker", or "none".
+    /// "firecracker", "nsjail", "dev-bypass", or "none".
     pub engine: String,
-    /// True when `CREG_DEV_SANDBOX=true` is set in the environment.
-    /// Behavioural analysis is skipped and every package receives the
-    /// High-severity SB012 finding. Must be false on public validators.
+    /// True when `CREG_DEV_SANDBOX=true` is active for local testnet development.
     pub dev_bypass: bool,
-    /// True when the active engine runs packages with real isolation
-    /// (nsjail/gVisor/Docker). False for dev-bypass and none.
+    /// True when the active engine provides hardware/kernel isolation (`firecracker` or `nsjail`).
     pub isolated: bool,
-    /// True when the engine is a degraded fallback (Docker raises SB010;
-    /// "none" means non-WASM packages fail closed and the validator abstains).
+    /// True when isolated native execution is unavailable.
     pub degraded: bool,
-    /// Human-readable note for operators.
+    /// Human-readable status note for operators.
     pub note: String,
 }
 
 static SANDBOX_STATUS: tokio::sync::OnceCell<SandboxStatus> = tokio::sync::OnceCell::const_new();
 
 /// Detect (once per process) which sandbox engine this node will use.
-/// The result is cached because engine availability does not change at
-/// runtime and probing spawns external processes.
 pub async fn engine_status() -> SandboxStatus {
     SANDBOX_STATUS
         .get_or_init(detect_engine_status)
@@ -79,8 +72,7 @@ pub async fn engine_status() -> SandboxStatus {
         .clone()
 }
 
-/// For read-only nodes (observers), probe validator HTTP peers for fleet sandbox
-/// status when the local process has no sandbox engine installed.
+/// For read-only observer nodes, probe validator HTTP peers for fleet sandbox posture.
 pub async fn fleet_sandbox_from_peers(peer_urls: &[String]) -> Option<SandboxStatus> {
     if peer_urls.is_empty() {
         return None;
@@ -125,9 +117,8 @@ fn env_flag_true(key: &str) -> bool {
     )
 }
 
-/// ISSUE-013: the validator crate must not honor `CREG_DEV_SANDBOX` unless this
-/// is an explicit testnet/dev profile. Public validators and production remain
-/// fail-closed even if the node process missed `NodeConfig` guards.
+/// `CREG_DEV_SANDBOX` is permitted only on explicit non-public, non-production
+/// testnet/dev profiles (`ISSUE-013`).
 fn dev_sandbox_bypass_allowed(
     dev_sandbox: bool,
     testnet: bool,
@@ -148,15 +139,33 @@ fn dev_sandbox_bypass_active() -> bool {
 
 async fn detect_engine_status() -> SandboxStatus {
     let dev_bypass = dev_sandbox_bypass_active();
-    if command_ready("nsjail", &["--help"]).await {
+    let cfg = SandboxConfig::default();
+
+    if detect_firecracker_ready().await {
+        return SandboxStatus {
+            engine: "firecracker".into(),
+            dev_bypass,
+            isolated: true,
+            degraded: false,
+            note: "Tier 1 Firecracker microVM + jailer + in-guest eBPF CO-RE".into(),
+        };
+    }
+
+    if detect_nsjail_ready(
+        cfg.nsjail_config_path.as_deref(),
+        cfg.rootfs_base_dir.as_deref(),
+    )
+    .await
+    {
         return SandboxStatus {
             engine: "nsjail".into(),
             dev_bypass,
             isolated: true,
             degraded: false,
-            note: "kernel namespaces + seccomp-BPF (primary engine)".into(),
+            note: "Tier 2 hardened nsjail + seccomp-BPF + digest-pinned Alpine rootfs".into(),
         };
     }
+
     if dev_bypass {
         return SandboxStatus {
             engine: "dev-bypass".into(),
@@ -166,30 +175,13 @@ async fn detect_engine_status() -> SandboxStatus {
             note: "CREG_DEV_SANDBOX=true — behavioural analysis skipped; every package receives SB012 (High). Local development only.".into(),
         };
     }
-    if command_ready("runsc", &["--version"]).await {
-        return SandboxStatus {
-            engine: "gvisor".into(),
-            dev_bypass,
-            isolated: true,
-            degraded: false,
-            note: "userspace syscall interception (runsc)".into(),
-        };
-    }
-    if command_ready("docker", &["version", "--format", "{{.Server.Version}}"]).await {
-        return SandboxStatus {
-            engine: "docker".into(),
-            dev_bypass,
-            isolated: true,
-            degraded: true,
-            note: "OCI container fallback — packages receive SB010 (degraded isolation)".into(),
-        };
-    }
+
     SandboxStatus {
         engine: "none".into(),
         dev_bypass,
         isolated: false,
         degraded: true,
-        note: "no sandbox engine available — non-WASM packages fail closed and this validator abstains".into(),
+        note: "no isolated sandbox engine available (Firecracker/hardened nsjail missing) — non-WASM packages fail closed and this validator abstains".into(),
     }
 }
 
@@ -199,6 +191,9 @@ pub struct SandboxResult {
     pub observed_network_hosts: Vec<String>,
     pub observed_fs_writes: Vec<String>,
     pub observed_process_spawns: Vec<String>,
+    /// Canonical normalized kernel behavior graph (Tier 1 / Tier 2).
+    #[serde(default)]
+    pub kernel_graph: Option<KernelBehaviorGraphV1>,
     /// Execution metrics for observability.
     pub metrics: SandboxMetrics,
 }
@@ -206,7 +201,7 @@ pub struct SandboxResult {
 /// Execution metrics collected during sandbox run.
 #[derive(Debug, Clone, Default, serde::Serialize, serde::Deserialize)]
 pub struct SandboxMetrics {
-    /// Which engine was used: "nsjail", "gvisor", "docker", "wasm", "dev-bypass", "none".
+    /// Engine used: "firecracker", "nsjail", "wasm", "dev-bypass", or "none".
     pub engine_used: String,
     /// Wall-clock time in milliseconds.
     pub wall_time_ms: u64,
@@ -218,30 +213,33 @@ pub struct SandboxMetrics {
     pub findings_count: usize,
 }
 
-/// Sandbox configuration limits.
+/// Sandbox configuration limits & deterministic cache inputs.
 pub struct SandboxConfig {
-    /// Wall-clock timeout for the install + postinstall hooks (seconds).
+    /// Wall-clock timeout for install + hooks (seconds).
     pub timeout_secs: u64,
     /// Max memory for the sandbox (megabytes).
     pub memory_mb: u32,
-    /// Block all network by default; only whitelist declared manifest hosts.
+    /// Network containment mode.
     pub network_mode: NetworkMode,
-    /// Path to the nsjail seccomp config file (protobuf text format).
+    /// Path to the required `nsjail` seccomp config file (protobuf text format).
     pub nsjail_config_path: Option<PathBuf>,
-    /// Path to the Docker seccomp profile JSON.
-    pub docker_seccomp_path: Option<PathBuf>,
-    /// Base directory for per-ecosystem minimal rootfs trees.
+    /// Base directory containing digest-pinned per-ecosystem rootfs trees and `rootfs-digests.json`.
     pub rootfs_base_dir: Option<PathBuf>,
-    /// SHA-256 hash of the tarball for result caching.
+    /// Cached tarball + policy + manifest + trigger digest key.
     pub tarball_hash: Option<String>,
+    /// Active policy bundle identifier (`VNA-17`).
+    pub policy_bundle_id: String,
+    /// Deterministic trigger input vector (`VNA-17`).
+    pub trigger_spec: TriggerSpecV1,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum NetworkMode {
     /// No outbound connections at all.
     Isolated,
-    /// Allow only hosts declared in the manifest.
+    /// Allow only hosts declared in the manifest (captured via sinkhole).
     ManifestOnly,
-    /// Full network (used for testing only — never in production validators).
+    /// Full network (local testing only — never in production validators).
     Full,
 }
 
@@ -271,12 +269,11 @@ fn env_path(name: &str) -> Option<PathBuf> {
 
 impl Default for SandboxConfig {
     fn default() -> Self {
-        // Resolve config paths relative to the executable.
         let exe_dir = std::env::current_exe()
             .ok()
             .and_then(|p| p.parent().map(|d| d.to_path_buf()));
 
-        let config_base = exe_dir.clone().map(|d| d.join("config").join("sandbox"));
+        let config_base = exe_dir.map(|d| d.join("config").join("sandbox"));
 
         Self {
             timeout_secs: env_u64("CREG_SANDBOX_TIMEOUT", 120),
@@ -284,24 +281,20 @@ impl Default for SandboxConfig {
             network_mode: NetworkMode::ManifestOnly,
             nsjail_config_path: env_path("CREG_SANDBOX_NSJAIL_CONFIG")
                 .or_else(|| config_base.as_ref().map(|d| d.join("nsjail-seccomp.cfg"))),
-            docker_seccomp_path: env_path("CREG_SANDBOX_DOCKER_SECCOMP")
-                .or_else(|| config_base.as_ref().map(|d| d.join("docker-seccomp.json"))),
             rootfs_base_dir: env_path("CREG_SANDBOX_ROOTFS_DIR")
                 .or_else(|| config_base.as_ref().map(|d| d.join("rootfs"))),
             tarball_hash: None,
+            policy_bundle_id: AnalysisBundleSet::current().policy_bundle_id,
+            trigger_spec: TriggerSpecV1::default(),
         }
     }
 }
 
-/// In-memory cache for sandbox results keyed by deterministic hash.
+/// In-memory cache for sandbox results keyed by manifest/policy/trigger hash.
 static RESULT_CACHE: std::sync::LazyLock<std::sync::Mutex<HashMap<String, SandboxResult>>> =
     std::sync::LazyLock::new(|| std::sync::Mutex::new(HashMap::new()));
 
-/// Canonical-keyed store for the most-recent sandbox result per package.
-/// Used by the diff analysis stage to compare current vs. previous version
-/// runtime behavior. Keyed by the package canonical (e.g. `npm:express@4.18.2`).
-/// Populated by `store_result` after each successful sandbox run; looked up by
-/// `get_result` before the next version of the same package is processed.
+/// Canonical-keyed store for the most-recent sandbox result per package (Stage 3 diffing).
 static CANONICAL_STORE: std::sync::LazyLock<std::sync::Mutex<HashMap<String, SandboxResult>>> =
     std::sync::LazyLock::new(|| std::sync::Mutex::new(HashMap::new()));
 
@@ -330,15 +323,12 @@ fn canonical_to_filename(canonical: &str) -> String {
     format!("{}.json", sanitized)
 }
 
-/// Persist a sandbox result by canonical for use by the diff stage when the
-/// next version of the same package is processed.
-/// Results are stored both in the fast in-memory cache and durably on disk.
+/// Persist a sandbox result by package canonical for future Stage 3 differential checks.
 pub fn store_result(canonical: &str, result: &SandboxResult) {
     if let Ok(mut store) = CANONICAL_STORE.lock() {
         store.insert(canonical.to_string(), result.clone());
     }
 
-    // Persist durably to disk
     let dir = sandbox_store_dir();
     if let Err(e) = std::fs::create_dir_all(&dir) {
         tracing::debug!("Could not create sandbox store dir {:?}: {}", dir, e);
@@ -355,23 +345,18 @@ pub fn store_result(canonical: &str, result: &SandboxResult) {
 }
 
 /// Retrieve a previously stored sandbox result by canonical.
-/// Checks the fast in-memory cache first, then falls back to reading the
-/// durable disk store if available across node restarts.
 pub fn get_result(canonical: &str) -> Option<SandboxResult> {
-    // 1. Check in-memory store
     if let Ok(store) = CANONICAL_STORE.lock() {
         if let Some(res) = store.get(canonical) {
             return Some(res.clone());
         }
     }
 
-    // 2. Fall back to disk store
     let dir = sandbox_store_dir();
     let file_path = dir.join(canonical_to_filename(canonical));
     if file_path.exists() {
         if let Ok(data) = std::fs::read_to_string(&file_path) {
             if let Ok(res) = serde_json::from_str::<SandboxResult>(&data) {
-                // Populate in-memory store for fast subsequent lookups
                 if let Ok(mut store) = CANONICAL_STORE.lock() {
                     store.insert(canonical.to_string(), res.clone());
                 }
@@ -383,24 +368,90 @@ pub fn get_result(canonical: &str) -> Option<SandboxResult> {
     None
 }
 
-// ── Cache key helper ────────────────────────────────────────────────────────
+// ── Cache key helper (VNA-17) ───────────────────────────────────────────────
 
-fn compute_cache_key(tarball_bytes: &[u8], ecosystem: &str, config: &SandboxConfig) -> String {
-    use sha2::{Digest, Sha256};
-    // NetworkMode discriminant is included so that results run under different
-    // network policies (e.g. ManifestOnly vs Isolated) are never conflated.
-    // A package that probes for internet access behaves differently when egress
-    // is blocked — caching across modes would silently drop those findings.
-    let network_mode_byte: u8 = match config.network_mode {
+#[derive(serde::Serialize)]
+struct CanonicalManifestDigestInput {
+    allowed_network_hosts: Vec<String>,
+    allowed_fs_writes: Vec<String>,
+    spawns_processes: bool,
+    allowed_process_spawns: Vec<String>,
+}
+
+fn canonical_manifest_sha256(manifest: &PackageManifest) -> String {
+    let mut hosts = manifest
+        .allowed_network_hosts
+        .iter()
+        .map(|h| h.trim().trim_end_matches('.').to_ascii_lowercase())
+        .collect::<Vec<_>>();
+    hosts.sort();
+    hosts.dedup();
+
+    let mut writes = manifest
+        .allowed_fs_writes
+        .iter()
+        .map(|w| w.trim().replace('\\', "/"))
+        .collect::<Vec<_>>();
+    writes.sort();
+    writes.dedup();
+
+    let mut spawns = manifest
+        .allowed_process_spawns
+        .iter()
+        .map(|p| p.trim().to_string())
+        .collect::<Vec<_>>();
+    spawns.sort();
+    spawns.dedup();
+
+    let canonical = CanonicalManifestDigestInput {
+        allowed_network_hosts: hosts,
+        allowed_fs_writes: writes,
+        spawns_processes: manifest.spawns_processes,
+        allowed_process_spawns: spawns,
+    };
+    let encoded = serde_json::to_vec(&canonical).unwrap_or_default();
+    hex::encode(Sha256::digest(&encoded))
+}
+
+/// Deterministic sandbox result cache key (`VNA-17`).
+///
+/// Binds:
+///   `tarball_sha256 || ecosystem || canonical_manifest_sha256 || policy_bundle_id || trigger_spec_sha256 || timeout || memory || network_mode`
+/// so modifying any declared manifest permission, policy bundle, or trigger spec
+/// invalidates stale cached verdicts.
+#[allow(clippy::too_many_arguments)]
+pub fn compute_sandbox_cache_key(
+    tarball_bytes: &[u8],
+    ecosystem: &str,
+    manifest: &PackageManifest,
+    policy_bundle_id: &str,
+    trigger_spec: &TriggerSpecV1,
+    timeout_secs: u64,
+    memory_mb: u32,
+    network_mode: &NetworkMode,
+) -> String {
+    let tarball_sha256 = hex::encode(Sha256::digest(tarball_bytes));
+    let manifest_sha256 = canonical_manifest_sha256(manifest);
+    let trigger_sha256 = trigger_spec.canonical_sha256();
+    let network_mode_byte: u8 = match network_mode {
         NetworkMode::Isolated => 0,
         NetworkMode::ManifestOnly => 1,
         NetworkMode::Full => 2,
     };
+
     let mut hasher = Sha256::new();
-    hasher.update(tarball_bytes);
-    hasher.update(ecosystem.as_bytes());
-    hasher.update(config.timeout_secs.to_le_bytes());
-    hasher.update(config.memory_mb.to_le_bytes());
+    hasher.update(b"CREG-SANDBOX-KEY-V2:");
+    hasher.update(tarball_sha256.as_bytes());
+    hasher.update(b":");
+    hasher.update(ecosystem.trim().to_ascii_lowercase().as_bytes());
+    hasher.update(b":");
+    hasher.update(manifest_sha256.as_bytes());
+    hasher.update(b":");
+    hasher.update(policy_bundle_id.as_bytes());
+    hasher.update(b":");
+    hasher.update(trigger_sha256.as_bytes());
+    hasher.update(timeout_secs.to_le_bytes());
+    hasher.update(memory_mb.to_le_bytes());
     hasher.update([network_mode_byte]);
     hex::encode(hasher.finalize())
 }
@@ -417,68 +468,177 @@ async fn resolve_manifest_domains(hosts: &[String]) -> HashSet<String> {
     resolved
 }
 
+fn result_from_graph(
+    graph: KernelBehaviorGraphV1,
+    exit_code: i32,
+    wall_time_ms: u64,
+) -> SandboxResult {
+    let engine_used = graph.tier.as_engine_name().to_string();
+    let findings = graph.into_findings();
+    let observed_network_hosts = graph
+        .network_events
+        .iter()
+        .map(|ev| ev.sni.as_deref().unwrap_or(&ev.destination).to_string())
+        .collect::<Vec<_>>();
+    let observed_fs_writes = graph
+        .files_written
+        .iter()
+        .chain(graph.overlay_added.iter())
+        .chain(graph.overlay_modified.iter())
+        .cloned()
+        .collect::<Vec<_>>();
+    let observed_process_spawns = graph
+        .processes
+        .iter()
+        .map(|p| p.executable.clone())
+        .collect::<Vec<_>>();
+    let observations_count =
+        observed_network_hosts.len() + observed_fs_writes.len() + observed_process_spawns.len();
+    let findings_count = findings.len();
+
+    SandboxResult {
+        findings,
+        observed_network_hosts,
+        observed_fs_writes,
+        observed_process_spawns,
+        kernel_graph: Some(graph),
+        metrics: SandboxMetrics {
+            engine_used,
+            wall_time_ms,
+            exit_code,
+            observations_count,
+            findings_count,
+        },
+    }
+}
+
 // ── Main Entry Point ────────────────────────────────────────────────────────
 
 pub async fn run(
-    _pkg_id: &common::PackageId,
+    pkg_id: &common::PackageId,
     tarball_bytes: &[u8],
     manifest: &PackageManifest,
 ) -> Result<SandboxResult> {
+    run_with_trigger(pkg_id, tarball_bytes, manifest, &TriggerSpecV1::default()).await
+}
+
+pub async fn run_with_trigger(
+    pkg_id: &common::PackageId,
+    tarball_bytes: &[u8],
+    manifest: &PackageManifest,
+    trigger_spec: &TriggerSpecV1,
+) -> Result<SandboxResult> {
+    trigger_spec.validate()?;
+
     let mut config = SandboxConfig::default();
+    config.trigger_spec = trigger_spec.clone();
     let start_time = Instant::now();
 
-    // ── A4: Result Caching ────────────────────────────────────────────────────
-    // Check cache for deterministic packages (same tarball + ecosystem + config).
-    let cache_key = compute_cache_key(tarball_bytes, &_pkg_id.ecosystem, &config);
+    let cache_key = compute_sandbox_cache_key(
+        tarball_bytes,
+        &pkg_id.ecosystem,
+        manifest,
+        &config.policy_bundle_id,
+        &config.trigger_spec,
+        config.timeout_secs,
+        config.memory_mb,
+        &config.network_mode,
+    );
     config.tarball_hash = Some(cache_key.clone());
 
     if let Ok(cache) = RESULT_CACHE.lock() {
         if let Some(cached) = cache.get(&cache_key) {
-            tracing::info!("Sandbox result cache HIT for {}", _pkg_id);
+            tracing::info!("Sandbox result cache HIT for {}", pkg_id);
             return Ok(cached.clone());
         }
     }
 
     let tmp_dir = std::env::temp_dir().join(format!("creg-sandbox-{}", uuid::Uuid::new_v4()));
     std::fs::create_dir_all(&tmp_dir)?;
-
     let tarball_path = tmp_dir.join("package.tar.gz");
     std::fs::write(&tarball_path, tarball_bytes)?;
 
-    tracing::info!("Starting sandbox engine detection for {} ...", _pkg_id);
-
-    // Pre-resolve allowed network hosts to IP addresses asynchronously
     let resolved_ips = resolve_manifest_domains(&manifest.allowed_network_hosts).await;
 
-    // ── Engine 1: nsjail ──────────────────────────────────────────────────────
-    // nsjail has no --version flag; --help exits 0 when the binary is usable.
-    if command_ready("nsjail", &["--help"]).await {
-        tracing::info!("nsjail detected — using primary sandbox engine");
-        let result = run_nsjail_sandbox(
+    // ── Tier 1: Firecracker microVM + jailer + in-guest eBPF CO-RE ───────────
+    if detect_firecracker_ready().await {
+        tracing::info!(
+            "Tier 1 Firecracker detected — launching microVM sandbox for {}",
+            pkg_id
+        );
+        let outcome = run_firecracker_sandbox(
+            pkg_id,
             &tarball_path,
-            _pkg_id,
-            &config,
             manifest,
             &resolved_ips,
-            start_time,
+            trigger_spec,
+            config.timeout_secs,
         )
         .await;
         let _ = std::fs::remove_dir_all(&tmp_dir);
-        let result = result?;
+        let outcome = outcome?;
+        let result = result_from_graph(outcome.graph, outcome.exit_code, outcome.wall_time_ms);
         cache_result(&cache_key, &result);
         return Ok(result);
     }
 
-    // ── Dev bypass (ISSUE-013) ────────────────────────────────────────────────
-    // Allowed only for testnet/dev profiles: CREG_DEV_SANDBOX=true AND
-    // CREG_TESTNET=true, and never when CREG_PUBLIC_VALIDATOR or CREG_PRODUCTION
-    // is set. Release images still use this path for local compose without
-    // nsjail. Public/production validators fail closed below.
+    // ── Tier 2: Hardened nsjail + digest-pinned Alpine rootfs + seccomp ─────
+    if command_ready("nsjail", &["--help"]).await {
+        tracing::info!(
+            "Tier 2 nsjail detected — launching hardened namespace sandbox for {}",
+            pkg_id
+        );
+        let outcome = run_nsjail_sandbox_strict(
+            &tarball_path,
+            pkg_id,
+            config.nsjail_config_path.as_deref(),
+            config.rootfs_base_dir.as_deref(),
+            config.memory_mb,
+            config.timeout_secs,
+            manifest,
+            &resolved_ips,
+            trigger_spec,
+        )
+        .await;
+        let _ = std::fs::remove_dir_all(&tmp_dir);
+        let outcome = outcome?;
+        let result = result_from_graph(outcome.graph, outcome.exit_code, outcome.wall_time_ms);
+        cache_result(&cache_key, &result);
+        return Ok(result);
+    }
+
+    // ── Tier 3: Standalone WASM/WASI only (`VNA-16`) ────────────────────────
+    // Strictly gated to genuine standalone WASM packages so npm/pypi/cargo
+    // tarballs cannot smuggle a dummy `.wasm` file to bypass fail-closed abstention.
+    if crate::wasm_sandbox::is_standalone_wasm_package(pkg_id, tarball_bytes) {
+        tracing::info!("Tier 3 standalone WASM package detected for {}", pkg_id);
+        let wasm_res =
+            crate::wasm_sandbox::run_in_wasm(pkg_id, &tarball_path, &config, manifest).await;
+        let _ = std::fs::remove_dir_all(&tmp_dir);
+        let wasm_result = wasm_res?;
+        let observations_count = wasm_result.observed_network_hosts.len()
+            + wasm_result.observed_fs_writes.len()
+            + wasm_result.observed_process_spawns.len();
+        let result = SandboxResult {
+            metrics: SandboxMetrics {
+                engine_used: "wasm".into(),
+                wall_time_ms: start_time.elapsed().as_millis() as u64,
+                exit_code: wasm_result.metrics.exit_code,
+                observations_count,
+                findings_count: wasm_result.findings.len(),
+            },
+            ..wasm_result
+        };
+        cache_result(&cache_key, &result);
+        return Ok(result);
+    }
+
+    // ── Dev bypass (local testnet/dev only) ─────────────────────────────────
     if dev_sandbox_bypass_active() {
         tracing::warn!(
             "CREG_DEV_SANDBOX=true — behavioural analysis is SKIPPED for {}. \
-             This is for local development only; NEVER set this flag on a mainnet validator.",
-            _pkg_id
+             Local testnet/dev only; NEVER enabled on public/production validators.",
+            pkg_id
         );
         let _ = std::fs::remove_dir_all(&tmp_dir);
         return Ok(SandboxResult {
@@ -493,6 +653,7 @@ pub async fn run(
             observed_network_hosts: vec![],
             observed_fs_writes: vec![],
             observed_process_spawns: vec![],
+            kernel_graph: None,
             metrics: SandboxMetrics {
                 engine_used: "dev-bypass".into(),
                 wall_time_ms: start_time.elapsed().as_millis() as u64,
@@ -503,123 +664,20 @@ pub async fn run(
         });
     }
 
-    // ── Engine 2: gVisor (runsc) ──────────────────────────────────────────────
-    if command_ready("runsc", &["--version"]).await {
-        tracing::info!("gVisor (runsc) detected — using userspace syscall sandbox");
-        let result = run_gvisor_sandbox(
-            &tarball_path,
-            _pkg_id,
-            &config,
-            manifest,
-            &resolved_ips,
-            start_time,
-        )
-        .await;
-        let _ = std::fs::remove_dir_all(&tmp_dir);
-        let result = result?;
-        cache_result(&cache_key, &result);
-        return Ok(result);
-    }
-
-    // ── Engine 3: Docker ──────────────────────────────────────────────────────
-    if command_ready("docker", &["version", "--format", "{{.Server.Version}}"]).await {
-        tracing::warn!("Falling back to Docker containment (reduced isolation)");
-        let docker_result = run_docker_sandbox(&tarball_path, _pkg_id, &config, start_time).await;
-        let _ = std::fs::remove_dir_all(&tmp_dir);
-        return match docker_result {
-            Ok(obs) => {
-                let mut findings = check_against_manifest(&obs, manifest, &resolved_ips);
-                findings.push(Finding {
-                    id: "SB010".into(),
-                    title: "Degraded sandbox isolation".into(),
-                    severity: FindingSeverity::Medium,
-                    description: "Package was analysed using Docker instead of nsjail — kernel-level syscall filtering is not active.".into(),
-                    file: "sandbox-engine".into(),
-                    line: None,
-                });
-                let observations_count =
-                    obs.network_hosts.len() + obs.fs_writes.len() + obs.process_spawns.len();
-                let result = SandboxResult {
-                    metrics: SandboxMetrics {
-                        engine_used: "docker".into(),
-                        wall_time_ms: start_time.elapsed().as_millis() as u64,
-                        exit_code: obs.exit_code,
-                        observations_count,
-                        findings_count: findings.len(),
-                    },
-                    findings,
-                    observed_network_hosts: obs.network_hosts,
-                    observed_fs_writes: obs.fs_writes,
-                    observed_process_spawns: obs.process_spawns,
-                };
-                cache_result(&cache_key, &result);
-                Ok(result)
-            }
-            Err(e) => {
-                tracing::error!("Docker sandbox also failed: {}", e);
-                Err(e)
-            }
-        };
-    }
-
-    // ── Engine 4: WASM/WASI ───────────────────────────────────────────────────
-    // Cross-platform fallback — more secure than "no sandbox" but limited to
-    // packages that include WASM payloads or can be executed via WASI.
-    let is_wasm_candidate = _pkg_id.name.ends_with("-wasm") || tarball_contains_wasm(tarball_bytes);
-
-    if is_wasm_candidate {
-        tracing::info!("Attempting WASM/WASI sandbox for {} ...", _pkg_id);
-        match crate::wasm_sandbox::run_in_wasm(_pkg_id, &tarball_path, &config, manifest).await {
-            Ok(wasm_result) => {
-                let _ = std::fs::remove_dir_all(&tmp_dir);
-                let observations_count = wasm_result.observed_network_hosts.len()
-                    + wasm_result.observed_fs_writes.len()
-                    + wasm_result.observed_process_spawns.len();
-                let result = SandboxResult {
-                    metrics: SandboxMetrics {
-                        engine_used: "wasm".into(),
-                        wall_time_ms: start_time.elapsed().as_millis() as u64,
-                        exit_code: 0,
-                        observations_count,
-                        findings_count: wasm_result.findings.len(),
-                    },
-                    ..wasm_result
-                };
-                cache_result(&cache_key, &result);
-                return Ok(result);
-            }
-            Err(e) => {
-                tracing::warn!(
-                    "WASM sandbox failed for {}: {} — continuing to degraded mode",
-                    _pkg_id,
-                    e
-                );
-            }
-        }
-    }
-
-    // ── No sandbox — FAIL CLOSED ──────────────────────────────────────────────
-    // No engine is available and the operator did not explicitly opt in via
-    // CREG_DEV_SANDBOX=true. Refusing to produce a SandboxResult causes the
-    // validator pipeline to propagate the error and abstain from voting,
-    // which is the correct safety posture for mainnet.
+    // ── Fail Closed ─────────────────────────────────────────────────────────
     let _ = std::fs::remove_dir_all(&tmp_dir);
     tracing::error!(
-        "No sandboxing engine available (nsjail, gVisor, Docker, WASM) and \
-         CREG_DEV_SANDBOX is not allowed. Refusing to validate {} — the validator \
-         will abstain from this round. Install nsjail, or set CREG_DEV_SANDBOX=true \
-         together with CREG_TESTNET=true on non-public deployments.",
-        _pkg_id
+        "No isolated kernel sandbox engine (Firecracker or hardened nsjail) is available for {}, \
+         and package is not standalone WASM. Refusing to vote without behavioural isolation.",
+        pkg_id
     );
     anyhow::bail!(
-        "no sandbox engine available for {} and CREG_DEV_SANDBOX bypass is not allowed; \
+        "no isolated sandbox engine available for {} and CREG_DEV_SANDBOX bypass is not allowed; \
          refusing to vote without behavioural analysis",
-        _pkg_id
+        pkg_id
     )
 }
 
-/// Maximum number of entries in RESULT_CACHE.
-/// Configurable via `CREG_SANDBOX_CACHE_SIZE` (default: 1000).
 fn sandbox_cache_max() -> usize {
     std::env::var("CREG_SANDBOX_CACHE_SIZE")
         .ok()
@@ -631,725 +689,14 @@ fn cache_result(key: &str, result: &SandboxResult) {
     if let Ok(mut cache) = RESULT_CACHE.lock() {
         let max = sandbox_cache_max();
         if cache.len() >= max {
-            // Bounded eviction: clear the entire cache when the cap is reached.
-            // This prevents unbounded memory growth while keeping the
-            // implementation dependency-free (a full LRU would require the
-            // `lru` crate). The configurable CREG_SANDBOX_CACHE_SIZE lets
-            // operators tune the trade-off between memory and cache hit rate.
             cache.clear();
-            tracing::debug!(
-                "Sandbox RESULT_CACHE evicted (reached {} entries cap; tune via CREG_SANDBOX_CACHE_SIZE)",
-                max
-            );
+            tracing::debug!("Sandbox RESULT_CACHE cleared at {} entries cap", max);
         }
         cache.insert(key.to_string(), result.clone());
     }
 }
 
-/// Check if a tarball contains .wasm files (H1: WASM detection) via bounded `creg-unpack`.
-fn tarball_contains_wasm(tarball_bytes: &[u8]) -> bool {
-    let Ok(unpacked) = creg_unpack::unpack_tarball(tarball_bytes) else {
-        return false;
-    };
-    unpacked.files.iter().any(|file| {
-        file.path.to_ascii_lowercase().ends_with(".wasm") || file.raw_bytes.starts_with(b"\x00asm")
-    })
-}
-
-// ── Ecosystem Helpers ───────────────────────────────────────────────────────
-
-/// Select ecosystem-specific install commands for nsjail.
-fn nsjail_install_args(ecosystem: &str, tarball_path: &Path) -> Vec<std::ffi::OsString> {
-    let cmd_str = match ecosystem {
-        "npm" => format!(
-            "/usr/bin/node /usr/lib/node_modules/npm/bin/npm-cli.js install {} >/dev/null 2>&1",
-            tarball_path.to_string_lossy()
-        ),
-        "cargo" => format!(
-            "/usr/bin/cargo install --path {} --no-default-features >/dev/null 2>&1",
-            tarball_path.to_string_lossy()
-        ),
-        "rubygems" => format!(
-            "/usr/bin/gem install {} >/dev/null 2>&1",
-            tarball_path.to_string_lossy()
-        ),
-        "maven" => format!(
-            "/usr/bin/mvn install:install-file -Dfile={} >/dev/null 2>&1",
-            tarball_path.to_string_lossy()
-        ),
-        _ => format!(
-            "/usr/bin/python3 -m pip install {} >/dev/null 2>&1",
-            tarball_path.to_string_lossy()
-        ),
-    };
-    vec!["/bin/sh".into(), "-c".into(), cmd_str.into()]
-}
-
-/// Select ecosystem-specific Docker image and install command.
-fn docker_ecosystem_config(ecosystem: &str) -> (&'static str, &'static str) {
-    match ecosystem {
-        "npm" => ("node:20-slim", "npm install /pkg/package.tar.gz"),
-        "cargo" => (
-            "rust:1-slim",
-            "cargo install --path /pkg/package.tar.gz --no-default-features",
-        ),
-        "rubygems" => ("ruby:3-slim", "gem install /pkg/package.tar.gz"),
-        "maven" => (
-            "maven:3-eclipse-temurin-21",
-            "mvn install:install-file -Dfile /pkg/package.tar.gz",
-        ),
-        _ => ("python:3-slim", "pip install /pkg/package.tar.gz"),
-    }
-}
-
-/// Resolve the per-ecosystem rootfs directory for nsjail chroot (C1).
-fn resolve_rootfs(config: &SandboxConfig, ecosystem: &str) -> String {
-    if let Some(ref base) = config.rootfs_base_dir {
-        let eco_dir = match ecosystem {
-            "npm" => "npm",
-            "cargo" => "cargo",
-            "rubygems" => "rubygems",
-            "maven" => "maven",
-            _ => "pip",
-        };
-        let rootfs_path = base.join(eco_dir);
-        if rootfs_path.is_dir() {
-            return rootfs_path.to_string_lossy().into_owned();
-        }
-        tracing::warn!(
-            "Rootfs not found at {} — falling back to /",
-            rootfs_path.display()
-        );
-    }
-    "/".to_string()
-}
-
-// ── nsjail Engine ───────────────────────────────────────────────────────────
-
-async fn run_nsjail_sandbox(
-    tarball_path: &Path,
-    pkg_id: &common::PackageId,
-    config: &SandboxConfig,
-    manifest: &PackageManifest,
-    resolved_ips: &HashSet<String>,
-    start_time: Instant,
-) -> Result<SandboxResult> {
-    let install_args = nsjail_install_args(&pkg_id.ecosystem, tarball_path);
-    let chroot_path = resolve_rootfs(config, &pkg_id.ecosystem);
-
-    let mut cmd = tokio::process::Command::new("nsjail");
-    cmd.arg("-Mo");
-
-    // C2: Use seccomp config file if available.
-    if let Some(ref cfg_path) = config.nsjail_config_path {
-        if cfg_path.is_file() {
-            cmd.arg("--config").arg(cfg_path);
-            tracing::info!("nsjail: Using seccomp config from {}", cfg_path.display());
-        } else {
-            tracing::warn!(
-                "nsjail: Seccomp config not found at {} — running without explicit policy",
-                cfg_path.display()
-            );
-        }
-    }
-
-    // H3: Structured logging via --log_fd (fd 3 for JSON-structured output).
-    // nsjail writes structured log to the specified fd; we capture via stderr.
-    cmd.arg("--log_fd").arg("2");
-
-    cmd.arg("--chroot")
-        .arg(&chroot_path)
-        .arg("--user")
-        .arg("99999")
-        .arg("--group")
-        .arg("99999")
-        .arg("--time_limit")
-        .arg(config.timeout_secs.to_string())
-        .arg("--max_cpus")
-        .arg("1")
-        .arg("--rlimit_as")
-        .arg(config.memory_mb.to_string())
-        .arg("--")
-        .args(&install_args);
-
-    let output = cmd.output().await?;
-
-    let observations = parse_nsjail_output(&output.stderr)?;
-    let findings = check_against_manifest(&observations, manifest, resolved_ips);
-    let observations_count = observations.network_hosts.len()
-        + observations.fs_writes.len()
-        + observations.process_spawns.len();
-
-    Ok(SandboxResult {
-        metrics: SandboxMetrics {
-            engine_used: "nsjail".into(),
-            wall_time_ms: start_time.elapsed().as_millis() as u64,
-            exit_code: output.status.code().unwrap_or(-1),
-            observations_count,
-            findings_count: findings.len(),
-        },
-        findings,
-        observed_network_hosts: observations.network_hosts,
-        observed_fs_writes: observations.fs_writes,
-        observed_process_spawns: observations.process_spawns,
-    })
-}
-
-// ── gVisor Engine (A1) ─────────────────────────────────────────────────────
-
-async fn run_gvisor_sandbox(
-    tarball_path: &Path,
-    pkg_id: &common::PackageId,
-    config: &SandboxConfig,
-    manifest: &PackageManifest,
-    resolved_ips: &HashSet<String>,
-    start_time: Instant,
-) -> Result<SandboxResult> {
-    let (docker_image, install_cmd) = docker_ecosystem_config(&pkg_id.ecosystem);
-    let install_cmd_redirected = format!("{} >/dev/null 2>&1", install_cmd);
-
-    // gVisor runs as a Docker runtime, so we use `docker run --runtime=runsc`.
-    let docker_future = tokio::process::Command::new("docker")
-        .arg("run")
-        .arg("--rm")
-        .arg("--runtime=runsc")
-        .arg("--network=none")
-        .arg("--read-only")
-        .arg("--tmpfs")
-        .arg("/tmp:size=256m")
-        .arg("--memory")
-        .arg(format!("{}m", config.memory_mb))
-        .arg("--cpus")
-        .arg("1")
-        .arg("-v")
-        .arg(format!("{}:/pkg/package.tar.gz:ro", tarball_path.display()))
-        .arg(docker_image)
-        .arg("sh")
-        .arg("-c")
-        .arg(&install_cmd_redirected)
-        .output();
-
-    let output = tokio::time::timeout(
-        std::time::Duration::from_secs(config.timeout_secs),
-        docker_future,
-    )
-    .await
-    .map_err(|_| anyhow::anyhow!("gVisor sandbox timed out after {}s", config.timeout_secs))?
-    .map_err(|e| anyhow::anyhow!("gVisor sandbox execution failed: {}", e))?;
-
-    // gVisor stderr is similar to Docker's — parse with the Docker parser.
-    let observations = parse_docker_output(&output.stderr)?;
-    let mut findings = check_against_manifest(&observations, manifest, resolved_ips);
-    findings.push(Finding {
-        id: "SB013".into(),
-        title: "gVisor sandbox used".into(),
-        severity: FindingSeverity::Low,
-        description: "Package was analysed using gVisor (runsc) — userspace syscall interception provides strong isolation.".into(),
-        file: "sandbox-engine".into(),
-        line: None,
-    });
-
-    let observations_count = observations.network_hosts.len()
-        + observations.fs_writes.len()
-        + observations.process_spawns.len();
-
-    Ok(SandboxResult {
-        metrics: SandboxMetrics {
-            engine_used: "gvisor".into(),
-            wall_time_ms: start_time.elapsed().as_millis() as u64,
-            exit_code: output.status.code().unwrap_or(-1),
-            observations_count,
-            findings_count: findings.len(),
-        },
-        findings,
-        observed_network_hosts: observations.network_hosts,
-        observed_fs_writes: observations.fs_writes,
-        observed_process_spawns: observations.process_spawns,
-    })
-}
-
-// ── Docker Engine ───────────────────────────────────────────────────────────
-
-async fn run_docker_sandbox(
-    tarball_path: &Path,
-    pkg_id: &common::PackageId,
-    config: &SandboxConfig,
-    _start_time: Instant,
-) -> Result<Observations> {
-    let (docker_image, install_cmd) = docker_ecosystem_config(&pkg_id.ecosystem);
-
-    // M2: Wrap the install command with strace to capture successful writes
-    // and process spawns that the error-based parser would miss.
-    let strace_wrapper = format!(
-        "strace -f -e trace=network,write,openat,execve -o /tmp/strace.log sh -c '{} >/dev/null 2>&1' 2>&1; \
-         cat /tmp/strace.log >&2",
-        install_cmd
-    );
-
-    let mut docker_cmd = tokio::process::Command::new("docker");
-    docker_cmd
-        .arg("run")
-        .arg("--rm")
-        .arg("--network=none")
-        .arg("--read-only")
-        .arg("--tmpfs")
-        .arg("/tmp:size=256m")
-        .arg("--memory")
-        .arg(format!("{}m", config.memory_mb))
-        .arg("--cpus")
-        .arg("1");
-
-    // M1: Apply Docker seccomp profile if available.
-    if let Some(ref seccomp_path) = config.docker_seccomp_path {
-        if seccomp_path.is_file() {
-            docker_cmd
-                .arg("--security-opt")
-                .arg(format!("seccomp={}", seccomp_path.display()));
-            tracing::info!(
-                "Docker: Using seccomp profile from {}",
-                seccomp_path.display()
-            );
-        }
-    }
-
-    docker_cmd
-        .arg("-v")
-        .arg(format!("{}:/pkg/package.tar.gz:ro", tarball_path.display()))
-        .arg(docker_image)
-        .arg("sh")
-        .arg("-c")
-        .arg(&strace_wrapper);
-
-    let docker_future = docker_cmd.output();
-
-    let output = tokio::time::timeout(
-        std::time::Duration::from_secs(config.timeout_secs),
-        docker_future,
-    )
-    .await
-    .map_err(|_| anyhow::anyhow!("Docker sandbox timed out after {}s", config.timeout_secs))?
-    .map_err(|e| anyhow::anyhow!("Docker sandbox execution failed: {}", e))?;
-
-    // Parse both the original Docker error-based output AND the strace output.
-    let mut observations = parse_docker_output(&output.stderr)?;
-    let strace_obs = parse_strace_output(&output.stderr)?;
-    merge_observations(&mut observations, strace_obs);
-
-    observations.exit_code = output.status.code().unwrap_or(-1);
-    Ok(observations)
-}
-
-// ── Observation Types ───────────────────────────────────────────────────────
-
-struct Observations {
-    network_hosts: Vec<String>,
-    fs_writes: Vec<String>,
-    process_spawns: Vec<String>,
-    exit_code: i32,
-}
-
-/// Merge additional observations from strace into the primary set, deduplicating.
-fn merge_observations(primary: &mut Observations, additional: Observations) {
-    for host in additional.network_hosts {
-        if !primary.network_hosts.contains(&host) {
-            primary.network_hosts.push(host);
-        }
-    }
-    for path in additional.fs_writes {
-        if !primary.fs_writes.contains(&path) {
-            primary.fs_writes.push(path);
-        }
-    }
-    for spawn in additional.process_spawns {
-        if !primary.process_spawns.contains(&spawn) {
-            primary.process_spawns.push(spawn);
-        }
-    }
-}
-
-// ── Log Parsers ─────────────────────────────────────────────────────────────
-
-fn sanitize_control_characters(s: &str) -> String {
-    s.chars()
-        .map(|c| {
-            if c.is_ascii_control() && c != '\n' && c != '\r' && c != '\t' {
-                '?'
-            } else {
-                c
-            }
-        })
-        .collect()
-}
-
-/// Parse nsjail stderr/audit logs to extract observed system calls.
-/// nsjail in `-Mo` (audit/monitor mode) logs seccomp events in the format:
-///   `[SECCOMP] connect(fd, addr={sa_family=AF_INET, addr=93.184.216.34, port=443}, ...)`
-///   `[SECCOMP] open("/etc/passwd", O_RDONLY|O_CLOEXEC)`
-///   `[SECCOMP] execve("/bin/sh", ["/bin/sh", "-c", "curl ..."])`
-fn parse_nsjail_output(stderr: &[u8]) -> Result<Observations> {
-    let raw_str = String::from_utf8_lossy(stderr);
-    let stderr_str = sanitize_control_characters(&raw_str);
-    let mut network_hosts = Vec::new();
-    let mut fs_writes = Vec::new();
-    let mut process_spawns = Vec::new();
-
-    const MAX_OBSERVED_NET_HOSTS: usize = 500;
-    const MAX_OBSERVED_FS_WRITES: usize = 1000;
-    const MAX_OBSERVED_SPAWNS: usize = 500;
-    let mut limit_warned = false;
-
-    for line in stderr_str.lines() {
-        if network_hosts.len() >= MAX_OBSERVED_NET_HOSTS
-            || fs_writes.len() >= MAX_OBSERVED_FS_WRITES
-            || process_spawns.len() >= MAX_OBSERVED_SPAWNS
-        {
-            if !limit_warned {
-                tracing::warn!("Sandbox observations limit reached; truncating remaining output to prevent DoS.");
-                limit_warned = true;
-            }
-        }
-
-        // ── Network connections ────────────────────────────────────────────
-        if line.contains("connect(") {
-            if network_hosts.len() >= MAX_OBSERVED_NET_HOSTS {
-                continue;
-            }
-            if let Some(addr_start) = line.find("addr=") {
-                let rest = &line[addr_start + 5..];
-                let addr: String = rest
-                    .chars()
-                    .take_while(|c| c.is_ascii_digit() || *c == '.')
-                    .collect();
-                if !addr.is_empty() && addr.contains('.') {
-                    network_hosts.push(addr);
-                    continue;
-                }
-            }
-            if let Some(start) = line.find('"') {
-                let rest = &line[start + 1..];
-                if let Some(end) = rest.find('"') {
-                    let host = &rest[..end];
-                    if !host.is_empty() {
-                        network_hosts.push(host.to_string());
-                        continue;
-                    }
-                }
-            }
-            network_hosts.push(format!("unknown-egress (raw: {})", line.trim()));
-        }
-
-        // ── Filesystem writes ─────────────────────────────────────────────
-        if line.contains("open(")
-            && (line.contains("O_WRONLY") || line.contains("O_RDWR") || line.contains("O_CREAT"))
-        {
-            if fs_writes.len() >= MAX_OBSERVED_FS_WRITES {
-                continue;
-            }
-            if let Some(start) = line.find('"') {
-                let rest = &line[start + 1..];
-                if let Some(end) = rest.find('"') {
-                    let path = &rest[..end];
-                    if !path.is_empty() {
-                        fs_writes.push(path.to_string());
-                        continue;
-                    }
-                }
-            }
-            fs_writes.push(format!("unknown-write (raw: {})", line.trim()));
-        }
-
-        // ── Process spawns ────────────────────────────────────────────────
-        if line.contains("execve(") {
-            if process_spawns.len() >= MAX_OBSERVED_SPAWNS {
-                continue;
-            }
-            if let Some(start) = line.find('"') {
-                let rest = &line[start + 1..];
-                if let Some(end) = rest.find('"') {
-                    let binary = &rest[..end];
-                    if !binary.is_empty() {
-                        process_spawns.push(binary.to_string());
-                        continue;
-                    }
-                }
-            }
-            process_spawns.push(format!("unknown-spawn (raw: {})", line.trim()));
-        }
-    }
-
-    Ok(Observations {
-        network_hosts,
-        fs_writes,
-        process_spawns,
-        exit_code: 0,
-    })
-}
-
-/// Parse Docker container stderr to extract behavioural observations.
-fn parse_docker_output(stderr: &[u8]) -> Result<Observations> {
-    let raw_str = String::from_utf8_lossy(stderr);
-    let stderr_str = sanitize_control_characters(&raw_str);
-    let mut network_hosts = Vec::new();
-    let mut fs_writes = Vec::new();
-    let mut process_spawns = Vec::new();
-
-    const MAX_OBSERVED_NET_HOSTS: usize = 500;
-    const MAX_OBSERVED_FS_WRITES: usize = 1000;
-    const MAX_OBSERVED_SPAWNS: usize = 500;
-    let mut limit_warned = false;
-
-    for line in stderr_str.lines() {
-        if network_hosts.len() >= MAX_OBSERVED_NET_HOSTS
-            || fs_writes.len() >= MAX_OBSERVED_FS_WRITES
-            || process_spawns.len() >= MAX_OBSERVED_SPAWNS
-        {
-            if !limit_warned {
-                tracing::warn!("Sandbox observations limit reached; truncating remaining output to prevent DoS.");
-                limit_warned = true;
-            }
-        }
-
-        let lower = line.to_lowercase();
-
-        if lower.contains("econnrefused")
-            || lower.contains("enetunreach")
-            || lower.contains("getaddrinfo")
-            || lower.contains("dns resolution")
-            || lower.contains("network is unreachable")
-        {
-            if network_hosts.len() < MAX_OBSERVED_NET_HOSTS {
-                if let Some(idx) = lower.find("enotfound ") {
-                    let rest = &line[idx + 10..];
-                    let host: String = rest.chars().take_while(|c| !c.is_whitespace()).collect();
-                    if !host.is_empty() {
-                        network_hosts.push(host);
-                        continue;
-                    }
-                }
-                network_hosts.push(format!("network-attempt-detected (raw: {})", line.trim()));
-            }
-        }
-
-        if lower.contains("erofs") || lower.contains("read-only file system") {
-            if fs_writes.len() < MAX_OBSERVED_FS_WRITES {
-                if let Some(start) = line.find('\'') {
-                    let rest = &line[start + 1..];
-                    if let Some(end) = rest.find('\'') {
-                        fs_writes.push(rest[..end].to_string());
-                        continue;
-                    }
-                }
-                fs_writes.push(format!("write-attempted (raw: {})", line.trim()));
-            }
-        }
-
-        if lower.contains("spawn") || lower.contains("child_process") || lower.contains("exec(") {
-            if process_spawns.len() < MAX_OBSERVED_SPAWNS {
-                process_spawns.push(format!("process-spawn-detected (raw: {})", line.trim()));
-            }
-        }
-    }
-
-    Ok(Observations {
-        network_hosts,
-        fs_writes,
-        process_spawns,
-        exit_code: 0,
-    })
-}
-
-/// M2: Parse strace output to capture successful writes and process spawns.
-/// strace output format:
-///   `connect(3, {sa_family=AF_INET, sin_port=htons(443), sin_addr=inet_addr("93.184.216.34")}, 16) = 0`
-///   `openat(AT_FDCWD, "/tmp/foo", O_WRONLY|O_CREAT|O_TRUNC, 0644) = 3`
-///   `execve("/bin/sh", ["sh", "-c", "..."], ...) = 0`
-fn parse_strace_output(stderr: &[u8]) -> Result<Observations> {
-    let raw_str = String::from_utf8_lossy(stderr);
-    let stderr_str = sanitize_control_characters(&raw_str);
-    let mut network_hosts = Vec::new();
-    let mut fs_writes = Vec::new();
-    let mut process_spawns = Vec::new();
-
-    const MAX_OBSERVED_NET_HOSTS: usize = 500;
-    const MAX_OBSERVED_FS_WRITES: usize = 1000;
-    const MAX_OBSERVED_SPAWNS: usize = 500;
-    let mut limit_warned = false;
-
-    for line in stderr_str.lines() {
-        if network_hosts.len() >= MAX_OBSERVED_NET_HOSTS
-            || fs_writes.len() >= MAX_OBSERVED_FS_WRITES
-            || process_spawns.len() >= MAX_OBSERVED_SPAWNS
-        {
-            if !limit_warned {
-                tracing::warn!("Sandbox observations limit reached; truncating remaining output to prevent DoS.");
-                limit_warned = true;
-            }
-        }
-
-        // strace connect: extract IP from inet_addr("x.x.x.x")
-        if line.starts_with("connect(") || line.contains("] connect(") {
-            if network_hosts.len() < MAX_OBSERVED_NET_HOSTS {
-                if let Some(start) = line.find("inet_addr(\"") {
-                    let rest = &line[start + 11..];
-                    if let Some(end) = rest.find('"') {
-                        let ip = &rest[..end];
-                        if !ip.is_empty() {
-                            network_hosts.push(ip.to_string());
-                        }
-                    }
-                }
-            }
-        }
-
-        // strace openat with write flags (successful — return value >= 0)
-        if (line.starts_with("openat(") || line.contains("] openat("))
-            && (line.contains("O_WRONLY") || line.contains("O_RDWR") || line.contains("O_CREAT"))
-            && !line.ends_with("= -1 EROFS")
-            && !line.ends_with("= -1 EACCES")
-        {
-            if fs_writes.len() < MAX_OBSERVED_FS_WRITES {
-                if let Some(start) = line.find('"') {
-                    let rest = &line[start + 1..];
-                    if let Some(end) = rest.find('"') {
-                        let path = &rest[..end];
-                        if !path.is_empty() {
-                            fs_writes.push(path.to_string());
-                        }
-                    }
-                }
-            }
-        }
-
-        // strace execve (successful)
-        if (line.starts_with("execve(") || line.contains("] execve(")) && line.contains("= 0") {
-            if process_spawns.len() < MAX_OBSERVED_SPAWNS {
-                if let Some(start) = line.find('"') {
-                    let rest = &line[start + 1..];
-                    if let Some(end) = rest.find('"') {
-                        let binary = &rest[..end];
-                        if !binary.is_empty() {
-                            process_spawns.push(binary.to_string());
-                        }
-                    }
-                }
-            }
-        }
-    }
-
-    Ok(Observations {
-        network_hosts,
-        fs_writes,
-        process_spawns,
-        exit_code: 0,
-    })
-}
-
-// ── Manifest Validation ─────────────────────────────────────────────────────
-
-/// Cross-check the observed behaviour against what the publisher declared.
-/// H2: Supports `allowed_process_spawns` allowlist for fine-grained process control.
-fn check_against_manifest(
-    obs: &Observations,
-    manifest: &PackageManifest,
-    resolved_ips: &HashSet<String>,
-) -> Vec<Finding> {
-    let mut findings = Vec::new();
-
-    // Undeclared network access — normalized domain/IP matching.
-    for host in &obs.network_hosts {
-        let norm_host = host.trim().trim_end_matches('.').to_ascii_lowercase();
-        let is_ip = norm_host.parse::<IpAddr>().is_ok();
-        let allowed = if is_ip {
-            resolved_ips.contains(&norm_host)
-        } else {
-            manifest.allowed_network_hosts.iter().any(|declared| {
-                let norm_decl = declared.trim().trim_end_matches('.').to_ascii_lowercase();
-                !norm_decl.is_empty()
-                    && (norm_host == norm_decl || norm_host.ends_with(&format!(".{norm_decl}")))
-            })
-        };
-        if !allowed {
-            findings.push(Finding {
-                id: "SB001".into(),
-                title: "Undeclared network access".into(),
-                severity: FindingSeverity::High,
-                description: format!("Undeclared network access to '{}'", host),
-                file: "install-hook".into(),
-                line: None,
-            });
-        }
-    }
-
-    // Undeclared filesystem writes — prefix matching.
-    for path in &obs.fs_writes {
-        let allowed = manifest.allowed_fs_writes.iter().any(|declared| {
-            path == declared
-                || path.starts_with(&format!("{}/", declared))
-                || path.starts_with(&format!("{}\\", declared))
-        });
-        if !allowed {
-            findings.push(Finding {
-                id: "SB002".into(),
-                title: "Undeclared filesystem write".into(),
-                severity: FindingSeverity::High,
-                description: format!("Undeclared filesystem write to '{}'", path),
-                file: "install-hook".into(),
-                line: None,
-            });
-        }
-    }
-
-    // H2: Process spawn validation with allowlist support.
-    for spawn in &obs.process_spawns {
-        if manifest.spawns_processes {
-            // If the manifest has a specific allowlist, check against it.
-            if !manifest.allowed_process_spawns.is_empty() {
-                let binary_name = Path::new(spawn)
-                    .file_name()
-                    .map(|n| n.to_string_lossy().to_string())
-                    .unwrap_or_default();
-                let allowed = manifest
-                    .allowed_process_spawns
-                    .iter()
-                    .any(|declared| spawn == declared || binary_name == *declared);
-                if !allowed {
-                    findings.push(Finding {
-                        id: "SB004".into(),
-                        title: "Process spawn not in allowlist".into(),
-                        severity: FindingSeverity::High,
-                        description: format!(
-                            "Process '{}' spawned but not in allowed_process_spawns: {:?}",
-                            spawn, manifest.allowed_process_spawns
-                        ),
-                        file: "install-hook".into(),
-                        line: None,
-                    });
-                }
-            }
-            // Otherwise spawns_processes=true without allowlist means all spawns are OK.
-        } else {
-            findings.push(Finding {
-                id: "SB003".into(),
-                title: "Undeclared process spawn".into(),
-                severity: FindingSeverity::Critical,
-                description: format!("Undeclared child process spawn: '{}'", spawn),
-                file: "install-hook".into(),
-                line: None,
-            });
-        }
-    }
-
-    findings
-}
-
-// ── Phase-Based Execution (A5) ──────────────────────────────────────────────
-
-/// Multi-phase sandbox execution for deeper behavioral analysis.
-/// Phase 1: Install — dependency resolution (network may be allowed)
-/// Phase 2: Post-install — hook execution (network blocked)
-/// Phase 3: Import — runtime loading (network blocked, strict mode)
-///
-/// This is a design hook — called from `run()` when `CREG_MULTIPHASE=true`.
+/// Multi-phase sandbox execution hook using distinct `TriggerSpecV1` profiles.
 #[allow(dead_code)]
 pub async fn run_multiphase(
     pkg_id: &common::PackageId,
@@ -1364,8 +711,16 @@ pub async fn run_multiphase(
         description: manifest.description.clone(),
     };
 
-    // Phase 1: Install with declared network access
-    let phase1 = run(pkg_id, tarball_bytes, &phase1_manifest).await?;
+    let phase1 = run_with_trigger(
+        pkg_id,
+        tarball_bytes,
+        &phase1_manifest,
+        &TriggerSpecV1 {
+            env_overrides: [("CREG_PHASE".into(), "install".into())].into(),
+            ..TriggerSpecV1::default()
+        },
+    )
+    .await?;
     if phase1
         .findings
         .iter()
@@ -1374,14 +729,22 @@ pub async fn run_multiphase(
         return Ok(phase1);
     }
 
-    // Phase 2: Post-install hooks — no network
     let phase2_manifest = PackageManifest {
-        allowed_network_hosts: vec![], // No network in post-install
-        ..phase1_manifest.clone()
+        allowed_network_hosts: vec![],
+        ..phase1_manifest
     };
-    let phase2 = run(pkg_id, tarball_bytes, &phase2_manifest).await?;
+    let phase2 = run_with_trigger(
+        pkg_id,
+        tarball_bytes,
+        &phase2_manifest,
+        &TriggerSpecV1 {
+            clock_offset_secs: 86_400,
+            env_overrides: [("CREG_PHASE".into(), "postinstall".into())].into(),
+            ..TriggerSpecV1::default()
+        },
+    )
+    .await?;
 
-    // Merge findings from both phases.
     let mut combined = phase1;
     combined.findings.extend(phase2.findings);
     for host in phase2.observed_network_hosts {
@@ -1416,16 +779,8 @@ mod tests {
         assert!(!dev_sandbox_bypass_allowed(false, true, false, false));
     }
 
-    #[test]
-    fn test_sanitize_control_characters() {
-        let input = "hello\x00world\x1b[31mred\r\nnewline";
-        let sanitized = sanitize_control_characters(input);
-        assert_eq!(sanitized, "hello?world?[31mred\r\nnewline");
-    }
-
     #[tokio::test]
     async fn test_resolve_manifest_domains() {
-        // Test with raw IP literals (v4 and v6, ignoring trailing dots/whitespace)
         let hosts = vec![
             "127.0.0.1".to_string(),
             "8.8.8.8.".to_string(),
@@ -1436,51 +791,9 @@ mod tests {
         assert!(resolved.contains("8.8.8.8"));
         assert!(resolved.contains("::1"));
 
-        // Non-literal hostnames must not perform live OS DNS lookups (VNA-20 determinism).
         let local_hosts = vec!["localhost".to_string(), "registry.example.com".to_string()];
         let resolved_local = resolve_manifest_domains(&local_hosts).await;
         assert!(resolved_local.is_empty());
-    }
-
-    #[test]
-    fn test_observation_limit_and_truncation() {
-        // Generate a large mock stderr with many connect calls
-        let mut mock_stderr = Vec::new();
-        for i in 0..600 {
-            mock_stderr.extend_from_slice(
-                format!(
-                    "[SECCOMP] connect(fd, addr={{sa_family=AF_INET, addr=1.1.1.{}, port=443}})\n",
-                    i
-                )
-                .as_bytes(),
-            );
-        }
-
-        let obs = parse_nsjail_output(&mock_stderr).unwrap();
-        // Limit is 500
-        assert_eq!(obs.network_hosts.len(), 500);
-    }
-
-    #[test]
-    fn sandbox_config_reads_timeout_and_paths_from_env() {
-        let previous_timeout = std::env::var("CREG_SANDBOX_TIMEOUT").ok();
-        let previous_memory = std::env::var("CREG_SANDBOX_MEMORY_MB").ok();
-        let previous_nsjail = std::env::var("CREG_SANDBOX_NSJAIL_CONFIG").ok();
-        std::env::set_var("CREG_SANDBOX_TIMEOUT", "90");
-        std::env::set_var("CREG_SANDBOX_MEMORY_MB", "256");
-        std::env::set_var("CREG_SANDBOX_NSJAIL_CONFIG", "/tmp/nsjail.cfg");
-
-        let cfg = SandboxConfig::default();
-        assert_eq!(cfg.timeout_secs, 90);
-        assert_eq!(cfg.memory_mb, 256);
-        assert_eq!(
-            cfg.nsjail_config_path.as_deref(),
-            Some(std::path::Path::new("/tmp/nsjail.cfg"))
-        );
-
-        restore_env("CREG_SANDBOX_TIMEOUT", previous_timeout);
-        restore_env("CREG_SANDBOX_MEMORY_MB", previous_memory);
-        restore_env("CREG_SANDBOX_NSJAIL_CONFIG", previous_nsjail);
     }
 
     #[test]
@@ -1495,6 +808,7 @@ mod tests {
             observed_network_hosts: vec!["registry.npmjs.org".into()],
             observed_fs_writes: vec!["/tmp/test.txt".into()],
             observed_process_spawns: vec!["node".into()],
+            kernel_graph: None,
             metrics: SandboxMetrics {
                 engine_used: "wasm".into(),
                 wall_time_ms: 42,
@@ -1506,13 +820,11 @@ mod tests {
 
         store_result(canonical, &mock_result);
 
-        // Verify result is retrievable
         let loaded = get_result(canonical).expect("should retrieve stored result");
         assert_eq!(loaded.observed_network_hosts, vec!["registry.npmjs.org"]);
         assert_eq!(loaded.observed_fs_writes, vec!["/tmp/test.txt"]);
         assert_eq!(loaded.metrics.engine_used, "wasm");
 
-        // Clear in-memory map to test pure disk loading
         if let Ok(mut store) = CANONICAL_STORE.lock() {
             store.clear();
         }
@@ -1522,6 +834,88 @@ mod tests {
         assert_eq!(disk_loaded.observed_process_spawns, vec!["node"]);
 
         restore_env("CREG_SANDBOX_STORE_DIR", prev_dir);
+    }
+
+    #[test]
+    fn test_cache_key_sensitive_to_manifest_policy_and_trigger() {
+        let tarball = b"deterministic-tarball-bytes";
+        let trigger = TriggerSpecV1::default();
+        let base_manifest = PackageManifest::default();
+
+        let base_key = compute_sandbox_cache_key(
+            tarball,
+            "npm",
+            &base_manifest,
+            "policy-v1",
+            &trigger,
+            120,
+            512,
+            &NetworkMode::ManifestOnly,
+        );
+
+        let mut net_manifest = base_manifest.clone();
+        net_manifest
+            .allowed_network_hosts
+            .push("api.example.com".into());
+        assert_ne!(
+            base_key,
+            compute_sandbox_cache_key(
+                tarball,
+                "npm",
+                &net_manifest,
+                "policy-v1",
+                &trigger,
+                120,
+                512,
+                &NetworkMode::ManifestOnly,
+            )
+        );
+
+        let mut proc_manifest = base_manifest.clone();
+        proc_manifest.spawns_processes = true;
+        assert_ne!(
+            base_key,
+            compute_sandbox_cache_key(
+                tarball,
+                "npm",
+                &proc_manifest,
+                "policy-v1",
+                &trigger,
+                120,
+                512,
+                &NetworkMode::ManifestOnly,
+            )
+        );
+
+        assert_ne!(
+            base_key,
+            compute_sandbox_cache_key(
+                tarball,
+                "npm",
+                &base_manifest,
+                "policy-v2",
+                &trigger,
+                120,
+                512,
+                &NetworkMode::ManifestOnly,
+            )
+        );
+
+        let mut alt_trigger = trigger.clone();
+        alt_trigger.clock_offset_secs = 86_400;
+        assert_ne!(
+            base_key,
+            compute_sandbox_cache_key(
+                tarball,
+                "npm",
+                &base_manifest,
+                "policy-v1",
+                &alt_trigger,
+                120,
+                512,
+                &NetworkMode::ManifestOnly,
+            )
+        );
     }
 
     fn restore_env(name: &str, previous: Option<String>) {

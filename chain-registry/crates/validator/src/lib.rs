@@ -14,6 +14,7 @@
 pub mod bundle;
 pub mod diff;
 pub mod intelligence;
+pub mod kernel_sandbox;
 pub mod llm;
 pub mod manifest_audit;
 pub mod pgp;

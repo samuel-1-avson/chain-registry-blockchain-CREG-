@@ -587,7 +587,7 @@ async fn main() -> Result<()> {
         if !sandbox.isolated {
             anyhow::bail!(
                 "MAL-001: public validator requires an isolated sandbox engine (got '{}'). \
-                 Install nsjail (fleet secure image) before serving public traffic.",
+                 Install Firecracker/jailer (Tier 1) or hardened nsjail + pinned rootfs (Tier 2) before serving public traffic.",
                 sandbox.engine
             );
         }

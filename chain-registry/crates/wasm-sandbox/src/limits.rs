@@ -1,6 +1,9 @@
 //! Resource Limits for WASM Sandbox
 //!
 //! This module provides resource limiting for the WASM sandbox to prevent
+/// Default cap on captured WASM guest stdout and stderr (64 KiB each, VNA-16).
+pub const MAX_WASM_STDIO_BYTES: usize = 64 * 1024;
+
 /// Resource limits for sandbox execution
 #[derive(Debug, Clone, Copy)]
 pub struct ResourceLimits {
@@ -18,6 +21,8 @@ pub struct ResourceLimits {
     pub max_stack_size: usize,
     /// Maximum WASM instruction fuel units
     pub max_fuel: u64,
+    /// Maximum captured bytes per stdio stream (`stdout` / `stderr`)
+    pub max_stdio_bytes: usize,
 }
 
 impl Default for ResourceLimits {
@@ -30,6 +35,7 @@ impl Default for ResourceLimits {
             max_syscalls: 10000,
             max_stack_size: 8 * 1024 * 1024, // 8 MB
             max_fuel: 500_000_000,           // 500M fuel units
+            max_stdio_bytes: MAX_WASM_STDIO_BYTES,
         }
     }
 }
@@ -45,6 +51,7 @@ impl ResourceLimits {
             max_syscalls: 1000,
             max_stack_size: 2 * 1024 * 1024, // 2 MB
             max_fuel: 100_000_000,           // 100M fuel units
+            max_stdio_bytes: MAX_WASM_STDIO_BYTES,
         }
     }
 
@@ -58,6 +65,7 @@ impl ResourceLimits {
             max_syscalls: 100000,
             max_stack_size: 16 * 1024 * 1024, // 16 MB
             max_fuel: 2_000_000_000,          // 2B fuel units
+            max_stdio_bytes: MAX_WASM_STDIO_BYTES,
         }
     }
 
@@ -76,6 +84,12 @@ impl ResourceLimits {
     /// Set fuel limit
     pub fn with_fuel(mut self, fuel: u64) -> Self {
         self.max_fuel = fuel;
+        self
+    }
+
+    /// Set maximum captured bytes per stdio stream
+    pub fn with_max_stdio_bytes(mut self, bytes: usize) -> Self {
+        self.max_stdio_bytes = bytes;
         self
     }
 }

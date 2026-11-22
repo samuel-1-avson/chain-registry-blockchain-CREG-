@@ -10,7 +10,9 @@
 //! strongest isolation.
 
 use std::collections::HashMap;
-use std::time::Duration;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::Arc;
+use std::time::{Duration, Instant};
 use thiserror::Error;
 use tracing::{debug, info, warn};
 use wasmtime::{Engine, Module, Store, StoreLimits, StoreLimitsBuilder};
@@ -19,7 +21,7 @@ pub mod capabilities;
 pub mod limits;
 
 pub use capabilities::CapabilitySet;
-pub use limits::ResourceLimits;
+pub use limits::{ResourceLimits, MAX_WASM_STDIO_BYTES};
 
 /// Errors that can occur during WASM sandbox execution
 #[derive(Error, Debug)]
@@ -141,10 +143,14 @@ pub struct SandboxResult {
     pub success: bool,
     /// Exit code
     pub exit_code: i32,
-    /// stdout output
+    /// stdout output (capped at `ResourceLimits::max_stdio_bytes`, default 64 KiB)
     pub stdout: String,
-    /// stderr output
+    /// stderr output (capped at `ResourceLimits::max_stdio_bytes`, default 64 KiB)
     pub stderr: String,
+    /// True if stdout exceeded `max_stdio_bytes` and was truncated
+    pub stdout_truncated: bool,
+    /// True if stderr exceeded `max_stdio_bytes` and was truncated
+    pub stderr_truncated: bool,
     /// Resource usage
     pub resource_usage: ResourceUsage,
     /// Validation findings
@@ -198,6 +204,9 @@ struct SandboxState {
     capabilities: CapabilitySet,
     stdout: String,
     stderr: String,
+    stdout_truncated: bool,
+    stderr_truncated: bool,
+    max_stdio_bytes: usize,
     syscalls: u64,
     max_syscalls: u64,
 }
@@ -205,8 +214,45 @@ struct SandboxState {
 const WASI_ESUCCESS: i32 = 0;
 const WASI_EBADF: i32 = 8;
 const WASI_EFAULT: i32 = 21;
+const WASI_EINVAL: i32 = 28;
 const WASI_NOSYS: i32 = 52;
 const WASI_NOTCAPABLE: i32 = 63;
+const MAX_FD_WRITE_IOVS: usize = 1024;
+
+struct WatchdogFinishGuard(Arc<AtomicBool>);
+
+impl Drop for WatchdogFinishGuard {
+    fn drop(&mut self) {
+        self.0.store(true, Ordering::Release);
+    }
+}
+
+fn push_bounded_utf8(dest: &mut String, bytes: &[u8], cap: usize, truncated: &mut bool) {
+    if bytes.is_empty() {
+        return;
+    }
+    let remaining = cap.saturating_sub(dest.len());
+    if remaining == 0 {
+        *truncated = true;
+        return;
+    }
+    let slice = &bytes[..bytes.len().min(remaining)];
+    if slice.len() < bytes.len() {
+        *truncated = true;
+    }
+    let text = String::from_utf8_lossy(slice);
+    if text.len() <= remaining {
+        dest.push_str(&text);
+    } else {
+        // Multi-byte U+FFFD replacement expanded past `remaining`; clamp safely at char boundary.
+        *truncated = true;
+        let mut end = remaining;
+        while end > 0 && !text.is_char_boundary(end) {
+            end -= 1;
+        }
+        dest.push_str(&text[..end]);
+    }
+}
 
 fn take_syscall(state: &mut SandboxState) -> i32 {
     state.syscalls = state.syscalls.saturating_add(1);
@@ -250,13 +296,31 @@ fn wasi_fd_write(
     if fd != 1 && fd != 2 {
         return WASI_EBADF;
     }
+    if iovs_len < 0 || (iovs_len as usize) > MAX_FD_WRITE_IOVS {
+        return WASI_EINVAL;
+    }
     let Some(memory) = guest_memory(&mut caller) else {
         return WASI_EBADF;
     };
+    let (current_len, max_stdio_bytes) = {
+        let state = caller.data();
+        let cur = if fd == 1 {
+            state.stdout.len()
+        } else {
+            state.stderr.len()
+        };
+        (cur, state.max_stdio_bytes)
+    };
+    let mut remaining = max_stdio_bytes.saturating_sub(current_len);
     let data = memory.data(&caller);
-    let mut collected = Vec::new();
-    for i in 0..iovs_len {
-        let base = (iovs as usize).saturating_add((i as usize).saturating_mul(8));
+    let iovs_base = (iovs as u32) as usize;
+    let iovs_count = iovs_len as usize;
+    let mut collected = Vec::with_capacity(remaining.min(4096));
+    let mut total_requested: usize = 0;
+    let mut overflowed = false;
+
+    for i in 0..iovs_count {
+        let base = iovs_base.saturating_add(i.saturating_mul(8));
         if base.saturating_add(8) > data.len() {
             return WASI_EFAULT;
         }
@@ -266,19 +330,44 @@ fn wasi_fd_write(
         if ptr.saturating_add(len) > data.len() {
             return WASI_EFAULT;
         }
-        collected.extend_from_slice(&data[ptr..ptr + len]);
+        total_requested = total_requested.saturating_add(len);
+        if remaining > 0 {
+            let take = len.min(remaining);
+            collected.extend_from_slice(&data[ptr..ptr + take]);
+            remaining -= take;
+            if take < len {
+                overflowed = true;
+            }
+        } else if len > 0 {
+            overflowed = true;
+        }
     }
-    let text = String::from_utf8_lossy(&collected);
     {
         let state = caller.data_mut();
         if fd == 1 {
-            state.stdout.push_str(&text);
+            push_bounded_utf8(
+                &mut state.stdout,
+                &collected,
+                state.max_stdio_bytes,
+                &mut state.stdout_truncated,
+            );
+            if overflowed {
+                state.stdout_truncated = true;
+            }
         } else {
-            state.stderr.push_str(&text);
+            push_bounded_utf8(
+                &mut state.stderr,
+                &collected,
+                state.max_stdio_bytes,
+                &mut state.stderr_truncated,
+            );
+            if overflowed {
+                state.stderr_truncated = true;
+            }
         }
     }
-    let total = collected.len() as u32;
-    let nptr = nwritten_ptr as usize;
+    let total = total_requested.min(u32::MAX as usize) as u32;
+    let nptr = (nwritten_ptr as u32) as usize;
     let data = memory.data_mut(&mut caller);
     if nptr.saturating_add(4) > data.len() {
         return WASI_EFAULT;
@@ -288,20 +377,14 @@ fn wasi_fd_write(
 }
 
 impl WasmSandbox {
-    /// Create a new WASM sandbox.
-    ///
-    /// NOTE: We intentionally do NOT use wasmtime epoch interruption because
-    /// it causes STATUS_STACK_BUFFER_OVERRUN aborts on Windows with wasmtime 18.
-    /// Timeouts are enforced externally via tokio::time::timeout instead.
+    /// Create a new WASM sandbox with cross-platform fuel metering and
+    /// epoch-based timeout interruption (`wasmtime >= 40`, VNA-16).
     pub fn new(config: SandboxConfig) -> Result<Self, SandboxError> {
         info!("Initializing WASM sandbox");
 
         let mut engine_config = wasmtime::Config::new();
-        // On Linux/macOS, enable native wasmtime fuel consumption. On Windows, wasmtime 18
-        // setjmp trap unwinding can trigger MSVC STATUS_STACK_BUFFER_OVERRUN, so timeouts
-        // and syscall budgets are enforced via tokio::time::timeout and SandboxState syscalls.
-        #[cfg(not(windows))]
         engine_config.consume_fuel(true);
+        engine_config.epoch_interruption(true);
         engine_config.max_wasm_stack(config.limits.max_stack_size);
 
         let engine = Engine::new(&engine_config).map_err(|e| {
@@ -322,30 +405,29 @@ impl WasmSandbox {
             "max_open_files",
             u64::from(self.config.limits.max_open_files),
         );
+        m.insert("max_stdio_bytes", self.config.limits.max_stdio_bytes as u64);
         m
     }
 
-    /// Run a WASM module in the sandbox with timeout and resource limits enforced.
-    ///
-    /// Timeout is enforced by running the WASM execution on a blocking thread
-    /// wrapped in `tokio::time::timeout`. If the module exceeds the deadline,
-    /// the blocking thread is detached. This avoids wasmtime epoch interruption
-    /// which crashes on Windows.
+    /// Run a WASM module in the sandbox with fuel, bounded stdio, and
+    /// epoch-based timeout interruption enforced cleanly on all platforms.
     pub async fn run(
         &self,
         wasm_bytes: &[u8],
         _input: &SandboxInput,
     ) -> Result<SandboxResult, SandboxError> {
         debug!("Compiling WASM module");
+        let started = Instant::now();
 
         // Compile module (can be done on async thread — it's fast)
         let module = Module::new(&self.engine, wasm_bytes)
             .map_err(|e| SandboxError::CompilationError(e.to_string()))?;
 
-        // Clone what we need for the blocking closure
+        // Clone what we need for the blocking closure and epoch watchdog
         let engine = self.engine.clone();
         let memory_limit = self.config.limits.max_memory.max(self.config.memory_limit);
         let max_fuel = self.config.limits.max_fuel;
+        let max_stdio_bytes = self.config.limits.max_stdio_bytes;
         let timeout_duration = Duration::from_millis(
             self.config
                 .limits
@@ -355,9 +437,23 @@ impl WasmSandbox {
         let capabilities = self.config.capabilities.clone();
         let max_syscalls = self.config.limits.max_syscalls;
 
-        // Run the entire instantiation + execution on a blocking thread
-        // so we can enforce timeout externally via tokio::time::timeout.
+        let watchdog_done = Arc::new(AtomicBool::new(false));
+        let watchdog_engine = engine.clone();
+        let watchdog_done_task = watchdog_done.clone();
+        let watchdog = tokio::spawn(async move {
+            tokio::time::sleep(timeout_duration).await;
+            while !watchdog_done_task.load(Ordering::Acquire) {
+                watchdog_engine.increment_epoch();
+                tokio::time::sleep(Duration::from_millis(10)).await;
+            }
+        });
+        let blocking_done = watchdog_done.clone();
+
+        // Run instantiation + execution on a blocking thread with both epoch
+        // interruption and fuel limits active.
         let handle = tokio::task::spawn_blocking(move || {
+            let _finish_guard = WatchdogFinishGuard(blocking_done);
+
             // Build store with resource limits.
             let limits = StoreLimitsBuilder::new().memory_size(memory_limit).build();
 
@@ -369,17 +465,20 @@ impl WasmSandbox {
                     capabilities,
                     stdout: String::new(),
                     stderr: String::new(),
+                    stdout_truncated: false,
+                    stderr_truncated: false,
+                    max_stdio_bytes,
                     syscalls: 0,
                     max_syscalls,
                 },
             );
-            #[cfg(not(windows))]
             if let Err(e) = store.set_fuel(max_fuel) {
                 return Err(SandboxError::ExecutionError(format!(
                     "Failed to configure fuel budget: {}",
                     e
                 )));
             }
+            store.set_epoch_deadline(1);
             store.limiter(|state| &mut state.limits);
 
             // ── WASI stub linker (ISSUE-015: capability + resource gated) ─
@@ -714,15 +813,17 @@ impl WasmSandbox {
             let call_result = func.call(&mut store, ()).map_err(|e| {
                 // Wasmtime attaches its WebAssembly backtrace as the outer
                 // error context. Displaying that context can hide the actual
-                // trap name, so classify fuel exhaustion from the typed trap
-                // instead of relying only on its formatted message.
-                if e.downcast_ref::<wasmtime::Trap>() == Some(&wasmtime::Trap::OutOfFuel) {
-                    SandboxError::ResourceLimitExceeded(format!(
-                        "Fuel limit exceeded (limit: {} fuel units): {}",
-                        max_fuel, e
-                    ))
-                } else {
-                    SandboxError::ExecutionError(e.to_string())
+                // trap name, so classify fuel exhaustion and epoch interrupts
+                // from the typed trap instead of relying only on formatted text.
+                match e.downcast_ref::<wasmtime::Trap>() {
+                    Some(wasmtime::Trap::OutOfFuel) => {
+                        SandboxError::ResourceLimitExceeded(format!(
+                            "Fuel limit exceeded (limit: {} fuel units): {}",
+                            max_fuel, e
+                        ))
+                    }
+                    Some(wasmtime::Trap::Interrupt) => SandboxError::Timeout(timeout_duration),
+                    _ => SandboxError::ExecutionError(e.to_string()),
                 }
             });
 
@@ -732,6 +833,7 @@ impl WasmSandbox {
                 .filter_map(|exp| exp.into_memory())
                 .collect();
             let peak_memory: usize = memories.iter().map(|mem| mem.data_size(&store)).sum();
+            let wall_time_ms = started.elapsed().as_millis() as u64;
 
             match call_result {
                 Ok(exit_code) => Ok(SandboxResult {
@@ -739,10 +841,12 @@ impl WasmSandbox {
                     exit_code,
                     stdout: store.data().stdout.clone(),
                     stderr: store.data().stderr.clone(),
+                    stdout_truncated: store.data().stdout_truncated,
+                    stderr_truncated: store.data().stderr_truncated,
                     resource_usage: ResourceUsage {
                         peak_memory,
                         cpu_time_ms: 0,
-                        wall_time_ms: 0,
+                        wall_time_ms,
                     },
                     findings: vec![],
                 }),
@@ -755,10 +859,12 @@ impl WasmSandbox {
                         exit_code: code,
                         stdout: store.data().stdout.clone(),
                         stderr: store.data().stderr.clone(),
+                        stdout_truncated: store.data().stdout_truncated,
+                        stderr_truncated: store.data().stderr_truncated,
                         resource_usage: ResourceUsage {
                             peak_memory,
                             cpu_time_ms: 0,
-                            wall_time_ms: 0,
+                            wall_time_ms,
                         },
                         findings: vec![],
                     })
@@ -781,10 +887,11 @@ impl WasmSandbox {
             }
         });
 
-        // Enforce timeout externally. If the blocking thread exceeds the
-        // deadline, we return a Timeout error. The orphaned thread will be
-        // cleaned up when the process exits.
-        match tokio::time::timeout(timeout_duration, handle).await {
+        // Wait slightly longer than `timeout_duration` so Wasmtime's epoch
+        // interrupt cleanly unwinds the blocking thread back to `Trap::Interrupt`
+        // without leaving an orphaned blocking thread behind.
+        let hard_deadline = timeout_duration.saturating_add(Duration::from_millis(500));
+        let outcome = match tokio::time::timeout(hard_deadline, handle).await {
             Ok(Ok(result)) => result,
             Ok(Err(join_err)) => {
                 // JoinError — the blocking task panicked
@@ -797,7 +904,10 @@ impl WasmSandbox {
                 warn!("WASM execution timed out (limit: {:?})", timeout_duration);
                 Err(SandboxError::Timeout(timeout_duration))
             }
-        }
+        };
+        watchdog_done.store(true, Ordering::Release);
+        watchdog.abort();
+        outcome
     }
 
     /// Run a validator script on a package
@@ -864,6 +974,7 @@ mod tests {
             .expect("run");
         assert_eq!(result.exit_code, 0);
         assert_eq!(result.stdout, "hi");
+        assert!(!result.stdout_truncated);
     }
 
     #[tokio::test]
@@ -880,10 +991,9 @@ mod tests {
         assert!(result.stdout.is_empty());
     }
 
-    #[cfg(not(windows))]
     #[tokio::test]
     async fn test_fuel_limit_exceeded() {
-        // Infinite loop WASM module
+        // Infinite loop WASM module — must hit OutOfFuel on Windows and Linux.
         let wat = r#"(module
             (func (export "_start") (result i32)
                 (loop $infinite (br $infinite))
@@ -909,6 +1019,68 @@ mod tests {
             }
             other => panic!("expected ResourceLimitExceeded, got: {:?}", other),
         }
+    }
+
+    #[tokio::test]
+    async fn test_epoch_timeout_interrupts_infinite_loop() {
+        let wat = r#"(module
+            (func (export "_start") (result i32)
+                (loop $infinite (br $infinite))
+                (i32.const 0)
+            )
+        )"#;
+        let wasm = wat::parse_str(wat).expect("wat");
+        // Huge fuel budget so epoch timeout triggers before fuel exhaustion.
+        let limits = ResourceLimits::default()
+            .with_fuel(u64::MAX / 4)
+            .with_time_ms(1_000);
+        let sandbox = WasmSandbox::new(
+            SandboxConfig::default()
+                .with_resource_limits(limits)
+                .with_timeout_secs(1),
+        )
+        .expect("sandbox");
+        let err = sandbox
+            .run(&wasm, &SandboxInput::new("epoch-loop", "1.0.0", "wasm"))
+            .await
+            .unwrap_err();
+
+        match err {
+            SandboxError::Timeout(_) => {}
+            other => panic!("expected Timeout via epoch interruption, got: {:?}", other),
+        }
+    }
+
+    #[tokio::test]
+    async fn test_fd_write_caps_stdio_at_64kib() {
+        // Write a 1024-byte buffer 128 times (128 KiB attempted > 64 KiB cap).
+        let wat = r#"(module
+            (import "wasi_snapshot_preview1" "fd_write"
+                (func $fd_write (param i32 i32 i32 i32) (result i32)))
+            (memory (export "memory") 2)
+            (func (export "_start") (result i32)
+                (local $i i32)
+                (i32.store (i32.const 0) (i32.const 1024))
+                (i32.store (i32.const 4) (i32.const 1024))
+                (local.set $i (i32.const 0))
+                (loop $w
+                    (drop (call $fd_write (i32.const 1) (i32.const 0) (i32.const 1) (i32.const 16)))
+                    (local.set $i (i32.add (local.get $i) (i32.const 1)))
+                    (br_if $w (i32.lt_u (local.get $i) (i32.const 128)))
+                )
+                (i32.const 0)
+            )
+        )"#;
+        let wasm = wat::parse_str(wat).expect("wat");
+        let sandbox = WasmSandbox::new(SandboxConfig::default()).expect("sandbox");
+        let result = sandbox
+            .run(&wasm, &SandboxInput::new("stdio-flood", "1.0.0", "wasm"))
+            .await
+            .expect("run should succeed cleanly with bounded stdout");
+        assert_eq!(result.exit_code, 0);
+        assert_eq!(result.stdout.len(), MAX_WASM_STDIO_BYTES);
+        assert!(result.stdout_truncated);
+        assert!(!result.stderr_truncated);
     }
 
     #[tokio::test]

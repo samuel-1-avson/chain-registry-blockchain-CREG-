@@ -947,8 +947,8 @@ struct RuntimeConfigResponse {
     validator_set_last_finalized_source_block: Option<u64>,
     node_id: String,
     validator_pubkey: Option<String>,
-    /// MAL-001: sandbox engine this validator will use ("nsjail", "gvisor",
-    /// "docker", "dev-bypass", "none").
+    /// MAL-001: sandbox engine this validator will use ("firecracker", "nsjail",
+    /// "dev-bypass", or "none").
     sandbox_engine: String,
     /// MAL-001: true when CREG_DEV_SANDBOX=true is active. Must be false on
     /// public validator profiles.

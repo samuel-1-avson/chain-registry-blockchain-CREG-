@@ -362,6 +362,7 @@ fn configure_process_containment(command: &mut Command) {
 #[cfg(unix)]
 struct ProcessTreeGuard {
     pid: i32,
+    exited: std::sync::atomic::AtomicBool,
 }
 
 #[cfg(windows)]
@@ -385,7 +386,10 @@ impl ProcessTreeGuard {
                 .id()
                 .ok_or(AuthorityAdapterError::ProcessContainmentUnavailable)?
                 as i32;
-            Ok(Self { pid })
+            Ok(Self {
+                pid,
+                exited: std::sync::atomic::AtomicBool::new(false),
+            })
         }
         #[cfg(windows)]
         {
@@ -429,6 +433,12 @@ impl ProcessTreeGuard {
         }
     }
 
+    fn mark_exited(&self) {
+        #[cfg(unix)]
+        self.exited
+            .store(true, std::sync::atomic::Ordering::Release);
+    }
+
     async fn terminate(&self, child: &mut tokio::process::Child) {
         #[cfg(unix)]
         unsafe {
@@ -440,6 +450,18 @@ impl ProcessTreeGuard {
             let _ = TerminateJobObject(self.job, 1);
         }
         let _ = child.kill().await;
+        self.mark_exited();
+    }
+}
+
+#[cfg(unix)]
+impl Drop for ProcessTreeGuard {
+    fn drop(&mut self) {
+        if !self.exited.load(std::sync::atomic::Ordering::Acquire) && self.pid > 0 {
+            unsafe {
+                let _ = libc::kill(-self.pid, libc::SIGKILL);
+            }
+        }
     }
 }
 
@@ -453,35 +475,103 @@ impl Drop for ProcessTreeGuard {
 }
 
 #[cfg(windows)]
+struct CurrentUserSid {
+    token_buf: Vec<u64>,
+}
+
+#[cfg(windows)]
+impl CurrentUserSid {
+    fn current() -> Result<Self, AuthorityAdapterError> {
+        use windows_sys::Win32::{
+            Foundation::CloseHandle,
+            Security::{GetTokenInformation, TokenUser, TOKEN_QUERY},
+            System::Threading::{GetCurrentProcess, OpenProcessToken},
+        };
+        let mut token = std::ptr::null_mut();
+        let opened = unsafe { OpenProcessToken(GetCurrentProcess(), TOKEN_QUERY, &mut token) };
+        if opened == 0 || token.is_null() {
+            return Err(AuthorityAdapterError::ProcessContainmentUnavailable);
+        }
+        let mut needed_len = 0u32;
+        unsafe {
+            GetTokenInformation(token, TokenUser, std::ptr::null_mut(), 0, &mut needed_len);
+        }
+        if needed_len < std::mem::size_of::<windows_sys::Win32::Security::TOKEN_USER>() as u32 {
+            unsafe { CloseHandle(token) };
+            return Err(AuthorityAdapterError::ProcessContainmentUnavailable);
+        }
+        let mut token_buf = vec![0u64; (needed_len as usize).div_ceil(8)];
+        let buf_bytes = (token_buf.len() * std::mem::size_of::<u64>()) as u32;
+        let ok = unsafe {
+            GetTokenInformation(
+                token,
+                TokenUser,
+                token_buf.as_mut_ptr() as *mut _,
+                buf_bytes,
+                &mut needed_len,
+            )
+        } != 0;
+        unsafe { CloseHandle(token) };
+        if !ok {
+            return Err(AuthorityAdapterError::ProcessContainmentUnavailable);
+        }
+        Ok(Self { token_buf })
+    }
+
+    fn as_psid(&self) -> windows_sys::Win32::Security::PSID {
+        let user = unsafe {
+            &*(self.token_buf.as_ptr() as *const windows_sys::Win32::Security::TOKEN_USER)
+        };
+        user.User.Sid
+    }
+}
+
+/// Replace any inherited directory DACL with a protected owner-only DACL
+/// (`VNA-18`): strips `Users`/`Everyone`/`Authenticated Users` inherited ACEs
+/// and verifies that exactly one `ACCESS_ALLOWED_ACE` remains for the current
+/// process user SID.
+#[cfg(windows)]
 fn harden_windows_directory(path: &Path) -> Result<(), AuthorityAdapterError> {
     use std::os::windows::ffi::OsStrExt;
     use windows_sys::Win32::{
-        Foundation::LocalFree,
+        Foundation::{LocalFree, GENERIC_ALL},
         Security::{
-            Authorization::{GetNamedSecurityInfoW, SetNamedSecurityInfoW, SE_FILE_OBJECT},
-            GetSecurityDescriptorControl, DACL_SECURITY_INFORMATION,
-            PROTECTED_DACL_SECURITY_INFORMATION, SE_DACL_PROTECTED,
+            AclSizeInformation,
+            Authorization::{
+                GetNamedSecurityInfoW, SetEntriesInAclW, SetNamedSecurityInfoW, EXPLICIT_ACCESS_W,
+                NO_MULTIPLE_TRUSTEE, SET_ACCESS, SE_FILE_OBJECT, TRUSTEE_IS_SID, TRUSTEE_IS_USER,
+                TRUSTEE_W,
+            },
+            EqualSid, GetAce, GetAclInformation, GetSecurityDescriptorControl, ACCESS_ALLOWED_ACE,
+            ACL_SIZE_INFORMATION, DACL_SECURITY_INFORMATION, PROTECTED_DACL_SECURITY_INFORMATION,
+            SE_DACL_PROTECTED, SUB_CONTAINERS_AND_OBJECTS_INHERIT,
         },
     };
+    let current_user = CurrentUserSid::current()?;
+    let owner_sid = current_user.as_psid();
     let mut wide: Vec<u16> = path.as_os_str().encode_wide().collect();
     wide.push(0);
-    let mut dacl = std::ptr::null_mut();
-    let mut descriptor = std::ptr::null_mut();
-    let status = unsafe {
-        GetNamedSecurityInfoW(
-            wide.as_ptr(),
-            SE_FILE_OBJECT,
-            DACL_SECURITY_INFORMATION,
-            std::ptr::null_mut(),
-            std::ptr::null_mut(),
-            &mut dacl,
-            std::ptr::null_mut(),
-            &mut descriptor,
-        )
+
+    let ea = EXPLICIT_ACCESS_W {
+        grfAccessPermissions: GENERIC_ALL,
+        grfAccessMode: SET_ACCESS,
+        grfInheritance: SUB_CONTAINERS_AND_OBJECTS_INHERIT,
+        Trustee: TRUSTEE_W {
+            pMultipleTrustee: std::ptr::null_mut(),
+            MultipleTrusteeOperation: NO_MULTIPLE_TRUSTEE,
+            TrusteeForm: TRUSTEE_IS_SID,
+            TrusteeType: TRUSTEE_IS_USER,
+            ptstrName: owner_sid as *mut u16,
+        },
     };
-    if status != 0 || descriptor.is_null() || dacl.is_null() {
+
+    let mut new_dacl = std::ptr::null_mut();
+    let acl_status = unsafe { SetEntriesInAclW(1, &ea, std::ptr::null(), &mut new_dacl) };
+    if acl_status != 0 || new_dacl.is_null() {
+        tracing::warn!("SetEntriesInAclW failed with Win32 status {}", acl_status);
         return Err(AuthorityAdapterError::ProcessContainmentUnavailable);
     }
+
     let protected = unsafe {
         SetNamedSecurityInfoW(
             wide.as_mut_ptr(),
@@ -489,14 +579,21 @@ fn harden_windows_directory(path: &Path) -> Result<(), AuthorityAdapterError> {
             DACL_SECURITY_INFORMATION | PROTECTED_DACL_SECURITY_INFORMATION,
             std::ptr::null_mut(),
             std::ptr::null_mut(),
-            dacl,
+            new_dacl,
             std::ptr::null(),
         )
     };
-    unsafe { LocalFree(descriptor as _) };
+    unsafe { LocalFree(new_dacl as _) };
     if protected != 0 {
+        tracing::warn!(
+            "SetNamedSecurityInfoW failed on {} with Win32 status {}",
+            path.display(),
+            protected
+        );
         return Err(AuthorityAdapterError::ProcessContainmentUnavailable);
     }
+
+    let mut verified_dacl = std::ptr::null_mut();
     let mut verified_descriptor = std::ptr::null_mut();
     let verify_status = unsafe {
         GetNamedSecurityInfoW(
@@ -505,20 +602,57 @@ fn harden_windows_directory(path: &Path) -> Result<(), AuthorityAdapterError> {
             DACL_SECURITY_INFORMATION,
             std::ptr::null_mut(),
             std::ptr::null_mut(),
-            std::ptr::null_mut(),
+            &mut verified_dacl,
             std::ptr::null_mut(),
             &mut verified_descriptor,
         )
     };
     let mut control = 0u16;
     let mut revision = 0u32;
-    let valid = verify_status == 0
+    let mut acl_size = ACL_SIZE_INFORMATION::default();
+    let mut valid = verify_status == 0
         && !verified_descriptor.is_null()
+        && !verified_dacl.is_null()
         && unsafe {
-            GetSecurityDescriptorControl(verified_descriptor, &mut control, &mut revision)
-        } != 0;
-    unsafe { LocalFree(verified_descriptor as _) };
-    if !valid || control & SE_DACL_PROTECTED == 0 {
+            GetSecurityDescriptorControl(verified_descriptor, &mut control, &mut revision) != 0
+                && control & SE_DACL_PROTECTED != 0
+                && GetAclInformation(
+                    verified_dacl,
+                    &mut acl_size as *mut _ as *mut _,
+                    std::mem::size_of::<ACL_SIZE_INFORMATION>() as u32,
+                    AclSizeInformation,
+                ) != 0
+                && acl_size.AceCount >= 1
+        };
+    if valid {
+        for idx in 0..acl_size.AceCount {
+            let mut ace_ptr = std::ptr::null_mut();
+            let ace_ok = unsafe {
+                GetAce(verified_dacl, idx, &mut ace_ptr) != 0
+                    && !ace_ptr.is_null()
+                    && (*(ace_ptr as *const ACCESS_ALLOWED_ACE)).Header.AceType == 0
+                    && EqualSid(
+                        owner_sid,
+                        (&(*(ace_ptr as *const ACCESS_ALLOWED_ACE)).SidStart as *const u32) as _,
+                    ) != 0
+            };
+            if !ace_ok {
+                valid = false;
+                break;
+            }
+        }
+    } else {
+        tracing::warn!(
+            "Windows DACL post-hardening verification failed: verify_status={}, control=0x{:x}, ace_count={}",
+            verify_status,
+            control,
+            acl_size.AceCount
+        );
+    }
+    if !verified_descriptor.is_null() {
+        unsafe { LocalFree(verified_descriptor as _) };
+    }
+    if !valid {
         return Err(AuthorityAdapterError::ProcessContainmentUnavailable);
     }
     Ok(())
@@ -971,6 +1105,67 @@ struct AuthorityAdapterInvocationV2<'a> {
     request: &'a AuthorityAdapterRequestV2,
 }
 
+/// Build the Linux `nsjail` containment command wrapping a pinned authority
+/// sidecar (`VNA-18`): isolated network namespace, read-only verifier directory,
+/// writable invocation scratch directory, and bounded PIDs/RAM/timeout.
+pub fn build_sidecar_nsjail_args(
+    verifier: &Path,
+    scratch: &Path,
+    timeout: Duration,
+) -> Result<Vec<String>, AuthorityAdapterError> {
+    let verifier_dir = verifier
+        .parent()
+        .ok_or(AuthorityAdapterError::VerifierUnavailable)?;
+    let verifier_str = verifier
+        .to_str()
+        .ok_or(AuthorityAdapterError::VerifierUnavailable)?;
+    let verifier_dir_str = verifier_dir
+        .to_str()
+        .ok_or(AuthorityAdapterError::VerifierUnavailable)?;
+    let scratch_visible = host_visible_absolute(scratch)?;
+    let scratch_str = scratch_visible
+        .to_str()
+        .ok_or(AuthorityAdapterError::InvalidConfig(
+            "verifier scratch path must be UTF-8",
+        ))?;
+
+    let mut args = vec![
+        "-Mo".to_owned(),
+        "--quiet".to_owned(),
+        "--clone_newnet".to_owned(),
+        "--bindmount_ro".to_owned(),
+        format!("{verifier_dir_str}:{verifier_dir_str}"),
+        "--bindmount".to_owned(),
+        format!("{scratch_str}:{scratch_str}"),
+        "--cwd".to_owned(),
+        verifier_dir_str.to_owned(),
+        "--time_limit".to_owned(),
+        timeout.as_secs().max(1).to_string(),
+        "--rlimit_as".to_owned(),
+        "512".to_owned(),
+        "--rlimit_nofile".to_owned(),
+        "64".to_owned(),
+        "--cgroup_pids_max".to_owned(),
+        "16".to_owned(),
+    ];
+    for (k, v) in sidecar_launch_env_pairs(scratch)? {
+        args.push("--env".to_owned());
+        args.push(format!("{k}={v}"));
+    }
+    args.push("--".to_owned());
+    args.push(verifier_str.to_owned());
+    Ok(args)
+}
+
+#[cfg(target_os = "linux")]
+async fn linux_nsjail_available() -> bool {
+    tokio::process::Command::new("nsjail")
+        .arg("--help")
+        .output()
+        .await
+        .is_ok_and(|o| o.status.success())
+}
+
 /// Invoke the pinned verifier directly, with no shell and no inherited
 /// environment. Call this only from an admission/attestation worker, never
 /// from block proposal, PBFT validation, sync, replay, or state rebuild paths.
@@ -995,10 +1190,37 @@ pub async fn verify_with_sidecar(
     })?;
 
     let scratch = private_invocation_scratch(&config.scratch_root)?;
-    let mut command = Command::new(&verifier);
-    apply_sidecar_launch_env(&mut command, scratch.path())?;
+
+    #[cfg(target_os = "linux")]
+    let mut command = {
+        let disable_nsjail = common::parse_env_bool("CREG_AUTHORITY_DISABLE_NSJAIL");
+        let require_nsjail = common::parse_env_bool("CREG_AUTHORITY_REQUIRE_NSJAIL");
+        if !disable_nsjail && linux_nsjail_available().await {
+            let mut ns_cmd = Command::new("nsjail");
+            let args = build_sidecar_nsjail_args(&verifier, scratch.path(), config.timeout)?;
+            ns_cmd.args(args);
+            apply_sidecar_launch_env(&mut ns_cmd, scratch.path())?;
+            ns_cmd
+        } else if require_nsjail {
+            scratch.close().map_err(AuthorityAdapterError::Io)?;
+            return Err(AuthorityAdapterError::ProcessContainmentUnavailable);
+        } else {
+            let mut direct = Command::new(&verifier);
+            apply_sidecar_launch_env(&mut direct, scratch.path())?;
+            direct.current_dir(verifier.parent().unwrap_or_else(|| Path::new(".")));
+            direct
+        }
+    };
+
+    #[cfg(not(target_os = "linux"))]
+    let mut command = {
+        let mut direct = Command::new(&verifier);
+        apply_sidecar_launch_env(&mut direct, scratch.path())?;
+        direct.current_dir(verifier.parent().unwrap_or_else(|| Path::new(".")));
+        direct
+    };
+
     command
-        .current_dir(verifier.parent().unwrap_or_else(|| Path::new(".")))
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
@@ -1039,6 +1261,7 @@ pub async fn verify_with_sidecar(
     let deadline = Instant::now() + config.timeout;
     let run = async {
         let status = child.wait().await.map_err(AuthorityAdapterError::Io)?;
+        process_guard.mark_exited();
         join_sidecar_task(&mut write).await?;
         let stdout = join_sidecar_task(&mut read_stdout).await?;
         let stderr = join_sidecar_task(&mut read_stderr).await?;
@@ -1917,5 +2140,112 @@ mod tests {
             request.validate_at(NOW, DEFAULT_MAX_EVIDENCE_BYTES, DEFAULT_MAX_ARTIFACT_BYTES),
             Err(AuthorityAdapterError::InvalidRequest(_))
         ));
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn windows_directory_hardening_strips_inherited_non_owner_aces() {
+        use std::os::windows::ffi::OsStrExt;
+        use windows_sys::Win32::{
+            Foundation::LocalFree,
+            Security::{
+                AclSizeInformation,
+                Authorization::{GetNamedSecurityInfoW, SE_FILE_OBJECT},
+                EqualSid, GetAce, GetAclInformation, GetSecurityDescriptorControl,
+                ACCESS_ALLOWED_ACE, ACL_SIZE_INFORMATION, DACL_SECURITY_INFORMATION,
+                SE_DACL_PROTECTED,
+            },
+        };
+
+        let dir = tempfile::tempdir().unwrap();
+        let target = dir.path().join("private-verifier-dir");
+        std::fs::create_dir(&target).unwrap();
+
+        harden_windows_directory(&target).expect("hardening directory must succeed");
+
+        let current_user = CurrentUserSid::current().unwrap();
+        let owner_sid = current_user.as_psid();
+        let mut wide: Vec<u16> = target.as_os_str().encode_wide().collect();
+        wide.push(0);
+
+        let mut dacl = std::ptr::null_mut();
+        let mut descriptor = std::ptr::null_mut();
+        let status = unsafe {
+            GetNamedSecurityInfoW(
+                wide.as_ptr(),
+                SE_FILE_OBJECT,
+                DACL_SECURITY_INFORMATION,
+                std::ptr::null_mut(),
+                std::ptr::null_mut(),
+                &mut dacl,
+                std::ptr::null_mut(),
+                &mut descriptor,
+            )
+        };
+        assert_eq!(status, 0);
+        assert!(!descriptor.is_null());
+        assert!(!dacl.is_null());
+
+        let mut control = 0u16;
+        let mut revision = 0u32;
+        let mut acl_size = ACL_SIZE_INFORMATION::default();
+        unsafe {
+            assert_ne!(
+                GetSecurityDescriptorControl(descriptor, &mut control, &mut revision),
+                0
+            );
+            assert_ne!(control & SE_DACL_PROTECTED, 0);
+            assert_ne!(
+                GetAclInformation(
+                    dacl,
+                    &mut acl_size as *mut _ as *mut _,
+                    std::mem::size_of::<ACL_SIZE_INFORMATION>() as u32,
+                    AclSizeInformation,
+                ),
+                0
+            );
+            assert!(
+                (1..=2).contains(&acl_size.AceCount),
+                "inherited non-owner ACEs must be stripped leaving only owner ACEs (found {})",
+                acl_size.AceCount
+            );
+            for idx in 0..acl_size.AceCount {
+                let mut ace_ptr = std::ptr::null_mut();
+                assert_ne!(GetAce(dacl, idx, &mut ace_ptr), 0);
+                let ace = &*(ace_ptr as *const ACCESS_ALLOWED_ACE);
+                assert_eq!(ace.Header.AceType, 0);
+                assert_ne!(EqualSid(owner_sid, (&ace.SidStart as *const u32) as _), 0);
+            }
+            LocalFree(descriptor as _);
+        }
+    }
+
+    #[test]
+    fn build_sidecar_nsjail_args_pins_readonly_verifier_and_private_scratch() {
+        let dir = tempfile::tempdir().unwrap();
+        let verifier_dir = dir.path().join("bin");
+        let scratch = dir.path().join("scratch");
+        std::fs::create_dir_all(&verifier_dir).unwrap();
+        std::fs::create_dir_all(&scratch).unwrap();
+        let verifier = verifier_dir.join("creg-verifier");
+        std::fs::write(&verifier, b"stub").unwrap();
+
+        let args = build_sidecar_nsjail_args(&verifier, &scratch, Duration::from_secs(15)).unwrap();
+        assert!(args.contains(&"--clone_newnet".to_owned()));
+        assert!(args.windows(2).any(|w| w == ["--cgroup_pids_max", "16"]));
+        assert!(args.windows(2).any(|w| w == ["--time_limit", "15"]));
+        assert!(args.windows(2).any(|w| {
+            w[0] == "--bindmount_ro" && w[1].contains(&verifier_dir.to_string_lossy().to_string())
+        }));
+        assert!(args.windows(2).any(|w| {
+            w[0] == "--bindmount"
+                && w[1].contains(
+                    &host_visible_absolute(&scratch)
+                        .unwrap()
+                        .to_string_lossy()
+                        .to_string(),
+                )
+        }));
+        assert_eq!(args.last().unwrap(), verifier.to_str().unwrap());
     }
 }

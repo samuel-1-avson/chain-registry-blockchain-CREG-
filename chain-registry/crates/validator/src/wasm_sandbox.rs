@@ -1,7 +1,119 @@
-use crate::sandbox::{NetworkMode, SandboxConfig, SandboxMetrics, SandboxResult};
+use crate::sandbox::{SandboxConfig, SandboxMetrics, SandboxResult};
 use anyhow::{Context, Result};
-use common::{Finding, FindingSeverity, PackageManifest};
+use common::{Finding, FindingSeverity, PackageId, PackageManifest};
 use std::time::Instant;
+
+/// Returns `true` ONLY for genuine standalone WASM packages (`VNA-16`).
+///
+/// Prevents non-WASM `npm` / `pypi` / `cargo` packages from smuggling a tiny
+/// dummy `.wasm` file to bypass Tier 1/Tier 2 fail-closed abstention and run in
+/// the Tier 3 WASI-only fallback.
+pub fn is_standalone_wasm_package(pkg_id: &PackageId, tarball_bytes: &[u8]) -> bool {
+    let Ok(unpacked) = creg_unpack::unpack_tarball(tarball_bytes) else {
+        return false;
+    };
+    if unpacked.files.is_empty() {
+        return false;
+    }
+
+    let mut has_valid_wasm = false;
+    let is_wasm_ecosystem = pkg_id.ecosystem.trim().eq_ignore_ascii_case("wasm");
+
+    for file in &unpacked.files {
+        let lower_path = file.path.to_ascii_lowercase();
+        let bytes = file.raw_bytes.as_ref();
+
+        if lower_path.ends_with(".wasm") {
+            if !bytes.starts_with(b"\x00asm") {
+                return false;
+            }
+            has_valid_wasm = true;
+            continue;
+        }
+
+        // Disallow any native binary headers disguised without extension
+        if bytes.starts_with(b"\x7fELF")
+            || bytes.starts_with(b"MZ")
+            || matches!(
+                bytes.get(0..4),
+                Some([0xfe, 0xed, 0xfa, 0xce])
+                    | Some([0xfe, 0xed, 0xfa, 0xcf])
+                    | Some([0xcf, 0xfa, 0xed, 0xfe])
+                    | Some([0xca, 0xfe, 0xba, 0xbe])
+            )
+        {
+            return false;
+        }
+
+        // Disallow script, compiled, or build-hook payloads in ANY ecosystem
+        let file_name = lower_path.rsplit('/').next().unwrap_or(&lower_path);
+        const DISALLOWED_EXTS: &[&str] = &[
+            ".js", ".mjs", ".cjs", ".ts", ".mts", ".cts", ".jsx", ".tsx", ".py", ".pyc", ".pyo",
+            ".pyw", ".rb", ".rs", ".sh", ".bash", ".zsh", ".ps1", ".bat", ".cmd", ".c", ".cc",
+            ".cpp", ".h", ".go", ".java", ".class", ".jar", ".so", ".dll", ".dylib", ".node",
+        ];
+        if DISALLOWED_EXTS.iter().any(|ext| lower_path.ends_with(ext)) {
+            return false;
+        }
+        const DISALLOWED_NAMES: &[&str] = &[
+            "setup.py",
+            "setup.cfg",
+            "pyproject.toml",
+            "build.rs",
+            "rakefile",
+            "gemfile",
+            "makefile",
+            "cmakelists.txt",
+            "install.sh",
+            "preinstall.sh",
+            "postinstall.sh",
+        ];
+        if DISALLOWED_NAMES.contains(&file_name) {
+            return false;
+        }
+
+        if file_name == "package.json" {
+            let Ok(val) = serde_json::from_slice::<serde_json::Value>(bytes) else {
+                return false;
+            };
+            if let Some(scripts) = val.get("scripts").and_then(|s| s.as_object()) {
+                if !scripts.is_empty() {
+                    return false;
+                }
+            }
+            for field in ["main", "module", "bin", "browser"] {
+                if let Some(target) = val.get(field).and_then(|v| v.as_str()) {
+                    if !target.to_ascii_lowercase().ends_with(".wasm") {
+                        return false;
+                    }
+                }
+            }
+            continue;
+        }
+
+        if is_wasm_ecosystem {
+            continue;
+        }
+
+        // Non-wasm ecosystem (e.g. npm `-wasm` wrapper): only passive docs/metadata permitted.
+        let is_passive_meta = lower_path.ends_with(".md")
+            || lower_path.ends_with(".txt")
+            || lower_path.ends_with(".rst")
+            || lower_path.ends_with(".wit")
+            || lower_path.ends_with(".d.ts")
+            || lower_path.ends_with(".map")
+            || file_name.starts_with("license")
+            || file_name.starts_with("copying")
+            || file_name.starts_with("notice")
+            || file_name == "readme"
+            || file_name == "changelog";
+        if !is_passive_meta {
+            return false;
+        }
+    }
+
+    has_valid_wasm
+}
 
 fn extract_wasm_files(tarball_path: &std::path::Path) -> Result<Vec<(String, Vec<u8>)>> {
     let tarball_bytes = std::fs::read(tarball_path)
@@ -56,6 +168,7 @@ pub async fn run_in_wasm(
                 observed_network_hosts: vec![],
                 observed_fs_writes: vec![],
                 observed_process_spawns: vec![],
+                kernel_graph: None,
                 metrics: SandboxMetrics {
                     engine_used: "wasm".into(),
                     wall_time_ms: start_time.elapsed().as_millis() as u64,
@@ -84,6 +197,7 @@ pub async fn run_in_wasm(
             observed_network_hosts: vec![],
             observed_fs_writes: vec![],
             observed_process_spawns: vec![],
+            kernel_graph: None,
             metrics: SandboxMetrics {
                 engine_used: "wasm".into(),
                 wall_time_ms: start_time.elapsed().as_millis() as u64,
@@ -99,6 +213,12 @@ pub async fn run_in_wasm(
     let mut limits = wasm_sandbox_crate::ResourceLimits::strict();
     limits.max_memory = memory_limit;
     limits.max_time_ms = config.timeout_secs.saturating_mul(1000);
+    // Allow generous per-second instruction budget so epoch interruption cleanly
+    // enforces wall-clock timeout on infinite loops while still capping CPU.
+    limits.max_fuel = config
+        .timeout_secs
+        .saturating_mul(25_000_000_000)
+        .max(500_000_000);
     let wasm_config = wasm_sandbox_crate::SandboxConfig::default()
         .with_resource_limits(limits)
         .with_capabilities(wasm_sandbox_crate::CapabilitySet::validator());
@@ -120,6 +240,7 @@ pub async fn run_in_wasm(
                 observed_network_hosts: vec![],
                 observed_fs_writes: vec![],
                 observed_process_spawns: vec![],
+                kernel_graph: None,
                 metrics: SandboxMetrics {
                     engine_used: "wasm".into(),
                     wall_time_ms: start_time.elapsed().as_millis() as u64,
@@ -140,6 +261,20 @@ pub async fn run_in_wasm(
         tracing::info!("[WASM] Executing WASM module: {} ...", path);
         match sandbox.run(&wasm_bytes, &sandbox_input).await {
             Ok(res) => {
+                if res.stdout_truncated || res.stderr_truncated {
+                    findings.push(Finding {
+                        id: "SB015".into(),
+                        title: "WASM sandbox stdio output truncated".into(),
+                        severity: FindingSeverity::Medium,
+                        description: format!(
+                            "WASM module {} exceeded the {} byte stdio cap and was truncated.",
+                            path,
+                            wasm_sandbox_crate::MAX_WASM_STDIO_BYTES
+                        ),
+                        file: path.clone(),
+                        line: None,
+                    });
+                }
                 for f in res.findings {
                     findings.push(Finding {
                         id: f.category.clone(),
@@ -222,6 +357,7 @@ pub async fn run_in_wasm(
         observed_network_hosts: vec![],
         observed_fs_writes: vec![],
         observed_process_spawns: vec![],
+        kernel_graph: None,
         metrics: SandboxMetrics {
             engine_used: "wasm".into(),
             wall_time_ms: start_time.elapsed().as_millis() as u64,
@@ -235,6 +371,7 @@ pub async fn run_in_wasm(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::sandbox::NetworkMode;
     use common::{PackageId, PackageManifest};
     use flate2::write::GzEncoder;
     use flate2::Compression;
@@ -281,9 +418,9 @@ mod tests {
             memory_mb: 64,
             network_mode: NetworkMode::Isolated,
             nsjail_config_path: None,
-            docker_seccomp_path: None,
             rootfs_base_dir: None,
             tarball_hash: None,
+            ..SandboxConfig::default()
         };
         let manifest = PackageManifest::default();
 
@@ -304,7 +441,6 @@ mod tests {
     }
 
     #[tokio::test]
-    #[ignore = "wasmtime infinite-loop modules can exhaust the blocking pool on Windows; run with --ignored"]
     async fn test_wasm_sandbox_timeout_disruption() {
         let result = tokio::time::timeout(
             std::time::Duration::from_secs(8),
@@ -344,9 +480,9 @@ mod tests {
             memory_mb: 64,
             network_mode: NetworkMode::Isolated,
             nsjail_config_path: None,
-            docker_seccomp_path: None,
             rootfs_base_dir: None,
             tarball_hash: None,
+            ..SandboxConfig::default()
         };
         let manifest = PackageManifest::default();
 
@@ -381,9 +517,9 @@ mod tests {
             memory_mb: 64,
             network_mode: NetworkMode::Isolated,
             nsjail_config_path: None,
-            docker_seccomp_path: None,
             rootfs_base_dir: None,
             tarball_hash: None,
+            ..SandboxConfig::default()
         };
         let manifest = PackageManifest::default();
 

@@ -8,12 +8,6 @@ description = "WASM-based sandboxing for cross-platform package validation"
 [dependencies]
 # WASM Runtime
 wasmtime = { workspace = true }
-wasmtime-wasi = { workspace = true }
-wasmtime-runtime = "18"
-
-# WASI components
-cap-std = "2"
-cap-rand = "2"
 
 # Async runtime
 tokio = { workspace = true }

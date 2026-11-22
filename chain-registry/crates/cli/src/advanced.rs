@@ -233,6 +233,8 @@ pub async fn wasm_validate(
             resource_usage: wasm_sandbox::ResourceUsage::default(),
             stdout: String::new(),
             stderr: "WASM validator not configured — static analysis still ran".into(),
+            stdout_truncated: false,
+            stderr_truncated: false,
         }
     };
 
