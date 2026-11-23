@@ -206,7 +206,7 @@ jobs:
           path: chain-registry/release-assurance
 
       - name: Install cosign
-        uses: sigstore/cosign-installer@v3.7.0
+        uses: sigstore/cosign-installer@v4.1.3
 
       - name: Create release manifests
         shell: bash
