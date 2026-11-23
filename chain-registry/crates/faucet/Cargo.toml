@@ -6,6 +6,8 @@ edition = "2021"
 [dependencies]
 common = { path = "../common", features = ["l1-rpc"] }
 chain-registry-secrets = { path = "../secrets" }
+# Single-writer hot-wallet signer + durable EOA nonce ledger (ADR-019 Inc 6).
+l1-tx = { path = "../l1-tx" }
 tokio = { version = "1", features = ["full"] }
 axum = "0.7"
 axum-server = { version = "0.7", features = ["tls-rustls"], optional = true }
@@ -17,16 +19,18 @@ anyhow = "1"
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 reqwest = { workspace = true }
-dashmap = "5.5"
 chrono = { version = "0.4", features = ["serde"] }
 alloy = { workspace = true }
 sha2 = "0.10"
+hmac = "0.12"
 hex = "0.4"
 ipnet = "2"
 rand = "0.8"
 metrics = "0.23"
 metrics-exporter-prometheus = "0.15"
-tokio-postgres = { version = "0.7", features = ["with-chrono-0_4"] }
+# Pooled PostgreSQL with TLS (ECA-32); replaces tokio-postgres + NoTls.
+sqlx = { workspace = true }
+zeroize = { workspace = true }
 
 [dev-dependencies]
 tokio-test = "0.4"

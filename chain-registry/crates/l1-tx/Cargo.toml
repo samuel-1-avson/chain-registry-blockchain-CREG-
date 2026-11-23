@@ -1,0 +1,24 @@
+[package]
+name = "l1-tx"
+version = "0.1.0"
+edition = "2021"
+description = "Single-writer L1 hot-wallet signer actor with a durable EOA nonce ledger (ADR-019 Increment 6)"
+
+[dependencies]
+common      = { path = "../common", features = ["l1-rpc"] }
+alloy       = { workspace = true }
+anyhow      = { workspace = true }
+async-trait = { workspace = true }
+chrono      = { workspace = true }
+hex         = { workspace = true }
+serde       = { workspace = true }
+serde_json  = { workspace = true }
+sha2        = { workspace = true }
+sqlx        = { workspace = true }
+thiserror   = { workspace = true }
+tokio       = { workspace = true }
+tracing     = { workspace = true }
+zeroize     = { workspace = true }
+
+[lints]
+workspace = true

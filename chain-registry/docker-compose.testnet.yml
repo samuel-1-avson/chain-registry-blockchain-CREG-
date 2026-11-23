@@ -285,6 +285,9 @@ services:
       FAUCET_RECONCILIATION_CONFIRMATIONS: "${FAUCET_RECONCILIATION_CONFIRMATIONS:-64}"
       FAUCET_PG_URL: "${CREG_PG_URL:-postgres://${POSTGRES_USER:-creg}:${POSTGRES_PASSWORD:-creg}@postgres:5432/${POSTGRES_DB:-chain_registry}}"
       FAUCET_ADMIN_TOKEN: "${FAUCET_ADMIN_TOKEN:-testnet-admin-secret}"
+      # ADR-019 Inc 6 (ECA-32): plaintext PG only on this private compose network.
+      FAUCET_PG_ALLOW_PLAINTEXT_PRIVATE_NETWORK: "true"
+      CREG_TESTNET: "true"
       RUST_LOG: "info"
     ports:
       - "8082:8082"
@@ -309,12 +312,18 @@ services:
       RELAYER_RPC_FALLBACKS: "${RELAYER_RPC_FALLBACKS:-}"
       RELAYER_PRIVATE_KEY: "${RELAYER_PRIVATE_KEY:?RELAYER_PRIVATE_KEY must be set in .env.testnet}"
       RELAYER_POLICY_PATH: "/app/config/relayer-policy.example.json"
+      # ADR-019 Inc 6: durable relayer state + l1-tx nonce ledger (PostgreSQL).
+      RELAYER_DATABASE_URL: "${CREG_PG_URL:-postgres://${POSTGRES_USER:-creg}:${POSTGRES_PASSWORD:-creg}@postgres:5432/${POSTGRES_DB:-chain_registry}}"
+      RELAYER_PG_ALLOW_PLAINTEXT_PRIVATE_NETWORK: "true"
+      CREG_TESTNET: "true"
       TESTNET_TOKEN_ADDR: "${TESTNET_TOKEN_ADDR:-0x02348b64895ea27088058191ADf8772353D00417}"
       TESTNET_STAKING_ADDR: "${TESTNET_STAKING_ADDR:-0xE906ae140987CC2cA711dDa4ee43574d3aDc31b7}"
       RUST_LOG: "info"
     ports:
       - "8083:8083"
     depends_on:
+      postgres:
+        condition: service_healthy
       spec-server:
         condition: service_healthy
     healthcheck:

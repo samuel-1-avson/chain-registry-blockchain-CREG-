@@ -1,4 +1,4 @@
-//! Background sync worker: sled → PostgreSQL.
+//! Background sync worker: node chain store (RocksDB) → PostgreSQL.
 
 use anyhow::{Context, Result};
 use sqlx::postgres::PgPoolOptions;

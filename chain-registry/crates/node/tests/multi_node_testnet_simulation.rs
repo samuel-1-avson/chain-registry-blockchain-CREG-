@@ -5,6 +5,9 @@
 //! BLS multi-signature aggregation, L1 Merkle checkpointing, and Developer Gateway Proxy gating.
 
 use chrono::Utc;
+use common::test_support::merkle_proof::{
+    build_merkle_tree, generate_inclusion_proof, verify_merkle_path,
+};
 use common::{
     block::BlockSignature, sha256_hex, Block, BlockHeader, Finding, FindingSeverity, PackageId,
     PackageManifest, PublishRequest, Transaction, TrustVerdict, VerdictStatus,
@@ -13,10 +16,6 @@ use consensus::{
     pbft::{pbft_signature_message, verify_pbft_phase_signature, PbftEngine},
     validator_set::{ValidatorInfo, ValidatorSet},
     vrf::{select_proposer_deterministic, VrfValidator},
-};
-use cross_chain::{
-    checkpoint_relayer::{CheckpointRelayQueue, L1CheckpointBatch},
-    merkle_proof::{build_merkle_tree, generate_inclusion_proof, verify_merkle_path},
 };
 use ed25519_dalek::{Signer, SigningKey};
 use libp2p::{Multiaddr, PeerId};
@@ -253,9 +252,11 @@ fn test_multi_node_testnet_cluster_full_simulation() {
     );
 
     // ─────────────────────────────────────────────────────────────────────────────
-    // 6. Cross-Chain Merkle Anchoring & State Root Proofs
+    // 6. Merkle State Root & Inclusion Proofs
+    // (L1 anchoring itself is node::bridge; the cross-chain checkpoint queue
+    // was retired with ADR-019 Increment 6.)
     // ─────────────────────────────────────────────────────────────────────────────
-    println!("\n[Stage 6/7] Generating Binary Merkle Tree & L1 State Root Checkpoint...");
+    println!("\n[Stage 6/7] Generating Binary Merkle Tree & State Root Inclusion Proof...");
     let tx1 = sha256_hex(b"tx_genesis");
     let tx2 = sha256_hex(format!("tx_{}_{}", package_id.canonical(), content_hash).as_bytes());
     let leaves = vec![tx1.clone(), tx2.clone()];
@@ -265,27 +266,11 @@ fn test_multi_node_testnet_cluster_full_simulation() {
     let proof =
         generate_inclusion_proof(&leaves, &package_id.canonical(), 1).expect("inclusion proof");
     assert!(verify_merkle_path(&tx2, 1, &proof.audit_path, &root_hash));
-
-    let mut relay_queue = CheckpointRelayQueue::new(10);
-    relay_queue
-        .enqueue(L1CheckpointBatch {
-            block_height: 1,
-            block_hash: block_hash.clone(),
-            state_root: root_hash.clone(),
-            transparency_root: root_hash.clone(),
-            package_count: 1,
-            bls_aggregate_signature: None,
-            participant_bitmask: None,
-            timestamp: 1724760000,
-        })
-        .expect("enqueue checkpoint");
-
-    let popped = relay_queue.pop_next();
-    assert!(popped.is_some());
+    assert_eq!(proof.root_hash, root_hash);
+    assert!(!verify_merkle_path(&tx1, 1, &proof.audit_path, &root_hash));
 
     println!("  ✓ Merkle State Root: {}", root_hash);
     println!("  ✓ Inclusion Proof generated and verified for Package Transaction");
-    println!("  ✓ L1 Checkpoint Queue ready for Smart Contract Anchor Relay");
 
     // ─────────────────────────────────────────────────────────────────────────────
     // 7. Developer Gateway Proxy Interception & Client Gating

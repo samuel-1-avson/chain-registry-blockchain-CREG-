@@ -1,14 +1,14 @@
 //! # PostgreSQL Sync Worker for Chain Registry
 //!
 //! This crate implements an ETL pipeline that mirrors finalized on-chain data
-//! from sled into PostgreSQL. It enables fast queries, search, and analytics
-//! without hitting the embedded chain database.
+//! from the node's RocksDB chain store into PostgreSQL. It enables fast
+//! queries, search, and analytics without hitting the embedded chain database.
 //!
 //! ## Architecture
 //!
 //! ```text
 //! ┌─────────────┐     poll      ┌─────────────┐     UPSERT     ┌─────────────┐
-//! │  sled DB    │ ◄──────────── │  SyncWorker │ ─────────────► │  PostgreSQL │
+//! │  RocksDB    │ ◄──────────── │  SyncWorker │ ─────────────► │  PostgreSQL │
 //! └─────────────┘   every 1s    └─────────────┘   in batches   └─────────────┘
 //! ```
 //!

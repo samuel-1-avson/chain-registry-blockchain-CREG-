@@ -268,6 +268,10 @@ services:
       RELAYER_RPC_FALLBACKS: ${RELAYER_RPC_FALLBACKS:-}
       RELAYER_PRIVATE_KEY: ${RELAYER_PRIVATE_KEY:-}
       RELAYER_POLICY_PATH: "/app/config/relayer-policy.example.json"
+      # ADR-019 Inc 6: durable relayer state + l1-tx nonce ledger (PostgreSQL).
+      RELAYER_DATABASE_URL: postgres://creg:${POSTGRES_PASSWORD:-creg_password}@postgres:5432/creg
+      RELAYER_PG_ALLOW_PLAINTEXT_PRIVATE_NETWORK: "true"
+      RELAYER_ALLOWED_ORIGINS: ${RELAYER_ALLOWED_ORIGINS:-http://localhost:3007}
       TESTNET_TOKEN_ADDR: ${CREG_TOKEN_ADDR:-0xB326dB1C6e457f4AdfBb11f17FDc145ED585b288}
       TESTNET_STAKING_ADDR: ${CREG_STAKING_ADDR:-0xE906ae140987CC2cA711dDa4ee43574d3aDc31b7}
       VITE_SEPOLIA_CREG_TOKEN: ${CREG_TOKEN_ADDR:-0xB326dB1C6e457f4AdfBb11f17FDc145ED585b288}
@@ -278,6 +282,8 @@ services:
     volumes:
       - ./config:/app/config:ro
     depends_on:
+      postgres:
+        condition: service_healthy
       spec-server:
         condition: service_healthy
     restart: unless-stopped
@@ -318,6 +324,10 @@ services:
       FAUCET_POW_DISABLED: "true"
       FAUCET_ADMIN_TOKEN: ${FAUCET_ADMIN_TOKEN:-dev-admin-secret}
       FAUCET_PG_URL: postgres://creg:${POSTGRES_PASSWORD:-creg_password}@postgres:5432/creg
+      # ADR-019 Inc 6 (ECA-32): plaintext PG only on this private compose network;
+      # admin + /metrics listen on 127.0.0.1:9086 inside the container.
+      FAUCET_PG_ALLOW_PLAINTEXT_PRIVATE_NETWORK: "true"
+      FAUCET_ALLOWED_ORIGINS: ${FAUCET_ALLOWED_ORIGINS:-http://localhost:3007,http://localhost:8082}
       FAUCET_EXPLORER_URL: http://localhost:3007
       RUST_LOG: "info"
     ports:

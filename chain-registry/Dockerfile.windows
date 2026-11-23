@@ -59,11 +59,10 @@ COPY crates/consensus/Cargo.toml crates/consensus/
 COPY crates/node/Cargo.toml     crates/node/
 COPY crates/faucet/Cargo.toml   crates/faucet/
 COPY crates/relayer/Cargo.toml  crates/relayer/
-COPY crates/zk-validator/Cargo.toml     crates/zk-validator/
 COPY crates/ml-validator/Cargo.toml     crates/ml-validator/
 COPY crates/wasm-sandbox/Cargo.toml     crates/wasm-sandbox/
 COPY crates/threshold-encryption/Cargo.toml crates/threshold-encryption/
-COPY crates/cross-chain/Cargo.toml        crates/cross-chain/
+COPY crates/l1-tx/Cargo.toml            crates/l1-tx/
 COPY crates/insurance/Cargo.toml        crates/insurance/
 COPY crates/db-sync/Cargo.toml          crates/db-sync/
 COPY crates/ipfs-pinner/Cargo.toml      crates/ipfs-pinner/
@@ -80,11 +79,10 @@ RUN mkdir -p crates/common/src && echo "pub fn _stub() {}" > crates/common/src/l
     mkdir -p crates/validator/src && echo "pub fn _stub() {}" > crates/validator/src/lib.rs && \
     mkdir -p crates/consensus/src && echo "pub fn _stub() {}" > crates/consensus/src/lib.rs && \
     mkdir -p crates/node/src && echo "fn main() {}" > crates/node/src/main.rs && \
-    mkdir -p crates/zk-validator/src && echo "pub fn _stub() {}" > crates/zk-validator/src/lib.rs && \
     mkdir -p crates/ml-validator/src && echo "pub fn _stub() {}" > crates/ml-validator/src/lib.rs && \
     mkdir -p crates/wasm-sandbox/src && echo "pub fn _stub() {}" > crates/wasm-sandbox/src/lib.rs && \
     mkdir -p crates/threshold-encryption/src && echo "pub fn _stub() {}" > crates/threshold-encryption/src/lib.rs && \
-    mkdir -p crates/cross-chain/src && echo "pub fn _stub() {}" > crates/cross-chain/src/lib.rs && \
+    mkdir -p crates/l1-tx/src && echo "pub fn _stub() {}" > crates/l1-tx/src/lib.rs && \
     mkdir -p crates/insurance/src && echo "pub fn _stub() {}" > crates/insurance/src/lib.rs && \
     mkdir -p crates/db-sync/src && echo "pub fn _stub() {}" > crates/db-sync/src/lib.rs && \
     mkdir -p crates/ipfs-pinner/src && echo "pub fn _stub() {}" > crates/ipfs-pinner/src/lib.rs && \

@@ -181,19 +181,19 @@ RUN cargo --version && rustc --version && \
 
 WORKDIR /build
 
-# All 20 workspace crate manifests for deterministic locked fetch.
+# All 19 workspace crate manifests for deterministic locked fetch.
 COPY Cargo.toml Cargo.lock ./
 COPY crates/cli/Cargo.toml                  crates/cli/
 COPY crates/common/Cargo.toml               crates/common/
 COPY crates/common/build.rs                 crates/common/
 COPY crates/common/proto/                   crates/common/proto/
 COPY crates/consensus/Cargo.toml            crates/consensus/
-COPY crates/cross-chain/Cargo.toml          crates/cross-chain/
 COPY crates/db-sync/Cargo.toml              crates/db-sync/
 COPY crates/faucet/Cargo.toml               crates/faucet/
 COPY crates/gateway/Cargo.toml              crates/gateway/
 COPY crates/insurance/Cargo.toml            crates/insurance/
 COPY crates/ipfs-pinner/Cargo.toml          crates/ipfs-pinner/
+COPY crates/l1-tx/Cargo.toml                crates/l1-tx/
 COPY crates/ml-validator/Cargo.toml         crates/ml-validator/
 COPY crates/node/Cargo.toml                 crates/node/
 COPY crates/node/build.rs                   crates/node/
@@ -204,19 +204,18 @@ COPY crates/threshold-encryption/Cargo.toml crates/threshold-encryption/
 COPY crates/unpack/Cargo.toml               crates/unpack/
 COPY crates/validator/Cargo.toml            crates/validator/
 COPY crates/wasm-sandbox/Cargo.toml         crates/wasm-sandbox/
-COPY crates/zk-validator/Cargo.toml         crates/zk-validator/
 COPY crates/zone-ipc/Cargo.toml             crates/zone-ipc/
 
 # Stub workspace targets so `cargo fetch --locked` caches cleanly before full source copy.
 RUN mkdir -p crates/cli/src                  && echo "fn main() {}"      > crates/cli/src/main.rs && \
     mkdir -p crates/common/src               && echo "pub fn _stub() {}" > crates/common/src/lib.rs && \
     mkdir -p crates/consensus/src            && echo "pub fn _stub() {}" > crates/consensus/src/lib.rs && \
-    mkdir -p crates/cross-chain/src          && echo "pub fn _stub() {}" > crates/cross-chain/src/lib.rs && \
     mkdir -p crates/db-sync/src              && echo "pub fn _stub() {}" > crates/db-sync/src/lib.rs && \
     mkdir -p crates/faucet/src               && echo "fn main() {}"      > crates/faucet/src/main.rs && \
     mkdir -p crates/gateway/src              && echo "fn main() {}"      > crates/gateway/src/main.rs && \
     mkdir -p crates/insurance/src            && echo "pub fn _stub() {}" > crates/insurance/src/lib.rs && \
     mkdir -p crates/ipfs-pinner/src          && echo "pub fn _stub() {}" > crates/ipfs-pinner/src/lib.rs && \
+    mkdir -p crates/l1-tx/src                && echo "pub fn _stub() {}" > crates/l1-tx/src/lib.rs && \
     mkdir -p crates/ml-validator/src         && echo "pub fn _stub() {}" > crates/ml-validator/src/lib.rs && \
     mkdir -p crates/node/src/bin             && echo "pub fn _stub() {}" > crates/node/src/lib.rs && \
     echo "fn main() {}" > crates/node/src/main.rs && \
@@ -235,7 +234,6 @@ RUN mkdir -p crates/cli/src                  && echo "fn main() {}"      > crate
     echo "fn main() {}" > crates/validator/src/bin/creg_sandboxd.rs && \
     echo "fn main() {}" > crates/validator/src/bin/creg_agent_runner.rs && \
     mkdir -p crates/wasm-sandbox/src         && echo "pub fn _stub() {}" > crates/wasm-sandbox/src/lib.rs && \
-    mkdir -p crates/zk-validator/src         && echo "pub fn _stub() {}" > crates/zk-validator/src/lib.rs && \
     mkdir -p crates/zone-ipc/src             && echo "pub fn _stub() {}" > crates/zone-ipc/src/lib.rs
 
 RUN cargo fetch --locked || (sleep 5 && cargo fetch --locked) || (sleep 10 && cargo fetch --locked)

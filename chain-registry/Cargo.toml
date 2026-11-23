@@ -6,11 +6,9 @@ members = [
     "crates/validator",
     "crates/consensus",
     "crates/node",
-    "crates/zk-validator",
     "crates/ml-validator",
     "crates/wasm-sandbox",
     "crates/threshold-encryption",
-    "crates/cross-chain",
     "crates/insurance",
     "crates/db-sync",
     "crates/ipfs-pinner",
@@ -20,7 +18,12 @@ members = [
     "crates/unpack",
     "crates/zone-ipc",
     "crates/gateway",
+    "crates/l1-tx",
 ]
+# Retired by ADR-009 and unlinked from every built crate by ADR-019 Increment 6
+# (ECA-33). Its source is kept for reference only; it is not built, tested or
+# audited with the workspace. Deleting it is a maintainer decision.
+exclude = ["crates/zk-validator", "tools/relayer-sled-export"]
 resolver = "2"
 
 [workspace.dependencies]
@@ -48,16 +51,6 @@ tonic        = { version = "0.12", features = ["transport", "prost"] }
 prost        = "0.13"
 prost-types  = "0.13"
 
-# ZK dependencies
-ark-bn254    = { version = "0.4", features = ["curve"] }
-ark-groth16   = "0.4"
-ark-snark     = "0.4"
-ark-ff        = "0.4"
-ark-ec        = "0.4"
-ark-serialize = "0.4"
-ark-relations = "0.4"
-ark-r1cs-std  = "0.4"
-
 # ML dependencies
 ort           = "2.0.0-rc.12"
 tract-onnx    = "0.21"
@@ -69,6 +62,13 @@ wasmtime      = { version = "48.0.10", default-features = false, features = ["cr
 # Ethereum/EVM dependencies
 alloy         = { version = "0.6", features = ["full", "json-rpc"] }
 alloy-sol-types = "0.6"
+
+# PostgreSQL for the L1 services (relayer, faucet, l1-tx nonce ledger).
+# TLS uses rustls + webpki roots; plaintext is refused by policy except for
+# loopback, UNIX sockets, or an explicit private-network opt-in (ECA-32).
+sqlx          = { version = "0.8", default-features = false, features = ["runtime-tokio", "postgres", "chrono", "tls-rustls-ring-webpki"] }
+async-trait   = "0.1"
+zeroize       = "=1.8.2"
 
 # Web/HTTP dependencies
 axum          = "0.7"

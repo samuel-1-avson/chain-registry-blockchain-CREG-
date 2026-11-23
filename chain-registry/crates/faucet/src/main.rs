@@ -3,36 +3,42 @@
 #![deny(clippy::unwrap_used)]
 #![cfg_attr(test, allow(clippy::unwrap_used, clippy::expect_used))]
 
+mod pow;
+
 use alloy::{
-    network::EthereumWallet,
-    primitives::{Address, U256},
-    providers::{Provider, ProviderBuilder},
+    network::TransactionBuilder,
+    primitives::{Address, Bytes, U256},
+    providers::Provider,
     rpc::types::TransactionRequest,
     signers::local::PrivateKeySigner,
     sol,
+    sol_types::SolCall,
 };
 use anyhow::Context;
 use axum::{
     extract::{ConnectInfo, Json, State},
-    http::{HeaderMap, StatusCode},
+    http::{HeaderMap, HeaderValue, StatusCode},
     response::{Html, IntoResponse, Json as JsonResponse},
     routing::{get, post},
     Router,
 };
 use chrono::{DateTime, Utc};
-use dashmap::DashMap;
 use ipnet::IpNet;
+use l1_tx::{
+    AlloyL1Rpc, SignerActor, SignerConfig, SignerHandle, SubmitError, SubmitRequest, TxState,
+};
 use metrics::{counter, gauge};
 use serde::{Deserialize, Serialize};
+use sqlx::{PgPool, Row};
 use std::collections::{BTreeMap, HashMap};
 use std::net::{IpAddr, SocketAddr};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 use tokio::sync::Mutex;
-use tokio_postgres::NoTls;
-use tower_http::cors::{Any, CorsLayer};
+use tower_http::cors::{AllowOrigin, Any, CorsLayer};
 use tracing::{error, info, warn};
+use zeroize::Zeroizing;
 
 sol!(
     #[sol(rpc)]
@@ -73,8 +79,6 @@ struct FaucetConfig {
     reconciliation_rpc_fallbacks: String,
     deployment_receipt_rpc_url: String,
     reconciliation_indexer_url: String,
-    /// Faucet private key (must have tokens to distribute)
-    faucet_key: String,
     /// Test CREG token contract address
     token_contract: String,
     chain_id: u64,
@@ -94,18 +98,29 @@ struct FaucetConfig {
     token_hot_wallet_float_wei: Option<u128>,
     /// Explicit rollout gate. Configuring budgets must not open public claims.
     token_distribution_open: bool,
+    /// Browser origins allowed by CORS (exact match). Required outside
+    /// testnet (`ECA-32`).
+    allowed_origins: Vec<String>,
 }
 
 impl FaucetConfig {
-    async fn from_env() -> anyhow::Result<(Self, chain_registry_secrets::SecretsProvider)> {
+    /// Read configuration and the hot key. The key is returned separately in
+    /// zeroizing memory and handed to the signer actor (`ECA-32`).
+    async fn from_env() -> anyhow::Result<(
+        Self,
+        chain_registry_secrets::SecretsProvider,
+        Zeroizing<String>,
+    )> {
         let secrets = chain_registry_secrets::SecretsProvider::from_env()?;
         let faucet_key = secrets
-            .secp256k1_signing_key_hex(chain_registry_secrets::HotKeyRole::Faucet)
+            .signing_key_secret(chain_registry_secrets::HotKeyRole::Faucet)
             .await?;
-        let faucet_address = std::env::var("FAUCET_ADDRESS").expect("FAUCET_ADDRESS must be set");
+        let faucet_key = Zeroizing::new(faucet_key.expose_secret().to_string());
+        let faucet_address = std::env::var("FAUCET_ADDRESS")
+            .map_err(|_| anyhow::anyhow!("FAUCET_ADDRESS must be set"))?;
         let signer: PrivateKeySigner = faucet_key
             .parse()
-            .map_err(|err| anyhow::anyhow!("Invalid configured faucet signing key: {err}"))?;
+            .map_err(|_| anyhow::anyhow!("Invalid configured faucet signing key"))?;
         let configured_address: Address = faucet_address
             .parse()
             .map_err(|err| anyhow::anyhow!("Invalid FAUCET_ADDRESS: {err}"))?;
@@ -136,9 +151,8 @@ impl FaucetConfig {
                     "FAUCET_RECONCILIATION_INDEXER_URL",
                     "https://api.routescan.io/v2/network/testnet/evm/11155111/etherscan/api",
                 ),
-                faucet_key,
                 token_contract: std::env::var("FAUCET_TOKEN_CONTRACT")
-                    .expect("FAUCET_TOKEN_CONTRACT must be set"),
+                    .map_err(|_| anyhow::anyhow!("FAUCET_TOKEN_CONTRACT must be set"))?,
                 chain_id: env_u64("FAUCET_CHAIN_ID", 31337),
                 token_deployment_tx_hash: env_string("FAUCET_TOKEN_DEPLOYMENT_TX_HASH", ""),
                 token_deployment_block: env_optional_u64("FAUCET_TOKEN_DEPLOYMENT_BLOCK")?,
@@ -152,8 +166,14 @@ impl FaucetConfig {
                 )?,
                 token_hot_wallet_float_wei: env_optional_u128("FAUCET_TOKEN_HOT_WALLET_FLOAT_WEI")?,
                 token_distribution_open: env_bool("FAUCET_TOKEN_DISTRIBUTION_OPEN", false)?,
+                allowed_origins: env_string("FAUCET_ALLOWED_ORIGINS", "")
+                    .split(',')
+                    .map(|origin| origin.trim().to_string())
+                    .filter(|origin| !origin.is_empty())
+                    .collect(),
             },
             secrets,
+            faucet_key,
         ))
     }
 }
@@ -255,108 +275,132 @@ struct ChainTransfer {
 // ── Postgres-backed persistent rate limiter ───────────────────────────────────
 
 /// Atomic, durable address and IP cooldown claims. PostgreSQL is required so a
-/// restart or a second faucet instance cannot bypass a cooldown.
+/// restart or a second faucet instance cannot bypass a cooldown. Connections
+/// come from a bounded `sqlx` pool (`ECA-32`); claims stay serialised per key
+/// by transaction-scoped advisory locks.
 #[derive(Clone)]
 struct PersistentRateLimiter {
-    pg: Arc<Mutex<tokio_postgres::Client>>,
+    pool: PgPool,
+}
+
+const FAUCET_SCHEMA_SQL: &str = "\
+CREATE TABLE IF NOT EXISTS faucet_rate_limits (\
+  key TEXT PRIMARY KEY, \
+  last_request_unix BIGINT NOT NULL\
+);\
+CREATE TABLE IF NOT EXISTS faucet_claim_ledger (\
+  id BIGSERIAL PRIMARY KEY, \
+  recipient TEXT NOT NULL, \
+  token_amount_wei NUMERIC(39, 0) NOT NULL, \
+  native_amount_wei NUMERIC(39, 0) NOT NULL, \
+  token_status TEXT NOT NULL CHECK (token_status IN ('not_requested', 'reserved', 'submitted', 'confirmed', 'failed')), \
+  native_status TEXT NOT NULL CHECK (native_status IN ('not_requested', 'reserved', 'submitted', 'confirmed', 'failed')), \
+  token_tx_hash TEXT UNIQUE, \
+  native_tx_hash TEXT UNIQUE, \
+  created_at TIMESTAMPTZ NOT NULL DEFAULT clock_timestamp(), \
+  token_confirmed_at TIMESTAMPTZ, \
+  native_confirmed_at TIMESTAMPTZ\
+);\
+ALTER TABLE faucet_claim_ledger ADD COLUMN IF NOT EXISTS token_block_number BIGINT;\
+ALTER TABLE faucet_claim_ledger ADD COLUMN IF NOT EXISTS token_log_index BIGINT;\
+ALTER TABLE faucet_claim_ledger ADD COLUMN IF NOT EXISTS native_block_number BIGINT;\
+ALTER TABLE faucet_claim_ledger ADD COLUMN IF NOT EXISTS native_log_index BIGINT;\
+ALTER TABLE faucet_claim_ledger DROP CONSTRAINT IF EXISTS faucet_claim_ledger_token_status_check;\
+ALTER TABLE faucet_claim_ledger DROP CONSTRAINT IF EXISTS faucet_claim_ledger_native_status_check;\
+DO $$ BEGIN \
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'faucet_claim_ledger_token_status_check') THEN \
+    ALTER TABLE faucet_claim_ledger ADD CONSTRAINT faucet_claim_ledger_token_status_check \
+      CHECK (token_status IN ('not_requested', 'reserved', 'submitted', 'confirmed', 'failed'));\
+  END IF;\
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'faucet_claim_ledger_native_status_check') THEN \
+    ALTER TABLE faucet_claim_ledger ADD CONSTRAINT faucet_claim_ledger_native_status_check \
+      CHECK (native_status IN ('not_requested', 'reserved', 'submitted', 'confirmed', 'failed'));\
+  END IF;\
+END $$;\
+CREATE TABLE IF NOT EXISTS faucet_token_transfers (\
+  chain_id BIGINT NOT NULL, token_address TEXT NOT NULL, tx_hash TEXT NOT NULL, log_index BIGINT NOT NULL,\
+  block_number BIGINT NOT NULL, block_hash TEXT NOT NULL,\
+  from_address TEXT NOT NULL, to_address TEXT NOT NULL,\
+  amount_wei NUMERIC(39, 0) NOT NULL, block_time TIMESTAMPTZ NOT NULL,\
+  PRIMARY KEY (chain_id, token_address, tx_hash, log_index)\
+);\
+CREATE TABLE IF NOT EXISTS faucet_funding_ledger (\
+  chain_id BIGINT NOT NULL, token_address TEXT NOT NULL, tx_hash TEXT NOT NULL, log_index BIGINT NOT NULL,\
+  block_number BIGINT NOT NULL, sender TEXT NOT NULL,\
+  amount_wei NUMERIC(39, 0) NOT NULL, block_time TIMESTAMPTZ NOT NULL,\
+  classification TEXT NOT NULL DEFAULT 'historical_unallocated',\
+  PRIMARY KEY (chain_id, token_address, tx_hash, log_index)\
+);\
+ALTER TABLE faucet_token_transfers ADD COLUMN IF NOT EXISTS token_address TEXT NOT NULL DEFAULT '';\
+ALTER TABLE faucet_funding_ledger ADD COLUMN IF NOT EXISTS token_address TEXT NOT NULL DEFAULT '';\
+CREATE TABLE IF NOT EXISTS faucet_reconciliation_state (\
+  chain_id BIGINT NOT NULL, token_address TEXT NOT NULL,\
+  deployment_tx_hash TEXT NOT NULL, deployment_block BIGINT NOT NULL,\
+  reconciled_through_block BIGINT NOT NULL, reconciled_through_hash TEXT NOT NULL,\
+  faucet_balance_wei NUMERIC(39, 0) NOT NULL, total_supply_wei NUMERIC(39, 0) NOT NULL,\
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT clock_timestamp(),\
+  PRIMARY KEY (chain_id, token_address)\
+);\
+CREATE TABLE IF NOT EXISTS faucet_pow_redemptions (\
+  challenge_id TEXT PRIMARY KEY CHECK (challenge_id ~ '^[0-9a-f]{64}$'), \
+  redeemed_at TIMESTAMPTZ NOT NULL DEFAULT clock_timestamp()\
+);";
+
+/// Advisory lock serialising faucet schema bootstrap across processes.
+const FAUCET_SCHEMA_LOCK_ID: i64 = 0x4661_7563_6574_5f73; // "Faucet_s"
+
+fn parse_wei_text(text: &str, what: &str) -> anyhow::Result<u128> {
+    text.parse::<u128>()
+        .with_context(|| format!("parse durable {what}"))
 }
 
 impl PersistentRateLimiter {
-    async fn new(pg_url: &str) -> anyhow::Result<Self> {
-        if pg_url.trim().is_empty() {
-            anyhow::bail!("FAUCET_PG_URL is required; refusing to start with volatile cooldowns");
-        }
-
-        let (client, connection) = tokio_postgres::connect(pg_url, NoTls)
+    async fn new(pool: PgPool) -> anyhow::Result<Self> {
+        let mut tx = pool
+            .begin()
             .await
-            .context("connect to durable faucet cooldown database")?;
-        tokio::spawn(async move {
-            if let Err(err) = connection.await {
-                error!("Postgres rate-limiter connection error: {}", err);
-            }
-        });
-
-        client
-            .execute(
-                "CREATE TABLE IF NOT EXISTS faucet_rate_limits (\
-                  key TEXT PRIMARY KEY, \
-                  last_request_unix BIGINT NOT NULL\
-                )",
-                &[],
-            )
+            .context("begin faucet schema bootstrap")?;
+        sqlx::query("SELECT pg_advisory_xact_lock($1)")
+            .bind(FAUCET_SCHEMA_LOCK_ID)
+            .execute(&mut *tx)
             .await
-            .context("initialize durable faucet cooldown table")?;
-
-        client
-            .execute(
-                "CREATE TABLE IF NOT EXISTS faucet_claim_ledger (\
-                  id BIGSERIAL PRIMARY KEY, \
-                  recipient TEXT NOT NULL, \
-                  token_amount_wei NUMERIC(39, 0) NOT NULL, \
-                  native_amount_wei NUMERIC(39, 0) NOT NULL, \
-                  token_status TEXT NOT NULL CHECK (token_status IN ('not_requested', 'reserved', 'submitted', 'confirmed', 'failed')), \
-                  native_status TEXT NOT NULL CHECK (native_status IN ('not_requested', 'reserved', 'submitted', 'confirmed', 'failed')), \
-                  token_tx_hash TEXT UNIQUE, \
-                  native_tx_hash TEXT UNIQUE, \
-                  created_at TIMESTAMPTZ NOT NULL DEFAULT clock_timestamp(), \
-                  token_confirmed_at TIMESTAMPTZ, \
-                  native_confirmed_at TIMESTAMPTZ\
-                )",
-                &[],
-            )
+            .context("lock faucet schema bootstrap")?;
+        sqlx::raw_sql(FAUCET_SCHEMA_SQL)
+            .execute(&mut *tx)
             .await
-            .context("initialize durable faucet claim ledger")?;
-
-        client
-            .batch_execute(
-                "ALTER TABLE faucet_claim_ledger ADD COLUMN IF NOT EXISTS token_block_number BIGINT;\
-                 ALTER TABLE faucet_claim_ledger ADD COLUMN IF NOT EXISTS token_log_index BIGINT;\
-                 ALTER TABLE faucet_claim_ledger ADD COLUMN IF NOT EXISTS native_block_number BIGINT;\
-                 ALTER TABLE faucet_claim_ledger ADD COLUMN IF NOT EXISTS native_log_index BIGINT;\
-                 ALTER TABLE faucet_claim_ledger DROP CONSTRAINT IF EXISTS faucet_claim_ledger_token_status_check;\
-                 ALTER TABLE faucet_claim_ledger DROP CONSTRAINT IF EXISTS faucet_claim_ledger_native_status_check;\
-                 DO $$ BEGIN \
-                   IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'faucet_claim_ledger_token_status_check') THEN \
-                     ALTER TABLE faucet_claim_ledger ADD CONSTRAINT faucet_claim_ledger_token_status_check \
-                       CHECK (token_status IN ('not_requested', 'reserved', 'submitted', 'confirmed', 'failed'));\
-                   END IF;\
-                   IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'faucet_claim_ledger_native_status_check') THEN \
-                     ALTER TABLE faucet_claim_ledger ADD CONSTRAINT faucet_claim_ledger_native_status_check \
-                       CHECK (native_status IN ('not_requested', 'reserved', 'submitted', 'confirmed', 'failed'));\
-                   END IF;\
-                 END $$;\
-                 CREATE TABLE IF NOT EXISTS faucet_token_transfers (\
-                   chain_id BIGINT NOT NULL, token_address TEXT NOT NULL, tx_hash TEXT NOT NULL, log_index BIGINT NOT NULL,\
-                   block_number BIGINT NOT NULL, block_hash TEXT NOT NULL,\
-                   from_address TEXT NOT NULL, to_address TEXT NOT NULL,\
-                   amount_wei NUMERIC(39, 0) NOT NULL, block_time TIMESTAMPTZ NOT NULL,\
-                   PRIMARY KEY (chain_id, token_address, tx_hash, log_index)\
-                 );\
-                 CREATE TABLE IF NOT EXISTS faucet_funding_ledger (\
-                   chain_id BIGINT NOT NULL, token_address TEXT NOT NULL, tx_hash TEXT NOT NULL, log_index BIGINT NOT NULL,\
-                   block_number BIGINT NOT NULL, sender TEXT NOT NULL,\
-                   amount_wei NUMERIC(39, 0) NOT NULL, block_time TIMESTAMPTZ NOT NULL,\
-                   classification TEXT NOT NULL DEFAULT 'historical_unallocated',\
-                   PRIMARY KEY (chain_id, token_address, tx_hash, log_index)\
-                 );\
-                 ALTER TABLE faucet_token_transfers ADD COLUMN IF NOT EXISTS token_address TEXT NOT NULL DEFAULT '';\
-                 ALTER TABLE faucet_funding_ledger ADD COLUMN IF NOT EXISTS token_address TEXT NOT NULL DEFAULT '';\
-                 CREATE TABLE IF NOT EXISTS faucet_reconciliation_state (\
-                   chain_id BIGINT NOT NULL, token_address TEXT NOT NULL,\
-                   deployment_tx_hash TEXT NOT NULL, deployment_block BIGINT NOT NULL,\
-                   reconciled_through_block BIGINT NOT NULL, reconciled_through_hash TEXT NOT NULL,\
-                   faucet_balance_wei NUMERIC(39, 0) NOT NULL, total_supply_wei NUMERIC(39, 0) NOT NULL,\
-                   updated_at TIMESTAMPTZ NOT NULL DEFAULT clock_timestamp(),\
-                   PRIMARY KEY (chain_id, token_address)\
-                 );",
-            )
+            .context("migrate durable faucet schema")?;
+        tx.commit()
             .await
-            .context("migrate durable faucet reconciliation schema")?;
-
+            .context("commit faucet schema bootstrap")?;
         info!("Postgres durable faucet rate-limit and claim-ledger tables ready");
-        Ok(Self {
-            pg: Arc::new(Mutex::new(client)),
-        })
+        Ok(Self { pool })
+    }
+
+    /// Record a proof-of-work challenge as spent. Returns `false` when it was
+    /// already redeemed (a replay). Expired records are pruned on the way.
+    async fn redeem_pow_challenge(
+        &self,
+        challenge_id: &str,
+        ttl: Duration,
+    ) -> anyhow::Result<bool> {
+        let ttl_secs = i64::try_from(ttl.as_secs()).unwrap_or(i64::MAX).max(60);
+        sqlx::query(
+            "DELETE FROM faucet_pow_redemptions \
+             WHERE redeemed_at < clock_timestamp() - make_interval(secs => $1::double precision * 2)",
+        )
+        .bind(ttl_secs as f64)
+        .execute(&self.pool)
+        .await
+        .context("prune spent proof-of-work challenges")?;
+        let inserted = sqlx::query(
+            "INSERT INTO faucet_pow_redemptions (challenge_id) VALUES ($1) \
+             ON CONFLICT (challenge_id) DO NOTHING",
+        )
+        .bind(challenge_id)
+        .execute(&self.pool)
+        .await
+        .context("record spent proof-of-work challenge")?;
+        Ok(inserted.rows_affected() == 1)
     }
 
     /// Atomically claim both cooldown keys before sending funds. Advisory locks
@@ -374,7 +418,8 @@ impl PersistentRateLimiter {
         token_daily_cap_wei: Option<u128>,
         token_address_lifetime_cap_wei: Option<u128>,
     ) -> anyhow::Result<Result<i64, CooldownRejection>> {
-        let addr_key = format!("addr:{}", address.to_lowercase());
+        let recipient = address.to_lowercase();
+        let addr_key = format!("addr:{}", recipient);
         let ip_key = format!("ip:{}", ip);
         let mut claims = vec![
             (addr_key, address_cooldown, "Please wait"),
@@ -382,9 +427,9 @@ impl PersistentRateLimiter {
         ];
         claims.sort_by(|left, right| left.0.cmp(&right.0));
 
-        let mut client = self.pg.lock().await;
-        let tx = client
-            .transaction()
+        let mut tx = self
+            .pool
+            .begin()
             .await
             .context("begin durable faucet claim")?;
         let mut lock_keys = claims
@@ -395,39 +440,34 @@ impl PersistentRateLimiter {
             lock_keys.extend([
                 "budget:token:allocation".to_string(),
                 "budget:token:daily".to_string(),
-                format!("budget:token:address:{}", address.to_lowercase()),
+                format!("budget:token:address:{}", recipient),
             ]);
         }
         lock_keys.sort();
         lock_keys.dedup();
         for key in &lock_keys {
-            tx.query_one(
-                "SELECT pg_advisory_xact_lock(hashtextextended($1, 0))",
-                &[key],
-            )
-            .await
-            .context("lock faucet cooldown or budget key")?;
+            sqlx::query("SELECT pg_advisory_xact_lock(hashtextextended($1, 0))")
+                .bind(key)
+                .execute(&mut *tx)
+                .await
+                .context("lock faucet cooldown or budget key")?;
         }
 
-        let now_unix: i64 = tx
-            .query_one(
-                "SELECT floor(extract(epoch FROM clock_timestamp()))::bigint",
-                &[],
-            )
-            .await
-            .context("read cooldown database clock")?
-            .get(0);
+        let now_unix: i64 =
+            sqlx::query_scalar("SELECT floor(extract(epoch FROM clock_timestamp()))::bigint")
+                .fetch_one(&mut *tx)
+                .await
+                .context("read cooldown database clock")?;
 
         for (key, cooldown, message_prefix) in &claims {
-            if let Some(row) = tx
-                .query_opt(
-                    "SELECT last_request_unix FROM faucet_rate_limits WHERE key = $1",
-                    &[key],
-                )
-                .await
-                .context("read faucet cooldown")?
-            {
-                let last_unix: i64 = row.get(0);
+            let last: Option<i64> = sqlx::query_scalar(
+                "SELECT last_request_unix FROM faucet_rate_limits WHERE key = $1",
+            )
+            .bind(key)
+            .fetch_optional(&mut *tx)
+            .await
+            .context("read faucet cooldown")?;
+            if let Some(last_unix) = last {
                 let elapsed = now_unix.saturating_sub(last_unix).max(0) as u64;
                 let cooldown_secs = cooldown.as_secs();
                 if elapsed < cooldown_secs {
@@ -445,15 +485,15 @@ impl PersistentRateLimiter {
         }
 
         if token_amount_wei > 0 {
-            let unresolved = tx
-                .query_opt(
-                    "SELECT id FROM faucet_claim_ledger \
-                     WHERE recipient = $1 AND token_status IN ('reserved', 'submitted') \
-                     ORDER BY id LIMIT 1",
-                    &[&address.to_lowercase()],
-                )
-                .await
-                .context("check for unresolved recipient token claim")?;
+            let unresolved: Option<i64> = sqlx::query_scalar(
+                "SELECT id FROM faucet_claim_ledger \
+                 WHERE recipient = $1 AND token_status IN ('reserved', 'submitted') \
+                 ORDER BY id LIMIT 1",
+            )
+            .bind(&recipient)
+            .fetch_optional(&mut *tx)
+            .await
+            .context("check for unresolved recipient token claim")?;
             if unresolved.is_some() {
                 tx.rollback()
                     .await
@@ -481,43 +521,35 @@ impl PersistentRateLimiter {
                 }));
             };
 
-            let allocation_used = tx
-                .query_one(
-                    "SELECT COALESCE(SUM(token_amount_wei), 0)::text \
-                     FROM faucet_claim_ledger \
-                     WHERE token_status IN ('reserved', 'submitted', 'confirmed')",
-                    &[],
-                )
-                .await
-                .context("read durable faucet allocation usage")?
-                .get::<_, String>(0)
-                .parse::<u128>()
-                .context("parse durable faucet allocation usage")?;
-            let daily_used = tx
-                .query_one(
-                    "SELECT COALESCE(SUM(token_amount_wei), 0)::text \
-                     FROM faucet_claim_ledger \
-                     WHERE token_status IN ('reserved', 'submitted', 'confirmed') \
-                       AND created_at >= (date_trunc('day', now() AT TIME ZONE 'UTC') AT TIME ZONE 'UTC')",
-                    &[],
-                )
-                .await
-                .context("read durable daily faucet usage")?
-                .get::<_, String>(0)
-                .parse::<u128>()
-                .context("parse durable daily faucet usage")?;
-            let address_used = tx
-                .query_one(
-                    "SELECT COALESCE(SUM(token_amount_wei), 0)::text \
-                     FROM faucet_claim_ledger \
-                     WHERE recipient = $1 AND token_status IN ('reserved', 'submitted', 'confirmed')",
-                    &[&address.to_lowercase()],
-                )
-                .await
-                .context("read durable recipient faucet usage")?
-                .get::<_, String>(0)
-                .parse::<u128>()
-                .context("parse durable recipient faucet usage")?;
+            let allocation_text: String = sqlx::query_scalar(
+                "SELECT COALESCE(SUM(token_amount_wei), 0)::text \
+                 FROM faucet_claim_ledger \
+                 WHERE token_status IN ('reserved', 'submitted', 'confirmed')",
+            )
+            .fetch_one(&mut *tx)
+            .await
+            .context("read durable faucet allocation usage")?;
+            let allocation_used = parse_wei_text(&allocation_text, "faucet allocation usage")?;
+            let daily_text: String = sqlx::query_scalar(
+                "SELECT COALESCE(SUM(token_amount_wei), 0)::text \
+                 FROM faucet_claim_ledger \
+                 WHERE token_status IN ('reserved', 'submitted', 'confirmed') \
+                   AND created_at >= (date_trunc('day', now() AT TIME ZONE 'UTC') AT TIME ZONE 'UTC')",
+            )
+            .fetch_one(&mut *tx)
+            .await
+            .context("read durable daily faucet usage")?;
+            let daily_used = parse_wei_text(&daily_text, "daily faucet usage")?;
+            let address_text: String = sqlx::query_scalar(
+                "SELECT COALESCE(SUM(token_amount_wei), 0)::text \
+                 FROM faucet_claim_ledger \
+                 WHERE recipient = $1 AND token_status IN ('reserved', 'submitted', 'confirmed')",
+            )
+            .bind(&recipient)
+            .fetch_one(&mut *tx)
+            .await
+            .context("read durable recipient faucet usage")?;
+            let address_used = parse_wei_text(&address_text, "recipient faucet usage")?;
 
             let within_allocation = allocation_used
                 .checked_add(token_amount_wei)
@@ -557,31 +589,28 @@ impl PersistentRateLimiter {
         } else {
             "not_requested"
         };
-        let token_amount_text = token_amount_wei.to_string();
-        let native_amount_text = native_amount_wei.to_string();
-        let claim_id: i64 = tx
-            .query_one(
-                "INSERT INTO faucet_claim_ledger \
-                   (recipient, token_amount_wei, native_amount_wei, token_status, native_status) \
-                 VALUES ($1, $2::text::numeric, $3::text::numeric, $4, $5) RETURNING id",
-                &[
-                    &address.to_lowercase(),
-                    &token_amount_text,
-                    &native_amount_text,
-                    &token_status,
-                    &native_status,
-                ],
-            )
-            .await
-            .context("reserve durable faucet claim")?
-            .get(0);
+        let claim_id: i64 = sqlx::query_scalar(
+            "INSERT INTO faucet_claim_ledger \
+               (recipient, token_amount_wei, native_amount_wei, token_status, native_status) \
+             VALUES ($1, $2::text::numeric, $3::text::numeric, $4, $5) RETURNING id",
+        )
+        .bind(&recipient)
+        .bind(token_amount_wei.to_string())
+        .bind(native_amount_wei.to_string())
+        .bind(token_status)
+        .bind(native_status)
+        .fetch_one(&mut *tx)
+        .await
+        .context("reserve durable faucet claim")?;
 
         for (key, _, _) in &claims {
-            tx.execute(
+            sqlx::query(
                 "INSERT INTO faucet_rate_limits (key, last_request_unix) VALUES ($1, $2) \
                  ON CONFLICT (key) DO UPDATE SET last_request_unix = EXCLUDED.last_request_unix",
-                &[key, &now_unix],
             )
+            .bind(key)
+            .bind(now_unix)
+            .execute(&mut *tx)
             .await
             .context("persist faucet cooldown claim")?;
         }
@@ -590,62 +619,84 @@ impl PersistentRateLimiter {
     }
 
     async fn mark_token_submitted(&self, claim_id: i64, tx_hash: &str) -> anyhow::Result<()> {
-        self.pg
-            .lock()
-            .await
-            .execute(
-                "UPDATE faucet_claim_ledger \
-                 SET token_status = 'submitted', token_tx_hash = $2 \
-                 WHERE id = $1 AND token_status = 'reserved'",
-                &[&claim_id, &tx_hash],
-            )
-            .await
-            .context("journal submitted tCREG faucet transfer")?;
+        sqlx::query(
+            "UPDATE faucet_claim_ledger \
+             SET token_status = 'submitted', token_tx_hash = $2 \
+             WHERE id = $1 AND token_status = 'reserved'",
+        )
+        .bind(claim_id)
+        .bind(tx_hash)
+        .execute(&self.pool)
+        .await
+        .context("journal submitted tCREG faucet transfer")?;
         Ok(())
     }
 
     async fn confirm_token_transfer(&self, claim_id: i64, tx_hash: &str) -> anyhow::Result<()> {
-        self.pg
-            .lock()
-            .await
-            .execute(
-                "UPDATE faucet_claim_ledger \
-                 SET token_status = 'confirmed', token_tx_hash = $2, token_confirmed_at = clock_timestamp() \
-                 WHERE id = $1 AND token_status IN ('reserved', 'submitted') AND (token_tx_hash IS NULL OR token_tx_hash = $2)",
-                &[&claim_id, &tx_hash],
-            )
-            .await
-            .context("record confirmed tCREG faucet transfer")?;
+        sqlx::query(
+            "UPDATE faucet_claim_ledger \
+             SET token_status = 'confirmed', token_tx_hash = $2, token_confirmed_at = clock_timestamp() \
+             WHERE id = $1 AND token_status IN ('reserved', 'submitted') AND (token_tx_hash IS NULL OR token_tx_hash = $2)",
+        )
+        .bind(claim_id)
+        .bind(tx_hash)
+        .execute(&self.pool)
+        .await
+        .context("record confirmed tCREG faucet transfer")?;
         Ok(())
     }
 
     async fn mark_native_submitted(&self, claim_id: i64, tx_hash: &str) -> anyhow::Result<()> {
-        self.pg
-            .lock()
-            .await
-            .execute(
-                "UPDATE faucet_claim_ledger \
-                 SET native_status = 'submitted', native_tx_hash = $2 \
-                 WHERE id = $1 AND native_status = 'reserved'",
-                &[&claim_id, &tx_hash],
-            )
-            .await
-            .context("journal submitted native faucet transfer")?;
+        sqlx::query(
+            "UPDATE faucet_claim_ledger \
+             SET native_status = 'submitted', native_tx_hash = $2 \
+             WHERE id = $1 AND native_status = 'reserved'",
+        )
+        .bind(claim_id)
+        .bind(tx_hash)
+        .execute(&self.pool)
+        .await
+        .context("journal submitted native faucet transfer")?;
         Ok(())
     }
 
     async fn confirm_native_transfer(&self, claim_id: i64, tx_hash: &str) -> anyhow::Result<()> {
-        self.pg
-            .lock()
+        sqlx::query(
+            "UPDATE faucet_claim_ledger \
+             SET native_status = 'confirmed', native_tx_hash = $2, native_confirmed_at = clock_timestamp() \
+             WHERE id = $1 AND native_status IN ('reserved', 'submitted') AND (native_tx_hash IS NULL OR native_tx_hash = $2)",
+        )
+        .bind(claim_id)
+        .bind(tx_hash)
+        .execute(&self.pool)
+        .await
+        .context("record confirmed native faucet transfer")?;
+        Ok(())
+    }
+
+    /// A fee-bumped replacement can be mined under a different hash than the
+    /// one first journaled. The l1-tx ledger is authoritative for which
+    /// attempt was mined, so the claim follows it before receipt recovery and
+    /// Transfer-log matching run (both match on the hash).
+    async fn follow_replacement_hash(
+        &self,
+        claim_id: i64,
+        is_token: bool,
+        current_hash: &str,
+    ) -> anyhow::Result<()> {
+        let sql = if is_token {
+            "UPDATE faucet_claim_ledger SET token_tx_hash = $2 \
+             WHERE id = $1 AND token_status = 'submitted' AND token_tx_hash IS DISTINCT FROM $2"
+        } else {
+            "UPDATE faucet_claim_ledger SET native_tx_hash = $2 \
+             WHERE id = $1 AND native_status = 'submitted' AND native_tx_hash IS DISTINCT FROM $2"
+        };
+        sqlx::query(sql)
+            .bind(claim_id)
+            .bind(current_hash)
+            .execute(&self.pool)
             .await
-            .execute(
-                "UPDATE faucet_claim_ledger \
-                 SET native_status = 'confirmed', native_tx_hash = $2, native_confirmed_at = clock_timestamp() \
-                 WHERE id = $1 AND native_status IN ('reserved', 'submitted') AND (native_tx_hash IS NULL OR native_tx_hash = $2)",
-                &[&claim_id, &tx_hash],
-            )
-            .await
-            .context("record confirmed native faucet transfer")?;
+            .context("follow a replaced faucet transfer hash")?;
         Ok(())
     }
 
@@ -663,28 +714,23 @@ impl PersistentRateLimiter {
              WHERE id = $1 AND {status_column} IN ('reserved', 'submitted') \
                AND ({hash_column} IS NULL OR {hash_column} = $2)"
         );
-        self.pg
-            .lock()
-            .await
-            .execute(&sql, &[&claim_id, &tx_hash])
+        sqlx::query(&sql)
+            .bind(claim_id)
+            .bind(tx_hash)
+            .execute(&self.pool)
             .await
             .context("record reverted faucet transfer")?;
         Ok(())
     }
 
     async fn token_claims_have_no_unresolved_rows(&self) -> anyhow::Result<bool> {
-        let row = self
-            .pg
-            .lock()
-            .await
-            .query_one(
-                "SELECT NOT EXISTS (SELECT 1 FROM faucet_claim_ledger \
-                   WHERE token_status IN ('reserved', 'submitted') OR native_status IN ('reserved', 'submitted'))",
-                &[],
-            )
-            .await
-            .context("check unresolved token claim ledger rows")?;
-        Ok(row.get(0))
+        sqlx::query_scalar(
+            "SELECT NOT EXISTS (SELECT 1 FROM faucet_claim_ledger \
+               WHERE token_status IN ('reserved', 'submitted') OR native_status IN ('reserved', 'submitted'))",
+        )
+        .fetch_one(&self.pool)
+        .await
+        .context("check unresolved token claim ledger rows")
     }
 
     async fn reconciliation_cursor(
@@ -694,25 +740,21 @@ impl PersistentRateLimiter {
         deployment_tx_hash: &str,
         deployment_block: i64,
     ) -> anyhow::Result<Option<(i64, String)>> {
-        let row = self
-            .pg
-            .lock()
-            .await
-            .query_opt(
-                "SELECT reconciled_through_block, reconciled_through_hash \
-                 FROM faucet_reconciliation_state \
-                 WHERE chain_id = $1 AND token_address = $2 \
-                   AND deployment_tx_hash = $3 AND deployment_block = $4",
-                &[
-                    &chain_id,
-                    &token_address,
-                    &deployment_tx_hash,
-                    &deployment_block,
-                ],
-            )
-            .await
-            .context("read faucet reconciliation cursor")?;
-        Ok(row.map(|row| (row.get(0), row.get(1))))
+        let row = sqlx::query(
+            "SELECT reconciled_through_block, reconciled_through_hash \
+             FROM faucet_reconciliation_state \
+             WHERE chain_id = $1 AND token_address = $2 \
+               AND deployment_tx_hash = $3 AND deployment_block = $4",
+        )
+        .bind(chain_id)
+        .bind(token_address)
+        .bind(deployment_tx_hash)
+        .bind(deployment_block)
+        .fetch_optional(&self.pool)
+        .await
+        .context("read faucet reconciliation cursor")?;
+        row.map(|row| -> anyhow::Result<(i64, String)> { Ok((row.try_get(0)?, row.try_get(1)?)) })
+            .transpose()
     }
 
     async fn reconciled_supply_snapshot(
@@ -720,31 +762,29 @@ impl PersistentRateLimiter {
         chain_id: i64,
         token_address: &str,
     ) -> anyhow::Result<Option<(i64, String, u128, u128, String)>> {
-        let row = self
-            .pg
-            .lock()
-            .await
-            .query_opt(
-                "SELECT reconciled_through_block, reconciled_through_hash, \
-                   faucet_balance_wei::text, total_supply_wei::text, updated_at::text \
-                 FROM faucet_reconciliation_state WHERE chain_id = $1 AND token_address = $2",
-                &[&chain_id, &token_address],
-            )
-            .await
-            .context("read verified faucet supply snapshot")?;
-        row.map(|row| {
-            let balance: String = row.get(2);
-            let supply: String = row.get(3);
+        let row = sqlx::query(
+            "SELECT reconciled_through_block, reconciled_through_hash, \
+               faucet_balance_wei::text, total_supply_wei::text, updated_at::text \
+             FROM faucet_reconciliation_state WHERE chain_id = $1 AND token_address = $2",
+        )
+        .bind(chain_id)
+        .bind(token_address)
+        .fetch_optional(&self.pool)
+        .await
+        .context("read verified faucet supply snapshot")?;
+        row.map(|row| -> anyhow::Result<(i64, String, u128, u128, String)> {
+            let balance: String = row.try_get(2)?;
+            let supply: String = row.try_get(3)?;
             Ok((
-                row.get(0),
-                row.get(1),
+                row.try_get(0)?,
+                row.try_get(1)?,
                 balance
                     .parse::<u128>()
                     .context("invalid stored faucet balance")?,
                 supply
                     .parse::<u128>()
                     .context("invalid stored total supply")?,
-                row.get(4),
+                row.try_get(4)?,
             ))
         })
         .transpose()
@@ -764,13 +804,13 @@ impl PersistentRateLimiter {
         faucet_address: &str,
         transfers: &[ChainTransfer],
     ) -> anyhow::Result<bool> {
-        let mut client = self.pg.lock().await;
-        let tx = client
-            .transaction()
+        let mut tx = self
+            .pool
+            .begin()
             .await
             .context("begin atomic on-chain faucet history import")?;
         for transfer in transfers {
-            tx.execute(
+            sqlx::query(
                 "INSERT INTO faucet_token_transfers \
                    (chain_id, token_address, tx_hash, log_index, block_number, block_hash, from_address, to_address, amount_wei, block_time) \
                  VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9::text::numeric, $10) \
@@ -778,117 +818,111 @@ impl PersistentRateLimiter {
                    block_number = EXCLUDED.block_number, block_hash = EXCLUDED.block_hash, \
                    from_address = EXCLUDED.from_address, to_address = EXCLUDED.to_address, \
                    amount_wei = EXCLUDED.amount_wei, block_time = EXCLUDED.block_time",
-                &[
-                    &chain_id,
-                    &token_address,
-                    &transfer.tx_hash,
-                    &transfer.log_index,
-                    &transfer.block_number,
-                    &transfer.block_hash,
-                    &transfer.from_address,
-                    &transfer.to_address,
-                    &transfer.amount_wei,
-                    &transfer.block_time,
-                ],
             )
+            .bind(chain_id)
+            .bind(token_address)
+            .bind(&transfer.tx_hash)
+            .bind(transfer.log_index)
+            .bind(transfer.block_number)
+            .bind(&transfer.block_hash)
+            .bind(&transfer.from_address)
+            .bind(&transfer.to_address)
+            .bind(&transfer.amount_wei)
+            .bind(transfer.block_time)
+            .execute(&mut *tx)
             .await
             .context("persist canonical faucet token transfer event")?;
 
             if transfer.to_address == faucet_address {
-                tx.execute(
-                "INSERT INTO faucet_funding_ledger \
+                sqlx::query(
+                    "INSERT INTO faucet_funding_ledger \
                        (chain_id, token_address, tx_hash, log_index, block_number, sender, amount_wei, block_time) \
                      VALUES ($1, $2, $3, $4, $5, $6, $7::text::numeric, $8) \
                      ON CONFLICT (chain_id, token_address, tx_hash, log_index) DO UPDATE SET \
                        block_number = EXCLUDED.block_number, sender = EXCLUDED.sender, \
                        amount_wei = EXCLUDED.amount_wei, block_time = EXCLUDED.block_time",
-                    &[
-                        &chain_id,
-                        &token_address,
-                        &transfer.tx_hash,
-                        &transfer.log_index,
-                        &transfer.block_number,
-                        &transfer.from_address,
-                        &transfer.amount_wei,
-                        &transfer.block_time,
-                    ],
                 )
+                .bind(chain_id)
+                .bind(token_address)
+                .bind(&transfer.tx_hash)
+                .bind(transfer.log_index)
+                .bind(transfer.block_number)
+                .bind(&transfer.from_address)
+                .bind(&transfer.amount_wei)
+                .bind(transfer.block_time)
+                .execute(&mut *tx)
                 .await
                 .context("record historical faucet funding as unallocated")?;
             }
 
             if transfer.from_address == faucet_address {
-                if let Some(existing) = tx
-                    .query_opt(
-                        "SELECT recipient, token_amount_wei::text FROM faucet_claim_ledger WHERE token_tx_hash = $1",
-                        &[&transfer.tx_hash],
-                    )
-                    .await
-                    .context("check imported transfer against existing claim")?
-                {
-                    let recipient: String = existing.get(0);
-                    let amount: String = existing.get(1);
+                let existing = sqlx::query(
+                    "SELECT recipient, token_amount_wei::text FROM faucet_claim_ledger WHERE token_tx_hash = $1",
+                )
+                .bind(&transfer.tx_hash)
+                .fetch_optional(&mut *tx)
+                .await
+                .context("check imported transfer against existing claim")?;
+                if let Some(existing) = existing {
+                    let recipient: String = existing.try_get(0)?;
+                    let amount: String = existing.try_get(1)?;
                     if recipient != transfer.to_address || amount != transfer.amount_wei {
                         anyhow::bail!(
                             "claim ledger transaction {} conflicts with its canonical Transfer event",
                             transfer.tx_hash
                         );
                     }
-                    tx.execute(
+                    sqlx::query(
                         "UPDATE faucet_claim_ledger SET token_status = 'confirmed', \
                            token_confirmed_at = $2, token_block_number = $3, token_log_index = $4 \
                          WHERE token_tx_hash = $1",
-                        &[
-                            &transfer.tx_hash,
-                            &transfer.block_time,
-                            &transfer.block_number,
-                            &transfer.log_index,
-                        ],
                     )
+                    .bind(&transfer.tx_hash)
+                    .bind(transfer.block_time)
+                    .bind(transfer.block_number)
+                    .bind(transfer.log_index)
+                    .execute(&mut *tx)
                     .await
                     .context("refresh canonical token claim confirmation")?;
                 } else {
-                    let matched = tx
-                        .query_opt(
-                            "WITH candidate AS (\
-                               SELECT id FROM faucet_claim_ledger \
-                               WHERE recipient = $1 AND token_amount_wei = $2::text::numeric \
-                                 AND token_status IN ('reserved', 'submitted') \
-                                 AND (token_tx_hash IS NULL OR token_tx_hash = $3) \
-                                 AND created_at <= $4::timestamptz + interval '5 minutes' \
-                               ORDER BY created_at, id LIMIT 1 FOR UPDATE SKIP LOCKED\
-                             ) \
-                             UPDATE faucet_claim_ledger AS claim SET \
-                               token_status = 'confirmed', token_tx_hash = $3, \
-                               token_confirmed_at = $4, token_block_number = $5, token_log_index = $6 \
-                             FROM candidate WHERE claim.id = candidate.id RETURNING claim.id",
-                            &[
-                                &transfer.to_address,
-                                &transfer.amount_wei,
-                                &transfer.tx_hash,
-                                &transfer.block_time,
-                                &transfer.block_number,
-                                &transfer.log_index,
-                            ],
-                        )
-                        .await
-                        .context("recover a claim whose broadcast hash was not journaled")?;
+                    let matched: Option<i64> = sqlx::query_scalar(
+                        "WITH candidate AS (\
+                           SELECT id FROM faucet_claim_ledger \
+                           WHERE recipient = $1 AND token_amount_wei = $2::text::numeric \
+                             AND token_status IN ('reserved', 'submitted') \
+                             AND (token_tx_hash IS NULL OR token_tx_hash = $3) \
+                             AND created_at <= $4::timestamptz + interval '5 minutes' \
+                           ORDER BY created_at, id LIMIT 1 FOR UPDATE SKIP LOCKED\
+                         ) \
+                         UPDATE faucet_claim_ledger AS claim SET \
+                           token_status = 'confirmed', token_tx_hash = $3, \
+                           token_confirmed_at = $4, token_block_number = $5, token_log_index = $6 \
+                         FROM candidate WHERE claim.id = candidate.id RETURNING claim.id",
+                    )
+                    .bind(&transfer.to_address)
+                    .bind(&transfer.amount_wei)
+                    .bind(&transfer.tx_hash)
+                    .bind(transfer.block_time)
+                    .bind(transfer.block_number)
+                    .bind(transfer.log_index)
+                    .fetch_optional(&mut *tx)
+                    .await
+                    .context("recover a claim whose broadcast hash was not journaled")?;
                     if matched.is_none() {
-                        tx.execute(
+                        sqlx::query(
                             "INSERT INTO faucet_claim_ledger \
                                (recipient, token_amount_wei, native_amount_wei, token_status, native_status, \
                                 token_tx_hash, created_at, token_confirmed_at, token_block_number, token_log_index) \
                              VALUES ($1, $2::text::numeric, 0, 'confirmed', 'not_requested', $3, $4, $4, $5, $6) \
                              ON CONFLICT (token_tx_hash) DO NOTHING",
-                            &[
-                                &transfer.to_address,
-                                &transfer.amount_wei,
-                                &transfer.tx_hash,
-                                &transfer.block_time,
-                                &transfer.block_number,
-                                &transfer.log_index,
-                            ],
                         )
+                        .bind(&transfer.to_address)
+                        .bind(&transfer.amount_wei)
+                        .bind(&transfer.tx_hash)
+                        .bind(transfer.block_time)
+                        .bind(transfer.block_number)
+                        .bind(transfer.log_index)
+                        .execute(&mut *tx)
                         .await
                         .context("import historical faucet claim")?;
                     }
@@ -896,17 +930,18 @@ impl PersistentRateLimiter {
             }
         }
 
-        let net_text: String = tx
-            .query_one(
-                "SELECT (\
-                   COALESCE(SUM(amount_wei) FILTER (WHERE to_address = $1), 0) - \
-                   COALESCE(SUM(amount_wei) FILTER (WHERE from_address = $1), 0)\
-                 )::text FROM faucet_token_transfers WHERE chain_id = $2 AND token_address = $3",
-                &[&faucet_address, &chain_id, &token_address],
-            )
-            .await
-            .context("sum imported faucet Transfer history")?
-            .get(0);
+        let net_text: String = sqlx::query_scalar(
+            "SELECT (\
+               COALESCE(SUM(amount_wei) FILTER (WHERE to_address = $1), 0) - \
+               COALESCE(SUM(amount_wei) FILTER (WHERE from_address = $1), 0)\
+             )::text FROM faucet_token_transfers WHERE chain_id = $2 AND token_address = $3",
+        )
+        .bind(faucet_address)
+        .bind(chain_id)
+        .bind(token_address)
+        .fetch_one(&mut *tx)
+        .await
+        .context("sum imported faucet Transfer history")?;
         let net_balance = net_text
             .parse::<u128>()
             .context("parse imported faucet Transfer balance")?;
@@ -918,7 +953,7 @@ impl PersistentRateLimiter {
             );
         }
 
-        tx.execute(
+        sqlx::query(
             "INSERT INTO faucet_reconciliation_state \
                (chain_id, token_address, deployment_tx_hash, deployment_block, \
                 reconciled_through_block, reconciled_through_hash, faucet_balance_wei, total_supply_wei, updated_at) \
@@ -929,145 +964,132 @@ impl PersistentRateLimiter {
                reconciled_through_hash = EXCLUDED.reconciled_through_hash, \
                faucet_balance_wei = EXCLUDED.faucet_balance_wei, \
                total_supply_wei = EXCLUDED.total_supply_wei, updated_at = clock_timestamp()",
-            &[
-                &chain_id,
-                &token_address,
-                &deployment_tx_hash,
-                &deployment_block,
-                &through_block,
-                &through_hash,
-                &faucet_balance_wei.to_string(),
-                &total_supply_wei.to_string(),
-            ],
         )
+        .bind(chain_id)
+        .bind(token_address)
+        .bind(deployment_tx_hash)
+        .bind(deployment_block)
+        .bind(through_block)
+        .bind(through_hash)
+        .bind(faucet_balance_wei.to_string())
+        .bind(total_supply_wei.to_string())
+        .execute(&mut *tx)
         .await
         .context("persist verified faucet reconciliation watermark")?;
         tx.commit()
             .await
             .context("commit verified on-chain faucet history")?;
 
-        // The unresolved-claim check acquires `self.pg` again. Release the
-        // single-connection guard first to avoid self-deadlocking here.
-        drop(client);
         self.token_claims_have_no_unresolved_rows().await
     }
 
     async fn submitted_token_claims(&self) -> anyhow::Result<Vec<(i64, String, String, String)>> {
-        let rows = self
-            .pg
-            .lock()
-            .await
-            .query(
-                "SELECT id, token_tx_hash, recipient, token_amount_wei::text \
-                 FROM faucet_claim_ledger WHERE token_status = 'submitted' AND token_tx_hash IS NOT NULL",
-                &[],
-            )
-            .await
-            .context("load submitted token transfers for receipt recovery")?;
-        Ok(rows
-            .into_iter()
-            .map(|row| (row.get(0), row.get(1), row.get(2), row.get(3)))
-            .collect())
+        let rows = sqlx::query(
+            "SELECT id, token_tx_hash, recipient, token_amount_wei::text \
+             FROM faucet_claim_ledger WHERE token_status = 'submitted' AND token_tx_hash IS NOT NULL",
+        )
+        .fetch_all(&self.pool)
+        .await
+        .context("load submitted token transfers for receipt recovery")?;
+        rows.iter()
+            .map(|row| -> anyhow::Result<(i64, String, String, String)> {
+                Ok((
+                    row.try_get(0)?,
+                    row.try_get(1)?,
+                    row.try_get(2)?,
+                    row.try_get(3)?,
+                ))
+            })
+            .collect()
     }
 
     async fn submitted_native_claims(&self) -> anyhow::Result<Vec<(i64, String, String, String)>> {
-        let rows = self
-            .pg
-            .lock()
-            .await
-            .query(
-                "SELECT id, native_tx_hash, recipient, native_amount_wei::text \
-                 FROM faucet_claim_ledger WHERE native_status = 'submitted' AND native_tx_hash IS NOT NULL",
-                &[],
-            )
-            .await
-            .context("load submitted native transfers for receipt recovery")?;
-        Ok(rows
-            .into_iter()
-            .map(|row| (row.get(0), row.get(1), row.get(2), row.get(3)))
-            .collect())
+        let rows = sqlx::query(
+            "SELECT id, native_tx_hash, recipient, native_amount_wei::text \
+             FROM faucet_claim_ledger WHERE native_status = 'submitted' AND native_tx_hash IS NOT NULL",
+        )
+        .fetch_all(&self.pool)
+        .await
+        .context("load submitted native transfers for receipt recovery")?;
+        rows.iter()
+            .map(|row| -> anyhow::Result<(i64, String, String, String)> {
+                Ok((
+                    row.try_get(0)?,
+                    row.try_get(1)?,
+                    row.try_get(2)?,
+                    row.try_get(3)?,
+                ))
+            })
+            .collect()
     }
 
     async fn unresolved_claim_details(&self) -> anyhow::Result<Vec<serde_json::Value>> {
-        let rows = self
-            .pg
-            .lock()
-            .await
-            .query(
-                "SELECT id, recipient, token_amount_wei::text, token_status, token_tx_hash, \
-                        native_amount_wei::text, native_status, native_tx_hash, created_at \
-                 FROM faucet_claim_ledger \
-                 WHERE token_status IN ('reserved', 'submitted') \
-                    OR native_status IN ('reserved', 'submitted') \
-                 ORDER BY created_at, id LIMIT 500",
-                &[],
-            )
-            .await
-            .context("read unresolved faucet claim details")?;
-        Ok(rows
-            .into_iter()
-            .map(|row| {
-                serde_json::json!({
-                    "claim_id": row.get::<_, i64>(0),
-                    "recipient": row.get::<_, String>(1),
-                    "token_amount_wei": row.get::<_, String>(2),
-                    "token_status": row.get::<_, String>(3),
-                    "token_tx_hash": row.get::<_, Option<String>>(4),
-                    "native_amount_wei": row.get::<_, String>(5),
-                    "native_status": row.get::<_, String>(6),
-                    "native_tx_hash": row.get::<_, Option<String>>(7),
-                    "created_at": row.get::<_, DateTime<Utc>>(8),
-                })
+        let rows = sqlx::query(
+            "SELECT id, recipient, token_amount_wei::text, token_status, token_tx_hash, \
+                    native_amount_wei::text, native_status, native_tx_hash, created_at \
+             FROM faucet_claim_ledger \
+             WHERE token_status IN ('reserved', 'submitted') \
+                OR native_status IN ('reserved', 'submitted') \
+             ORDER BY created_at, id LIMIT 500",
+        )
+        .fetch_all(&self.pool)
+        .await
+        .context("read unresolved faucet claim details")?;
+        rows.iter()
+            .map(|row| -> anyhow::Result<serde_json::Value> {
+                Ok(serde_json::json!({
+                    "claim_id": row.try_get::<i64, _>(0)?,
+                    "recipient": row.try_get::<String, _>(1)?,
+                    "token_amount_wei": row.try_get::<String, _>(2)?,
+                    "token_status": row.try_get::<String, _>(3)?,
+                    "token_tx_hash": row.try_get::<Option<String>, _>(4)?,
+                    "native_amount_wei": row.try_get::<String, _>(5)?,
+                    "native_status": row.try_get::<String, _>(6)?,
+                    "native_tx_hash": row.try_get::<Option<String>, _>(7)?,
+                    "created_at": row.try_get::<DateTime<Utc>, _>(8)?,
+                }))
             })
-            .collect())
+            .collect()
     }
 
     async fn confirmed_stats(&self) -> anyhow::Result<FaucetStats> {
-        let client = self.pg.lock().await;
-        let row = client
-            .query_one(
-                "SELECT \
-                   COUNT(*) FILTER (WHERE token_status = 'confirmed' OR native_status = 'confirmed'), \
-                   COALESCE(SUM(token_amount_wei) FILTER (WHERE token_status = 'confirmed'), 0)::text, \
-                   COALESCE(SUM(native_amount_wei) FILTER (WHERE native_status = 'confirmed'), 0)::text, \
-                   COUNT(DISTINCT recipient) FILTER (WHERE token_status = 'confirmed' OR native_status = 'confirmed'), \
-                   MAX(GREATEST(token_confirmed_at, native_confirmed_at)) \
-                     FILTER (WHERE token_status = 'confirmed' OR native_status = 'confirmed'), \
-                   COUNT(*) FILTER (WHERE token_status IN ('reserved', 'submitted') OR native_status IN ('reserved', 'submitted')) \
-                 FROM faucet_claim_ledger",
-                &[],
-            )
-            .await
-            .context("read durable confirmed faucet statistics")?;
-        let token_distributed = row
-            .get::<_, String>(1)
-            .parse::<u128>()
-            .context("parse durable confirmed tCREG total")?;
-        let native_distributed = row
-            .get::<_, String>(2)
-            .parse::<u128>()
-            .context("parse durable confirmed native total")?;
-        let last_drip = row.get::<_, Option<DateTime<Utc>>>(4);
+        let row = sqlx::query(
+            "SELECT \
+               COUNT(*) FILTER (WHERE token_status = 'confirmed' OR native_status = 'confirmed'), \
+               COALESCE(SUM(token_amount_wei) FILTER (WHERE token_status = 'confirmed'), 0)::text, \
+               COALESCE(SUM(native_amount_wei) FILTER (WHERE native_status = 'confirmed'), 0)::text, \
+               COUNT(DISTINCT recipient) FILTER (WHERE token_status = 'confirmed' OR native_status = 'confirmed'), \
+               MAX(GREATEST(token_confirmed_at, native_confirmed_at)) \
+                 FILTER (WHERE token_status = 'confirmed' OR native_status = 'confirmed'), \
+               COUNT(*) FILTER (WHERE token_status IN ('reserved', 'submitted') OR native_status IN ('reserved', 'submitted')) \
+             FROM faucet_claim_ledger",
+        )
+        .fetch_one(&self.pool)
+        .await
+        .context("read durable confirmed faucet statistics")?;
+        let token_distributed =
+            parse_wei_text(&row.try_get::<String, _>(1)?, "confirmed tCREG total")?;
+        let native_distributed =
+            parse_wei_text(&row.try_get::<String, _>(2)?, "confirmed native total")?;
+        let last_drip = row.try_get::<Option<DateTime<Utc>>, _>(4)?;
         Ok(FaucetStats {
-            total_drips: row.get::<_, i64>(0).max(0) as u64,
+            total_drips: row.try_get::<i64, _>(0)?.max(0) as u64,
             total_distributed: token_distributed,
             total_native_distributed: native_distributed,
-            unique_addresses: row.get::<_, i64>(3).max(0) as usize,
+            unique_addresses: row.try_get::<i64, _>(3)?.max(0) as usize,
             last_drip,
-            unresolved_claims: row.get::<_, i64>(5).max(0) as u64,
+            unresolved_claims: row.try_get::<i64, _>(5)?.max(0) as u64,
         })
     }
 
     async fn address_count(&self) -> usize {
-        let client = self.pg.lock().await;
-        match client
-            .query_one(
-                "SELECT COUNT(*) FROM faucet_rate_limits WHERE key LIKE 'addr:%'",
-                &[],
-            )
-            .await
+        match sqlx::query_scalar::<_, i64>(
+            "SELECT COUNT(*) FROM faucet_rate_limits WHERE key LIKE 'addr:%'",
+        )
+        .fetch_one(&self.pool)
+        .await
         {
-            Ok(row) => row.get::<_, i64>(0).max(0) as usize,
+            Ok(count) => count.max(0) as usize,
             Err(err) => {
                 warn!("Could not read faucet address count: {}", err);
                 0
@@ -1075,11 +1097,36 @@ impl PersistentRateLimiter {
         }
     }
 
+    /// `(claim id, is_token, status, journaled hash)` for every unresolved side.
+    async fn unresolved_transfer_sides(
+        &self,
+    ) -> anyhow::Result<Vec<(i64, bool, String, Option<String>)>> {
+        let rows = sqlx::query(
+            "SELECT id, token_status, token_tx_hash, native_status, native_tx_hash \
+             FROM faucet_claim_ledger \
+             WHERE token_status IN ('reserved', 'submitted') \
+                OR native_status IN ('reserved', 'submitted') \
+             ORDER BY id LIMIT 1000",
+        )
+        .fetch_all(&self.pool)
+        .await
+        .context("load unresolved faucet transfers")?;
+        let mut sides = Vec::new();
+        for row in &rows {
+            let id: i64 = row.try_get(0)?;
+            for (is_token, status_index, hash_index) in [(true, 1, 2), (false, 3, 4)] {
+                let status: String = row.try_get(status_index)?;
+                if matches!(status.as_str(), "reserved" | "submitted") {
+                    sides.push((id, is_token, status, row.try_get(hash_index)?));
+                }
+            }
+        }
+        Ok(sides)
+    }
+
     async fn check_ready(&self) -> anyhow::Result<()> {
-        self.pg
-            .lock()
-            .await
-            .simple_query("SELECT 1")
+        sqlx::query("SELECT 1")
+            .execute(&self.pool)
             .await
             .context("durable faucet cooldown database is unavailable")?;
         Ok(())
@@ -2438,8 +2485,13 @@ struct AppState {
     ledger_reconciled: AtomicBool,
     /// Prevent a public page load from generating repeated indexer requests.
     supply_cache: Mutex<Option<(Instant, Option<serde_json::Value>)>>,
-    /// Active PoW challenges keyed by challenge string.
-    pow_challenges: DashMap<String, PowChallenge>,
+    /// Stateless proof-of-work challenges (`ECA-31`).
+    pow: pow::PowIssuer,
+    /// The only path that signs with the faucet key (`ECO-INV-07`).
+    signer: SignerHandle,
+    /// Operator token for the loopback admin listener, resolved once through
+    /// `chain-registry-secrets` (`ECA-32`). `None` disables admin routes.
+    admin_token: Option<chain_registry_secrets::SecretString>,
     /// Operator pause flag — set via POST /admin/pause, cleared via POST /admin/resume.
     is_paused: Arc<AtomicBool>,
 }
@@ -2505,18 +2557,48 @@ fn is_valid_recipient(address: &str) -> bool {
     address.starts_with("0x") && address.len() == 42 && address.parse::<Address>().is_ok()
 }
 
-/// A proof-of-work challenge issued to clients.
-#[derive(Clone)]
-struct PowChallenge {
-    difficulty: u8,
-    created_at: Instant,
-}
-
-/// PoW difficulty — number of leading zero bits required in SHA-256(challenge || nonce).
-/// 20 bits ≈ 1M hashes ≈ ~1 second on a modern browser.
+/// Base PoW difficulty — leading zero bits required in SHA-256(challenge || nonce).
+/// 20 bits ≈ 1M hashes ≈ ~1 second on a modern browser. Rises with load.
 const POW_DIFFICULTY: u8 = 20;
 /// Challenge validity window.
 const POW_TTL: Duration = Duration::from_secs(120);
+/// Default loopback admin listener (`ECA-32`).
+const DEFAULT_ADMIN_BIND: &str = "127.0.0.1:9086";
+
+/// The admin listener must stay on loopback unless the operator explicitly
+/// accepts exposing it.
+fn admin_bind_address(raw: &str, allow_non_loopback: bool) -> anyhow::Result<SocketAddr> {
+    let address: SocketAddr = raw
+        .trim()
+        .parse()
+        .map_err(|_| anyhow::anyhow!("FAUCET_ADMIN_BIND must be an IP:port address"))?;
+    if !address.ip().is_loopback() && !allow_non_loopback {
+        anyhow::bail!(
+            "FAUCET_ADMIN_BIND must be a loopback address; set FAUCET_ADMIN_ALLOW_NON_LOOPBACK=true to override"
+        );
+    }
+    Ok(address)
+}
+
+/// Exact-origin CORS for the public listener. Outside testnet an allowlist
+/// is mandatory (`ECA-32`).
+fn build_public_cors(allowed_origins: &[String], testnet: bool) -> anyhow::Result<CorsLayer> {
+    let base = CorsLayer::new().allow_methods(Any).allow_headers(Any);
+    let origins: Vec<HeaderValue> = allowed_origins
+        .iter()
+        .filter_map(|origin| origin.parse::<HeaderValue>().ok())
+        .collect();
+    if origins.is_empty() {
+        if !testnet {
+            anyhow::bail!(
+                "FAUCET_ALLOWED_ORIGINS must list the allowed browser origins outside testnet"
+            );
+        }
+        warn!("FAUCET_ALLOWED_ORIGINS is empty; allowing any origin (testnet only)");
+        return Ok(base.allow_origin(Any));
+    }
+    Ok(base.allow_origin(AllowOrigin::list(origins)))
+}
 
 /// Serialize a u128 as a JSON string so large amounts survive the JavaScript
 /// 53-bit Number precision limit without truncation.
@@ -2609,13 +2691,26 @@ async fn main() -> anyhow::Result<()> {
         )
         .init();
 
-    let (config, secrets) = FaucetConfig::from_env().await?;
+    let (config, secrets, faucet_key) = FaucetConfig::from_env().await?;
     secrets.warn_hot_key_if_env(
         "faucet",
         chain_registry_secrets::HotKeyRole::Faucet,
-        &config.faucet_key,
+        &faucet_key,
         common::is_testnet_env(),
     );
+    let testnet = common::is_testnet_env();
+    let cors = build_public_cors(&config.allowed_origins, testnet)?;
+    let admin_bind = admin_bind_address(
+        &env_string("FAUCET_ADMIN_BIND", DEFAULT_ADMIN_BIND),
+        env_bool("FAUCET_ADMIN_ALLOW_NON_LOOPBACK", false)?,
+    )?;
+    let admin_token = match std::env::var("FAUCET_ADMIN_TOKEN_REF") {
+        Ok(reference) => Some(secrets.resolve_secret_ref(reference.trim()).await?),
+        Err(_) if std::env::var("FAUCET_ADMIN_TOKEN").is_ok_and(|v| !v.trim().is_empty()) => {
+            Some(secrets.resolve_secret_ref("env:FAUCET_ADMIN_TOKEN").await?)
+        }
+        Err(_) => None,
+    };
 
     info!("╔════════════════════════════════════════════════════════╗");
     info!("║        Chain Registry Testnet Faucet (REAL)            ║");
@@ -2632,7 +2727,14 @@ async fn main() -> anyhow::Result<()> {
     }
     info!("  Cooldown: {} seconds", config.cooldown_secs);
     info!("  Token contract: {}", config.token_contract);
-    info!("  RPC: {}", config.rpc_url);
+    // Endpoint URLs can embed provider API keys; log only their count.
+    info!(
+        "  RPC endpoints: {}",
+        config
+            .live_rpc_endpoints()
+            .map(|urls| urls.len())
+            .unwrap_or(0)
+    );
     info!("  Faucet address: {}", config.faucet_address);
 
     // ── Pre-flight balance check ──────────────────────────────────────────────
@@ -2666,15 +2768,75 @@ async fn main() -> anyhow::Result<()> {
         }
     }
 
+    // Durable state: one bounded pool over TLS, a UNIX socket or loopback
+    // (`ECA-32`); a plaintext private container network must be opted into.
     let pg_url = env_string("FAUCET_PG_URL", "");
-    let rate_limiter = PersistentRateLimiter::new(&pg_url).await?;
+    if pg_url.trim().is_empty() {
+        anyhow::bail!("FAUCET_PG_URL is required; refusing to start with volatile cooldowns");
+    }
+    let (pool, transport) = l1_tx::pg::connect_pool(
+        &pg_url,
+        "FAUCET_PG_URL",
+        env_bool("FAUCET_PG_ALLOW_PLAINTEXT_PRIVATE_NETWORK", false)?,
+        env_u64("FAUCET_PG_MAX_CONNECTIONS", 8).clamp(2, 64) as u32,
+    )
+    .await?;
+    drop(pg_url);
+    info!("  PostgreSQL: {:?}", transport);
+    let rate_limiter = PersistentRateLimiter::new(pool.clone()).await?;
+    l1_tx::pg::ensure_schema(&pool).await?;
+
+    // Single-writer signer for the faucet hot key (`ECA-28`, `ECO-INV-07`).
+    let signer_endpoints = config.live_rpc_endpoints()?;
+    let (signer, signer_task) = SignerActor::spawn(
+        faucet_key,
+        config.chain_id,
+        Arc::new(AlloyL1Rpc::from_urls(&signer_endpoints)?),
+        Arc::new(l1_tx::pg::PgNonceLedger::new(pool)),
+        SignerConfig {
+            confirmations: env_u64("FAUCET_CONFIRMATIONS", 1).max(1),
+            ..SignerConfig::default()
+        },
+    )
+    .await?;
+    if format!("{:#x}", signer.address()) != config.faucet_address.to_ascii_lowercase() {
+        anyhow::bail!("signer actor address does not match FAUCET_ADDRESS");
+    }
+    tokio::spawn(async move {
+        if signer_task.await.is_err() {
+            error!("faucet signer actor panicked");
+        }
+        error!("faucet signer actor stopped; drips are unavailable until restart");
+    });
+
+    let pow_key = match std::env::var("FAUCET_POW_HMAC_KEY_REF") {
+        Ok(reference) => {
+            let secret = secrets.resolve_secret_ref(reference.trim()).await?;
+            let bytes = Zeroizing::new(
+                hex::decode(secret.expose_secret().trim_start_matches("0x"))
+                    .map_err(|_| anyhow::anyhow!("FAUCET_POW_HMAC_KEY_REF must resolve to hex"))?,
+            );
+            <[u8; 32]>::try_from(bytes.as_slice())
+                .map_err(|_| anyhow::anyhow!("FAUCET_POW_HMAC_KEY_REF must resolve to 32 bytes"))?
+        }
+        Err(_) => pow::PowIssuer::random_key(),
+    };
+    let pow = pow::PowIssuer::new(
+        pow_key,
+        POW_TTL,
+        u8::try_from(env_u64("FAUCET_POW_DIFFICULTY", u64::from(POW_DIFFICULTY)))
+            .unwrap_or(POW_DIFFICULTY),
+        u32::try_from(env_u64("FAUCET_CHALLENGES_PER_IP_PER_MINUTE", 20)).unwrap_or(20),
+    );
 
     let state = Arc::new(AppState {
         config,
         rate_limiter,
         ledger_reconciled: AtomicBool::new(false),
         supply_cache: Mutex::new(None),
-        pow_challenges: DashMap::new(),
+        pow,
+        signer,
+        admin_token,
         is_paused: Arc::new(AtomicBool::new(false)),
     });
 
@@ -2683,6 +2845,7 @@ async fn main() -> anyhow::Result<()> {
         let mut retry_delay = Duration::from_secs(300);
         loop {
             let result = async {
+                sync_claims_with_signer_ledger(&reconciliation_state).await?;
                 recover_submitted_receipts(&reconciliation_state).await?;
                 reconcile_faucet_ledger(&reconciliation_state).await
             }
@@ -2706,11 +2869,6 @@ async fn main() -> anyhow::Result<()> {
             }
         }
     });
-
-    let cors = CorsLayer::new()
-        .allow_origin(Any)
-        .allow_methods(Any)
-        .allow_headers(Any);
 
     // ── Prometheus metrics recorder ───────────────────────────────────────────
     let prometheus_handle = metrics_exporter_prometheus::PrometheusBuilder::new()
@@ -2750,6 +2908,7 @@ async fn main() -> anyhow::Result<()> {
     // moved into the axum router.
     let bg_config = state.config.clone();
 
+    // Public listener: the faucet page, /api/* and /health only (ECA-32).
     let app = Router::new()
         .route("/", get(index_page))
         .route("/favicon.ico", get(favicon))
@@ -2760,6 +2919,12 @@ async fn main() -> anyhow::Result<()> {
         .route("/api/balance/:address", get(get_balance))
         .route("/api/network", get(get_network_info))
         .route("/health", get(health_check))
+        .layer(cors)
+        .with_state(Arc::clone(&state));
+
+    // Operator listener on loopback: Prometheus metrics and token-protected
+    // admin routes. It never shares the public listener or its CORS policy.
+    let admin_app = Router::new()
         .route(
             "/metrics",
             get(move || {
@@ -2767,13 +2932,21 @@ async fn main() -> anyhow::Result<()> {
                 async move { handle.render() }
             }),
         )
-        // ── Operator admin endpoints (require FAUCET_ADMIN_TOKEN) ─────────────
         .route("/admin/pause", post(admin_pause))
         .route("/admin/resume", post(admin_resume))
         .route("/admin/status", get(admin_status))
         .route("/admin/recovery", get(admin_recovery))
-        .layer(cors)
         .with_state(state);
+    let admin_listener = tokio::net::TcpListener::bind(admin_bind).await?;
+    info!(
+        "Faucet operator listener on http://{} (metrics, admin)",
+        admin_bind
+    );
+    tokio::spawn(async move {
+        if let Err(err) = axum::serve(admin_listener, admin_app).await {
+            error!("faucet operator listener stopped: {}", err);
+        }
+    });
 
     let port = env_u16("FAUCET_PORT", 8082);
     let addr = SocketAddr::from(([0, 0, 0, 0], port));
@@ -2850,143 +3023,232 @@ fn parse_address(value: &str, field_name: &str) -> Result<Address, String> {
         .map_err(|e| format!("Invalid {}: {}", field_name, e))
 }
 
-async fn execute_token_transfer(
-    config: &FaucetConfig,
-    rate_limiter: &PersistentRateLimiter,
+/// Gas ceilings for faucet transfers; estimates above them are refused.
+const TOKEN_TRANSFER_GAS_CEILING: u64 = 150_000;
+const NATIVE_TRANSFER_GAS_CEILING: u64 = 100_000;
+/// How long a drip request waits for a final receipt before answering
+/// "pending" (background recovery finishes it; there is no give-up).
+const TRANSFER_CONFIRMATION_WAIT: Duration = Duration::from_secs(180);
+
+/// l1-tx correlation id for one side of a claim.
+fn faucet_signer_request_id(claim_id: i64, is_token: bool) -> String {
+    format!(
+        "faucet:{claim_id}:{}",
+        if is_token { "token" } else { "native" }
+    )
+}
+
+/// Send one side of a claim through the single-writer signer actor (`ECA-28`)
+/// and wait for its final state. The claim ledger journals the hash as soon
+/// as the transaction is signed and follows fee-bump replacements.
+async fn send_via_signer(
+    state: &AppState,
     claim_id: i64,
-    to_address: &str,
+    is_token: bool,
+    to: Address,
+    value: U256,
+    input: Bytes,
+    gas_ceiling: u64,
 ) -> Result<String, String> {
-    let signer: PrivateKeySigner = config
-        .faucet_key
-        .parse()
-        .map_err(|e| format!("Invalid faucet private key: {}", e))?;
-    let wallet = EthereumWallet::from(signer);
-    let provider = ProviderBuilder::new()
-        .with_recommended_fillers()
-        .wallet(wallet)
-        .on_http(
-            config
-                .rpc_url
-                .parse()
-                .map_err(|e| format!("Invalid faucet RPC URL: {}", e))?,
-        );
+    let label = if is_token { "tCREG" } else { "Native ETH" };
+    let request_id = faucet_signer_request_id(claim_id, is_token);
+    let limiter = &state.rate_limiter;
 
-    let token_address = parse_address(&config.token_contract, "token contract")?;
-    let recipient = parse_address(to_address, "recipient address")?;
-    let contract = IERC20::new(token_address, &provider);
+    let estimate_request = TransactionRequest::default()
+        .with_from(state.signer.address())
+        .with_to(to)
+        .with_value(value)
+        .with_input(input.clone());
+    let provider = live_read_provider(&state.config)?;
+    let estimated = match provider.estimate_gas(&estimate_request).await {
+        Ok(estimated) if estimated <= gas_ceiling => estimated,
+        Ok(_) | Err(_) => {
+            let _ = limiter.mark_transfer_failed(claim_id, is_token, "").await;
+            return Err(format!(
+                "{label} transfer gas estimate failed or exceeded the policy ceiling; no transaction was sent"
+            ));
+        }
+    };
+    let gas_limit = estimated.saturating_add(estimated / 5).min(gas_ceiling);
 
-    let pending_tx = contract
-        .transfer(recipient, U256::from(config.drip_amount))
-        .send()
-        .await
-        .map_err(|e| format!("Transfer failed: {}", e))?;
-    let tx_hash = *pending_tx.tx_hash();
-
-    if let Err(err) = rate_limiter
-        .mark_token_submitted(claim_id, &tx_hash.to_string())
+    let ticket = match state
+        .signer
+        .submit(SubmitRequest {
+            request_id: request_id.clone(),
+            to,
+            value,
+            input,
+            gas_limit,
+        })
         .await
     {
+        Ok(ticket) => ticket,
+        Err(SubmitError::Unavailable(detail)) => {
+            // The actor may have signed before stopping; background recovery
+            // reads the l1-tx ledger and finishes or fails the claim.
+            error!("{label} faucet signer unavailable for claim {claim_id}: {detail}");
+            return Err(format!(
+                "{label} transfer could not be confirmed as sent; it is held for recovery"
+            ));
+        }
+        Err(other) => {
+            // Refused before anything was accepted by the network.
+            let _ = limiter.mark_transfer_failed(claim_id, is_token, "").await;
+            return Err(format!("{label} transfer was not sent: {other}"));
+        }
+    };
+    let first_hash = ticket.tx_hash.to_string();
+    let journaled = if is_token {
+        limiter.mark_token_submitted(claim_id, &first_hash).await
+    } else {
+        limiter.mark_native_submitted(claim_id, &first_hash).await
+    };
+    if let Err(err) = journaled {
         error!(
-            "tCREG transfer {} was broadcast but its submitted state could not be journaled: {}",
-            tx_hash, err
+            "{label} transfer {first_hash} was signed but its submitted state could not be journaled: {err}"
         );
         return Err(format!(
-            "Transfer {} was broadcast; durable receipt recovery is required",
-            tx_hash
+            "{label} transfer {first_hash} was sent; durable receipt recovery is required"
         ));
     }
 
-    pending_tx
-        .watch()
-        .await
-        .map_err(|e| format!("Transfer confirmation failed: {}", e))?;
-    let receipt = provider
-        .get_transaction_receipt(tx_hash)
-        .await
-        .map_err(|e| format!("Could not read tCREG transfer receipt {}: {}", tx_hash, e))?
-        .ok_or_else(|| format!("tCREG transfer receipt {} is not available", tx_hash))?;
-    if !receipt.status() {
-        rate_limiter
-            .mark_transfer_failed(claim_id, true, &tx_hash.to_string())
-            .await
-            .map_err(|err| {
-                format!("tCREG transfer reverted but failure journaling failed: {err}")
-            })?;
-        return Err(format!("tCREG transfer transaction {} reverted", tx_hash));
+    let deadline = Instant::now() + TRANSFER_CONFIRMATION_WAIT;
+    loop {
+        match state.signer.status(&request_id).await {
+            Ok(Some(row)) => {
+                let current = row
+                    .current_tx_hash()
+                    .map(|hash| hash.to_string())
+                    .unwrap_or_else(|| first_hash.clone());
+                if current != first_hash {
+                    if let Err(err) = limiter
+                        .follow_replacement_hash(claim_id, is_token, &current)
+                        .await
+                    {
+                        warn!("could not journal replacement hash {current}: {err}");
+                    }
+                }
+                match row.state {
+                    TxState::Confirmed => return Ok(current),
+                    TxState::Reverted => {
+                        limiter
+                            .mark_transfer_failed(claim_id, is_token, &current)
+                            .await
+                            .map_err(|err| {
+                                format!("{label} transfer reverted but failure journaling failed: {err}")
+                            })?;
+                        return Err(format!("{label} transfer transaction {current} reverted"));
+                    }
+                    TxState::Displaced | TxState::Rejected => {
+                        let _ = limiter
+                            .mark_transfer_failed(claim_id, is_token, &current)
+                            .await;
+                        return Err(format!(
+                            "{label} transfer {current} was displaced before it was mined"
+                        ));
+                    }
+                    TxState::Signed | TxState::Pending | TxState::Included => {}
+                }
+            }
+            Ok(None) => {}
+            Err(err) => warn!("could not read the l1-tx ledger for claim {claim_id}: {err}"),
+        }
+        if Instant::now() >= deadline {
+            return Err(format!(
+                "{label} transfer {first_hash} is still pending; background recovery will confirm it"
+            ));
+        }
+        tokio::time::sleep(Duration::from_secs(2)).await;
     }
+}
 
-    Ok(tx_hash.to_string())
+async fn execute_token_transfer(
+    state: &AppState,
+    claim_id: i64,
+    to_address: &str,
+) -> Result<String, String> {
+    let token_address = parse_address(&state.config.token_contract, "token contract")?;
+    let recipient = parse_address(to_address, "recipient address")?;
+    let input: Bytes = IERC20::transferCall {
+        to: recipient,
+        amount: U256::from(state.config.drip_amount),
+    }
+    .abi_encode()
+    .into();
+    send_via_signer(
+        state,
+        claim_id,
+        true,
+        token_address,
+        U256::ZERO,
+        input,
+        TOKEN_TRANSFER_GAS_CEILING,
+    )
+    .await
 }
 
 async fn execute_native_transfer(
-    config: &FaucetConfig,
-    rate_limiter: &PersistentRateLimiter,
+    state: &AppState,
     claim_id: i64,
     to_address: &str,
 ) -> Result<String, String> {
-    let signer: PrivateKeySigner = config
-        .faucet_key
-        .parse()
-        .map_err(|e| format!("Invalid faucet private key: {}", e))?;
-    let wallet = EthereumWallet::from(signer);
-    let provider = ProviderBuilder::new()
-        .with_recommended_fillers()
-        .wallet(wallet)
-        .on_http(
-            config
-                .rpc_url
-                .parse()
-                .map_err(|e| format!("Invalid faucet RPC URL: {}", e))?,
-        );
-
     let recipient = parse_address(to_address, "recipient address")?;
-    let tx = TransactionRequest::default()
-        .to(recipient)
-        .value(U256::from(config.native_drip_amount));
+    send_via_signer(
+        state,
+        claim_id,
+        false,
+        recipient,
+        U256::from(state.config.native_drip_amount),
+        Bytes::new(),
+        NATIVE_TRANSFER_GAS_CEILING,
+    )
+    .await
+}
 
-    let pending_tx = provider
-        .send_transaction(tx)
-        .await
-        .map_err(|e| format!("Native ETH transfer failed: {}", e))?;
-    let tx_hash = *pending_tx.tx_hash();
-
-    if let Err(err) = rate_limiter
-        .mark_native_submitted(claim_id, &tx_hash.to_string())
-        .await
+/// Before receipt recovery: journal hashes the signer recorded for reserved
+/// claims and follow fee-bump replacements, so recovery and Transfer-log
+/// matching see the hash that is actually mined.
+async fn sync_claims_with_signer_ledger(state: &AppState) -> anyhow::Result<()> {
+    for (claim_id, is_token, status, journaled) in
+        state.rate_limiter.unresolved_transfer_sides().await?
     {
-        error!(
-            "Native faucet transfer {} was broadcast but its submitted state could not be journaled: {}",
-            tx_hash, err
-        );
-        return Err(format!(
-            "Native transfer {} was broadcast; durable receipt recovery is required",
-            tx_hash
-        ));
+        let Some(row) = state
+            .signer
+            .status(&faucet_signer_request_id(claim_id, is_token))
+            .await?
+        else {
+            continue;
+        };
+        let Some(current) = row.current_tx_hash().map(|hash| hash.to_string()) else {
+            continue;
+        };
+        if row.state == TxState::Rejected {
+            state
+                .rate_limiter
+                .mark_transfer_failed(claim_id, is_token, "")
+                .await?;
+            continue;
+        }
+        if status == "reserved" {
+            if is_token {
+                state
+                    .rate_limiter
+                    .mark_token_submitted(claim_id, &current)
+                    .await?;
+            } else {
+                state
+                    .rate_limiter
+                    .mark_native_submitted(claim_id, &current)
+                    .await?;
+            }
+        } else if journaled.as_deref() != Some(current.as_str()) {
+            state
+                .rate_limiter
+                .follow_replacement_hash(claim_id, is_token, &current)
+                .await?;
+        }
     }
-
-    pending_tx
-        .watch()
-        .await
-        .map_err(|e| format!("Native ETH confirmation failed: {}", e))?;
-    let receipt = provider
-        .get_transaction_receipt(tx_hash)
-        .await
-        .map_err(|e| format!("Could not read native transfer receipt {}: {}", tx_hash, e))?
-        .ok_or_else(|| format!("Native transfer receipt {} is not available", tx_hash))?;
-    if !receipt.status() {
-        rate_limiter
-            .mark_transfer_failed(claim_id, false, &tx_hash.to_string())
-            .await
-            .map_err(|err| {
-                format!("native transfer reverted but failure journaling failed: {err}")
-            })?;
-        return Err(format!(
-            "Native ETH transfer transaction {} reverted",
-            tx_hash
-        ));
-    }
-
-    Ok(tx_hash.to_string())
+    Ok(())
 }
 
 async fn get_token_balance(config: &FaucetConfig, address: &str) -> Result<u128, String> {
@@ -3029,60 +3291,37 @@ fn live_read_provider(
         .map_err(|_| "Could not construct the faucet RPC client".to_string())
 }
 
-/// Issue a proof-of-work challenge. Client must find a nonce such that
-/// SHA-256(challenge || nonce) has `difficulty` leading zero bits.
-async fn get_challenge(State(state): State<Arc<AppState>>) -> impl IntoResponse {
-    info!(">>> get_challenge request received");
-    use rand::RngCore;
-    let mut bytes = [0u8; 16];
-    rand::rngs::OsRng.fill_bytes(&mut bytes);
-    let challenge = hex::encode(bytes);
-
-    // Prune expired challenges periodically.
-    state
-        .pow_challenges
-        .retain(|_, v| v.created_at.elapsed() < POW_TTL);
-
-    state.pow_challenges.insert(
-        challenge.clone(),
-        PowChallenge {
-            difficulty: POW_DIFFICULTY,
-            created_at: Instant::now(),
-        },
-    );
-
-    (
-        StatusCode::OK,
-        JsonResponse(ChallengeResponse {
-            challenge,
-            difficulty: POW_DIFFICULTY,
-            ttl_secs: POW_TTL.as_secs(),
-        }),
-    )
-}
-
-/// Verify proof-of-work: SHA-256(challenge || nonce) must have `difficulty` leading zero bits.
-fn verify_pow(challenge: &str, nonce: &str, difficulty: u8) -> bool {
-    use sha2::{Digest, Sha256};
-    let mut hasher = Sha256::new();
-    hasher.update(challenge.as_bytes());
-    hasher.update(nonce.as_bytes());
-    let hash = hasher.finalize();
-
-    // Count leading zero bits.
-    let mut leading_zeros = 0u8;
-    for byte in hash.iter() {
-        if *byte == 0 {
-            leading_zeros += 8;
-        } else {
-            leading_zeros += byte.leading_zeros() as u8;
-            break;
-        }
-        if leading_zeros >= difficulty {
-            break;
+/// Issue a stateless proof-of-work challenge bound to the requester's IP
+/// bucket (`ECA-31`). Issuance is rate-limited per IP and its difficulty
+/// rises with the global issuance rate.
+async fn get_challenge(
+    State(state): State<Arc<AppState>>,
+    ConnectInfo(peer_addr): ConnectInfo<SocketAddr>,
+    headers: HeaderMap,
+) -> impl IntoResponse {
+    let client_ip =
+        client_ip_from_request(peer_addr.ip(), &headers, &state.config.trusted_proxy_cidrs);
+    match state.pow.issue(&client_ip) {
+        Some((challenge, difficulty)) => (
+            StatusCode::OK,
+            JsonResponse(ChallengeResponse {
+                challenge,
+                difficulty,
+                ttl_secs: state.pow.ttl().as_secs(),
+            }),
+        )
+            .into_response(),
+        None => {
+            counter!("faucet_rate_limited_total", "reason" => "challenge_rate").increment(1);
+            (
+                StatusCode::TOO_MANY_REQUESTS,
+                JsonResponse(serde_json::json!({
+                    "error": "Too many challenge requests from this network; try again in a minute."
+                })),
+            )
+                .into_response()
         }
     }
-    leading_zeros >= difficulty
 }
 
 /// Handle drip request
@@ -3103,6 +3342,8 @@ async fn handle_drip(
     }
 
     let address = request.address.to_lowercase();
+    let client_ip =
+        client_ip_from_request(peer_addr.ip(), &headers, &state.config.trusted_proxy_cidrs);
 
     // ── PoW validation ────────────────────────────────────────────────────────
     let pow_enabled = std::env::var("FAUCET_POW_DISABLED").unwrap_or_default() != "true";
@@ -3129,26 +3370,49 @@ async fn handle_drip(
             }
         };
 
-        // Look up and consume the challenge (single-use).
-        let pow_entry = state.pow_challenges.remove(&challenge);
-        match pow_entry {
-            Some((_, pc)) if pc.created_at.elapsed() < POW_TTL => {
-                if !verify_pow(&challenge, &nonce, pc.difficulty) {
-                    counter!("faucet_pow_failures_total", "reason" => "invalid_solution")
-                        .increment(1);
-                    return (
-                        StatusCode::BAD_REQUEST,
-                        JsonResponse(DripResponse::error("Invalid proof-of-work solution.")),
-                    );
-                }
+        // Stateless check (tag, IP binding, freshness, work), then durable
+        // single-use redemption so a solved challenge cannot be replayed.
+        let verified = match state.pow.verify(&challenge, &nonce, &client_ip) {
+            Ok(verified) => verified,
+            Err(pow::PowError::InsufficientWork) => {
+                counter!("faucet_pow_failures_total", "reason" => "invalid_solution").increment(1);
+                return (
+                    StatusCode::BAD_REQUEST,
+                    JsonResponse(DripResponse::error("Invalid proof-of-work solution.")),
+                );
             }
-            _ => {
-                counter!("faucet_pow_failures_total", "reason" => "expired_or_unknown")
+            Err(reason) => {
+                counter!("faucet_pow_failures_total", "reason" => reason.metric_reason())
                     .increment(1);
                 return (
                     StatusCode::BAD_REQUEST,
                     JsonResponse(DripResponse::error(
                         "Unknown or expired challenge. Request a new one.",
+                    )),
+                );
+            }
+        };
+        match state
+            .rate_limiter
+            .redeem_pow_challenge(&verified.challenge_id, state.pow.ttl())
+            .await
+        {
+            Ok(true) => {}
+            Ok(false) => {
+                counter!("faucet_pow_failures_total", "reason" => "replayed").increment(1);
+                return (
+                    StatusCode::BAD_REQUEST,
+                    JsonResponse(DripResponse::error(
+                        "This challenge was already used. Request a new one.",
+                    )),
+                );
+            }
+            Err(err) => {
+                error!("Could not record proof-of-work redemption: {:#}", err);
+                return (
+                    StatusCode::SERVICE_UNAVAILABLE,
+                    JsonResponse(DripResponse::error(
+                        "The faucet ledger is temporarily unavailable; no funds were sent.",
                     )),
                 );
             }
@@ -3162,9 +3426,6 @@ async fn handle_drip(
             JsonResponse(DripResponse::error("Invalid Ethereum address format")),
         );
     }
-
-    let client_ip =
-        client_ip_from_request(peer_addr.ip(), &headers, &state.config.trusted_proxy_cidrs);
 
     // Balance reads gate a real transfer. An RPC error must never be treated
     // as a zero balance or as permission to send.
@@ -3382,8 +3643,7 @@ async fn handle_drip(
     let mut failures = Vec::new();
 
     if should_send_native {
-        match execute_native_transfer(&state.config, &state.rate_limiter, claim_id, &address).await
-        {
+        match execute_native_transfer(&state, claim_id, &address).await {
             Ok(tx_hash) => {
                 if let Err(err) = state
                     .rate_limiter
@@ -3432,7 +3692,7 @@ async fn handle_drip(
     }
 
     if should_send_token {
-        match execute_token_transfer(&state.config, &state.rate_limiter, claim_id, &address).await {
+        match execute_token_transfer(&state, claim_id, &address).await {
             Ok(tx_hash) => {
                 if let Err(err) = state
                     .rate_limiter
@@ -3957,26 +4217,35 @@ fn secrets_match(provided: &str, expected: &str) -> bool {
         == 0
 }
 
-/// Verify the `Authorization: Bearer <token>` header against `FAUCET_ADMIN_TOKEN`.
+/// Verify the `Authorization: Bearer <token>` header against the admin token
+/// resolved at startup (`FAUCET_ADMIN_TOKEN_REF`, or `env:FAUCET_ADMIN_TOKEN`).
 /// Returns `Err((status, json))` when authentication fails so handlers can
 /// `return err` immediately.
 fn check_admin_auth(
+    state: &AppState,
     headers: &HeaderMap,
 ) -> Result<(), (StatusCode, axum::response::Json<serde_json::Value>)> {
-    let token = std::env::var("FAUCET_ADMIN_TOKEN").unwrap_or_default();
-    if token.is_empty() {
+    check_admin_token(state.admin_token.as_ref(), headers)
+}
+
+fn check_admin_token(
+    admin_token: Option<&chain_registry_secrets::SecretString>,
+    headers: &HeaderMap,
+) -> Result<(), (StatusCode, axum::response::Json<serde_json::Value>)> {
+    let Some(token) = admin_token.filter(|token| !token.expose_secret().is_empty()) else {
         return Err((
             StatusCode::FORBIDDEN,
             axum::response::Json(serde_json::json!({
-                "error": "Admin endpoints disabled — set FAUCET_ADMIN_TOKEN to enable them"
+                "error": "Admin endpoints disabled — set FAUCET_ADMIN_TOKEN_REF to enable them"
             })),
         ));
-    }
+    };
     let provided = headers
         .get("authorization")
         .and_then(|v| v.to_str().ok())
         .unwrap_or("");
-    if !secrets_match(provided, &format!("Bearer {}", token)) {
+    let expected = Zeroizing::new(format!("Bearer {}", token.expose_secret()));
+    if !secrets_match(provided, &expected) {
         return Err((
             StatusCode::UNAUTHORIZED,
             axum::response::Json(serde_json::json!({"error": "Unauthorized"})),
@@ -3987,7 +4256,7 @@ fn check_admin_auth(
 
 /// `POST /admin/pause` — stop accepting new drip requests.
 async fn admin_pause(State(state): State<Arc<AppState>>, headers: HeaderMap) -> impl IntoResponse {
-    if let Err(e) = check_admin_auth(&headers) {
+    if let Err(e) = check_admin_auth(&state, &headers) {
         return e;
     }
     state.is_paused.store(true, Ordering::Relaxed);
@@ -4000,7 +4269,7 @@ async fn admin_pause(State(state): State<Arc<AppState>>, headers: HeaderMap) -> 
 
 /// `POST /admin/resume` — re-enable drip requests after a pause.
 async fn admin_resume(State(state): State<Arc<AppState>>, headers: HeaderMap) -> impl IntoResponse {
-    if let Err(e) = check_admin_auth(&headers) {
+    if let Err(e) = check_admin_auth(&state, &headers) {
         return e;
     }
     state.is_paused.store(false, Ordering::Relaxed);
@@ -4013,7 +4282,7 @@ async fn admin_resume(State(state): State<Arc<AppState>>, headers: HeaderMap) ->
 
 /// `GET /admin/status` — live operational snapshot (address count, pause state, stats).
 async fn admin_status(State(state): State<Arc<AppState>>, headers: HeaderMap) -> impl IntoResponse {
-    if let Err(e) = check_admin_auth(&headers) {
+    if let Err(e) = check_admin_auth(&state, &headers) {
         return e;
     }
     let address_count = state.rate_limiter.address_count().await;
@@ -4056,7 +4325,7 @@ async fn admin_recovery(
     State(state): State<Arc<AppState>>,
     headers: HeaderMap,
 ) -> impl IntoResponse {
-    if let Err(error) = check_admin_auth(&headers) {
+    if let Err(error) = check_admin_auth(&state, &headers) {
         return error;
     }
     match state.rate_limiter.unresolved_claim_details().await {
@@ -4356,7 +4625,6 @@ mod tests {
             reconciliation_rpc_fallbacks: String::new(),
             deployment_receipt_rpc_url: String::new(),
             reconciliation_indexer_url: String::new(),
-            faucet_key: String::new(),
             token_contract: TEST_TOKEN.into(),
             chain_id: SEPOLIA_CHAIN_ID,
             token_deployment_tx_hash: String::new(),
@@ -4369,7 +4637,97 @@ mod tests {
             token_address_lifetime_cap_wei: Some(100 * WEI),
             token_hot_wallet_float_wei: Some(100_000 * WEI),
             token_distribution_open: true,
+            allowed_origins: Vec::new(),
         }
+    }
+
+    #[test]
+    fn admin_listener_must_stay_on_loopback() {
+        assert_eq!(
+            admin_bind_address(DEFAULT_ADMIN_BIND, false).unwrap(),
+            "127.0.0.1:9086".parse::<SocketAddr>().unwrap()
+        );
+        assert!(admin_bind_address("[::1]:9086", false).is_ok());
+        assert!(admin_bind_address("0.0.0.0:9086", false).is_err());
+        assert!(admin_bind_address("10.0.0.5:9086", false).is_err());
+        assert!(admin_bind_address("0.0.0.0:9086", true).is_ok());
+        assert!(admin_bind_address("not-an-address", true).is_err());
+    }
+
+    #[test]
+    fn public_cors_requires_an_allowlist_outside_testnet() {
+        assert!(build_public_cors(&[], false).is_err());
+        assert!(build_public_cors(&[], true).is_ok());
+        assert!(build_public_cors(&["https://faucet.example".to_string()], false).is_ok());
+    }
+
+    #[test]
+    fn signer_request_ids_are_per_claim_side() {
+        assert_eq!(faucet_signer_request_id(42, true), "faucet:42:token");
+        assert_eq!(faucet_signer_request_id(42, false), "faucet:42:native");
+    }
+
+    /// Runs against PostgreSQL when `CREG_TEST_DATABASE_URL` is set.
+    #[tokio::test]
+    async fn pow_redemptions_are_single_use_and_claims_follow_replacements() {
+        let Ok(url) = std::env::var("CREG_TEST_DATABASE_URL") else {
+            eprintln!("skipping: CREG_TEST_DATABASE_URL is not set");
+            return;
+        };
+        let (pool, _) = l1_tx::pg::connect_pool(&url, "CREG_TEST_DATABASE_URL", true, 4)
+            .await
+            .unwrap();
+        let limiter = PersistentRateLimiter::new(pool.clone()).await.unwrap();
+        // Bootstrapping twice is a no-op.
+        PersistentRateLimiter::new(pool).await.unwrap();
+
+        let id = format!("{:064x}", Utc::now().timestamp_nanos_opt().unwrap_or(1));
+        assert!(limiter.redeem_pow_challenge(&id, POW_TTL).await.unwrap());
+        assert!(!limiter.redeem_pow_challenge(&id, POW_TTL).await.unwrap());
+
+        let address = format!("0x{:040x}", Utc::now().timestamp_nanos_opt().unwrap_or(2));
+        let claim_id = limiter
+            .claim(
+                &address,
+                "198.51.100.77",
+                Duration::ZERO,
+                Duration::ZERO,
+                0,
+                WEI,
+                None,
+                None,
+                None,
+            )
+            .await
+            .unwrap()
+            .ok()
+            .expect("claim accepted");
+        let first = format!("0x{}", "aa".repeat(32));
+        let replacement = format!("0x{}", "bb".repeat(32));
+        limiter
+            .mark_native_submitted(claim_id, &first)
+            .await
+            .unwrap();
+        limiter
+            .follow_replacement_hash(claim_id, false, &replacement)
+            .await
+            .unwrap();
+        let sides = limiter.unresolved_transfer_sides().await.unwrap();
+        let side = sides
+            .iter()
+            .find(|(id, is_token, _, _)| *id == claim_id && !is_token)
+            .expect("native side unresolved");
+        assert_eq!(side.3.as_deref(), Some(replacement.as_str()));
+        limiter
+            .confirm_native_transfer(claim_id, &replacement)
+            .await
+            .unwrap();
+        assert!(!limiter
+            .unresolved_transfer_sides()
+            .await
+            .unwrap()
+            .iter()
+            .any(|(id, _, _, _)| *id == claim_id));
     }
 
     #[test]
@@ -4537,7 +4895,7 @@ mod tests {
             let bits = leading_zero_bits(challenge, &nonce);
             for difficulty in [0u8, 1, 4, 8, 12, 16] {
                 assert_eq!(
-                    verify_pow(challenge, &nonce, difficulty),
+                    pow::work_satisfies(challenge, &nonce, difficulty),
                     bits >= u32::from(difficulty),
                     "nonce {nonce} has {bits} leading zero bits, difficulty {difficulty}"
                 );
@@ -4549,8 +4907,8 @@ mod tests {
             .map(|n| n.to_string())
             .find(|nonce| leading_zero_bits(challenge, nonce) >= 12)
             .expect("a 12-bit solution exists within 200,000 attempts");
-        assert!(verify_pow(challenge, &solved, 12));
-        assert!(!verify_pow("another-challenge", &solved, 255));
+        assert!(pow::work_satisfies(challenge, &solved, 12));
+        assert!(!pow::work_satisfies("another-challenge", &solved, 255));
     }
 
     fn headers_with_forwarded_for(value: &str) -> HeaderMap {
@@ -4864,7 +5222,6 @@ mod tests {
 
     #[test]
     fn admin_endpoints_need_the_configured_bearer_token() {
-        let key = "FAUCET_ADMIN_TOKEN";
         let bearer = |value: &str| {
             let mut headers = HeaderMap::new();
             headers.insert("authorization", value.parse().unwrap());
@@ -4873,19 +5230,20 @@ mod tests {
 
         // No token configured: the admin surface is disabled, even for a
         // request that presents a bearer header.
-        std::env::remove_var(key);
-        let (status, _) = check_admin_auth(&bearer("Bearer secret")).unwrap_err();
+        let (status, _) = check_admin_token(None, &bearer("Bearer secret")).unwrap_err();
+        assert_eq!(status, StatusCode::FORBIDDEN);
+        let empty = chain_registry_secrets::SecretString::new("");
+        let (status, _) = check_admin_token(Some(&empty), &bearer("Bearer ")).unwrap_err();
         assert_eq!(status, StatusCode::FORBIDDEN);
 
-        std::env::set_var(key, "secret");
-        assert!(check_admin_auth(&bearer("Bearer secret")).is_ok());
+        let token = chain_registry_secrets::SecretString::new("secret");
+        assert!(check_admin_token(Some(&token), &bearer("Bearer secret")).is_ok());
         for wrong in ["Bearer other", "secret", "bearer secret", "Bearer secret "] {
-            let (status, _) = check_admin_auth(&bearer(wrong)).unwrap_err();
+            let (status, _) = check_admin_token(Some(&token), &bearer(wrong)).unwrap_err();
             assert_eq!(status, StatusCode::UNAUTHORIZED, "{wrong:?}");
         }
-        let (status, _) = check_admin_auth(&HeaderMap::new()).unwrap_err();
+        let (status, _) = check_admin_token(Some(&token), &HeaderMap::new()).unwrap_err();
         assert_eq!(status, StatusCode::UNAUTHORIZED);
-        std::env::remove_var(key);
     }
 
     #[test]

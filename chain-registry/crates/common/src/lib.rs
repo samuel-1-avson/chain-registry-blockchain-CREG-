@@ -16,6 +16,7 @@ pub mod l1_rpc;
 pub mod ownership;
 pub mod package;
 pub mod shielded_wire;
+pub mod test_support;
 pub mod transparency_log;
 pub mod validator_snapshot;
 pub mod verdict;

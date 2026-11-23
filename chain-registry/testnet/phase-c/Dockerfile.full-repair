@@ -104,13 +104,12 @@ COPY crates/common/build.rs     crates/common/
 COPY crates/common/proto/       crates/common/proto/
 
 # Phase 1: Advanced Validation crates
-COPY crates/zk-validator/Cargo.toml     crates/zk-validator/
 COPY crates/ml-validator/Cargo.toml     crates/ml-validator/
 COPY crates/wasm-sandbox/Cargo.toml     crates/wasm-sandbox/
 
 # Phase 2: Enterprise crates
 COPY crates/threshold-encryption/Cargo.toml crates/threshold-encryption/
-COPY crates/cross-chain/Cargo.toml        crates/cross-chain/
+COPY crates/l1-tx/Cargo.toml              crates/l1-tx/
 
 # Phase 3: Ecosystem crates
 COPY crates/insurance/Cargo.toml        crates/insurance/
@@ -128,13 +127,12 @@ RUN mkdir -p crates/node/src       && echo "fn main() {}"      > crates/node/src
 RUN mkdir -p crates/relayer/src    && echo "fn main() {}"      > crates/relayer/src/main.rs
 
 # Phase 1 stubs
-RUN mkdir -p crates/zk-validator/src     && echo "pub fn _stub() {}" > crates/zk-validator/src/lib.rs
 RUN mkdir -p crates/ml-validator/src     && echo "pub fn _stub() {}" > crates/ml-validator/src/lib.rs
 RUN mkdir -p crates/wasm-sandbox/src     && echo "pub fn _stub() {}" > crates/wasm-sandbox/src/lib.rs
 
 # Phase 2 stubs
 RUN mkdir -p crates/threshold-encryption/src && echo "pub fn _stub() {}" > crates/threshold-encryption/src/lib.rs
-RUN mkdir -p crates/cross-chain/src        && echo "pub fn _stub() {}" > crates/cross-chain/src/lib.rs
+RUN mkdir -p crates/l1-tx/src              && echo "pub fn _stub() {}" > crates/l1-tx/src/lib.rs
 
 # Phase 3 stubs
 RUN mkdir -p crates/insurance/src        && echo "pub fn _stub() {}" > crates/insurance/src/lib.rs

@@ -4,6 +4,9 @@
 //! PBFT consensus finalization, and BLS multi-signature compression under heavy load.
 
 use chrono::Utc;
+use common::test_support::merkle_proof::{
+    build_merkle_tree, generate_inclusion_proof, verify_merkle_path,
+};
 use common::{
     sha256_hex, Block, BlockHeader, PackageId, PackageManifest, PublishRequest, Transaction,
 };
@@ -11,7 +14,6 @@ use consensus::{
     pbft::{pbft_signature_message, verify_pbft_phase_signature, PbftEngine},
     validator_set::{ValidatorInfo, ValidatorSet},
 };
-use cross_chain::merkle_proof::{build_merkle_tree, generate_inclusion_proof, verify_merkle_path};
 use ed25519_dalek::{Signer, SigningKey};
 use std::time::Instant;
 

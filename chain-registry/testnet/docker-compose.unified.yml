@@ -122,6 +122,10 @@ services:
       FAUCET_NATIVE_DRIP_AMOUNT: "${FAUCET_NATIVE_DRIP_AMOUNT:-0}"
       FAUCET_COOLDOWN_SECS: "60"
       FAUCET_PG_URL: "postgresql://faucet:${FAUCET_DB_PASSWORD:?URL-safe faucet database password required}@faucet-db:5432/creg_faucet"
+      # ADR-019 Inc 6 (ECA-32): faucet-db is reachable only on creg-unified-net;
+      # the browser origins are the public explorer and faucet hosts.
+      FAUCET_PG_ALLOW_PLAINTEXT_PRIVATE_NETWORK: "true"
+      FAUCET_ALLOWED_ORIGINS: "${FAUCET_ALLOWED_ORIGINS:-https://${CREG_PUBLIC_EXPLORER_HOST:-explorer.testnet.cregnet.dev},https://${CREG_PUBLIC_FAUCET_HOST:-faucet.testnet.cregnet.dev}}"
       FAUCET_EXPLORER_URL: "https://${CREG_PUBLIC_EXPLORER_HOST:-explorer.testnet.cregnet.dev}"
       RUST_LOG: "info"
     depends_on:

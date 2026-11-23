@@ -31,7 +31,6 @@ mod profile;
 mod publish;
 mod recovery;
 pub mod registry_proxy;
-mod relayer_cli;
 mod retry;
 mod sbom;
 mod search;
@@ -343,7 +342,7 @@ enum Commands {
         command: BatchCommands,
     },
 
-    /// Advanced validation commands (ZK, ML, WASM).
+    /// Advanced local validation commands (ML, WASM).
     Advanced {
         #[command(subcommand)]
         command: AdvancedCommands,
@@ -491,12 +490,6 @@ enum Commands {
         command: ObserverCommands,
     },
 
-    /// Ethereum L1 State Root Relayer and checkpoint operations
-    Relayer {
-        #[command(subcommand)]
-        command: RelayerCommands,
-    },
-
     /// Authenticate your Ethereum wallet (MetaMask) and derive CREG consensus identity.
     Login {
         /// File holding the Ethereum private key (hex) for headless/CI login
@@ -542,36 +535,6 @@ enum ProfileCommands {
     Show,
     /// Clear the active authenticated profile.
     Clear,
-}
-
-#[derive(Subcommand)]
-enum RelayerCommands {
-    /// Simulate L1 state-root anchoring calldata (nothing is broadcast; see ADR-019 ECA-26)
-    Soak {
-        /// Number of finalized checkpoints to anchor
-        #[arg(short, long, default_value = "100")]
-        count: usize,
-        /// Starting block height
-        #[arg(short, long, default_value = "1")]
-        start_height: u64,
-        /// Sepolia JSON-RPC URL
-        #[arg(
-            long,
-            env = "CREG_SEPOLIA_RPC_URL",
-            default_value = "https://ethereum-sepolia-rpc.publicnode.com"
-        )]
-        rpc_url: String,
-        /// Sepolia Registry contract address
-        #[arg(
-            long,
-            env = "CREG_L1_REGISTRY_ADDRESS",
-            default_value = "0xF232cC6F5C6EfC74C7517B209D15baBd57b817eE"
-        )]
-        contract: String,
-        /// Output raw JSON report
-        #[arg(long)]
-        json: bool,
-    },
 }
 
 #[derive(Subcommand)]
@@ -695,20 +658,6 @@ enum BatchCommands {
 
 #[derive(Subcommand)]
 enum AdvancedCommands {
-    /// Generate a local research Groth16 proof (not used for package admission)
-    ZkProof {
-        /// Path to package tarball
-        tarball: std::path::PathBuf,
-        /// Path to manifest file
-        #[arg(short, long)]
-        manifest: Option<std::path::PathBuf>,
-        /// Output file for ZK proof
-        #[arg(short = 'p', long = "proof-out")]
-        proof_out: Option<std::path::PathBuf>,
-        /// Verify an existing proof file instead of generating
-        #[arg(long)]
-        verify: Option<std::path::PathBuf>,
-    },
     /// Verify using ML-based threat detection
     MlVerify {
         /// Package tarball path
@@ -747,12 +696,6 @@ enum AdvancedCommands {
         /// Ecosystem
         #[arg(short, long, default_value = "npm")]
         ecosystem: String,
-        /// Generate ZK proof
-        #[arg(long)]
-        zk: bool,
-        /// Output directory for results
-        #[arg(short = 'd', long = "out-dir")]
-        out_dir: Option<std::path::PathBuf>,
     },
 }
 
@@ -1514,31 +1457,6 @@ async fn run(cli: Cli) -> Result<()> {
             }
         },
         Commands::Advanced { command } => match command {
-            AdvancedCommands::ZkProof {
-                tarball,
-                manifest,
-                proof_out,
-                verify,
-            } => {
-                if let Some(proof_path) = verify {
-                    let valid = advanced::verify_zk_proof_file(&proof_path, &tarball).await?;
-                    if json_out {
-                        println!("{}", serde_json::json!({ "valid": valid }));
-                    } else {
-                        if valid {
-                            println!("{} ZK proof is VALID", "✓".green().bold());
-                        } else {
-                            println!("{} ZK proof is INVALID", "✗".red().bold());
-                            std::process::exit(1);
-                        }
-                    }
-                } else {
-                    let output_path =
-                        proof_out.unwrap_or_else(|| std::path::PathBuf::from("proof.bin"));
-                    advanced::generate_and_save_zk_proof(&tarball, manifest.as_ref(), &output_path)
-                        .await?;
-                }
-            }
             AdvancedCommands::MlVerify {
                 tarball,
                 ecosystem,
@@ -1596,35 +1514,22 @@ async fn run(cli: Cli) -> Result<()> {
                 name,
                 version,
                 ecosystem,
-                zk,
-                out_dir,
             } => {
                 println!("Running full advanced validation pipeline...");
-                println!("\n[1/3] ML-based threat detection...");
+                println!("\n[1/2] ML-based threat detection...");
                 let ml_result = advanced::ml_verify(&tarball, &ecosystem).await?;
                 println!(
                     "  Score: {}/100 ({:?})",
                     ml_result.threat_score, ml_result.threat_level
                 );
 
-                println!("\n[2/3] WASM sandbox validation...");
+                println!("\n[2/2] WASM sandbox validation...");
                 let wasm_result =
                     advanced::wasm_validate(&tarball, &name, &version, &ecosystem).await?;
                 println!(
                     "  Success: {} (Exit: {})",
                     wasm_result.success, wasm_result.exit_code
                 );
-
-                if zk {
-                    println!("\n[3/3] Local research ZK proof generation (not admission)...");
-                    let proof = advanced::generate_zk_proof(&tarball, None).await?;
-                    println!("  Proof size: {} bytes", proof.len());
-                    if let Some(out_dir) = out_dir {
-                        let proof_path = out_dir.join("proof.bin");
-                        tokio::fs::write(&proof_path, &proof).await?;
-                        println!("  Proof saved to {:?}", proof_path);
-                    }
-                }
                 println!("\n{} Validation complete!", "✓".green().bold());
             }
         },
@@ -1857,17 +1762,6 @@ async fn run(cli: Cli) -> Result<()> {
             }
             ObserverCommands::Probe { lb_url, count } => {
                 observer::probe_drill(&lb_url, count).await?;
-            }
-        },
-        Commands::Relayer { command } => match command {
-            RelayerCommands::Soak {
-                count,
-                start_height,
-                rpc_url,
-                contract,
-                json,
-            } => {
-                relayer_cli::soak(count, start_height, &rpc_url, &contract, json).await?;
             }
         },
     }

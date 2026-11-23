@@ -1,0 +1,16 @@
+[package]
+name = "creg-relayer-sled-export"
+version = "0.1.0"
+edition = "2021"
+publish = false
+description = "One-shot export of a sled-era creg-relayer journal to JSON for the PostgreSQL relayer (ADR-019 Increment 6)."
+
+# Standalone on purpose: `sled` is banned from the main workspace (deny.toml,
+# ECO-INV-10). Build this tool only to migrate an existing relayer data dir.
+[workspace]
+
+[dependencies]
+sled       = "=0.34.7"
+serde      = { version = "1", features = ["derive"] }
+serde_json = "1"
+anyhow     = "1"

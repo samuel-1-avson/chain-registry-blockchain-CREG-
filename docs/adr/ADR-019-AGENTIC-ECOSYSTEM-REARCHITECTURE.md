@@ -812,3 +812,45 @@ Test results:
 1. `creg testnet stake-*` still passes the key to Foundry `cast` on the child process's argv. The fix is an in-process signer via `crates/l1-tx` (Inc 6).
 2. The legacy cloud-edge explorer configs (`testnet/nginx/explorer-{bootstrap,fleet,hybrid}`) replace the image's nginx config and still proxy `/rpc` to a public Sepolia RPC without the method allowlist.
 3. The deployed explorer images predate Increment 1, so they lack the `/rpc` allowlist until rebuilt. Redeploy the explorer (new image and `CREG_EXPLORER_SEPOLIA_RPC_*` env) before reloading Caddy with these routes, or `/sepolia` answers 508.
+
+### Increment 6 — L1 Services Modernization & Supply-Chain Burn-Down (implemented 2026-11-23)
+
+Decisions applied: #5 (relayer store = PostgreSQL) and #6 (single faucet instance, stateless HMAC PoW, shared `sqlx` pool). No consensus wire type, signed message, block or header format changed; the frozen test files are untouched.
+
+| Finding | What shipped | Where |
+| --- | --- | --- |
+| `ECA-26`, `ECA-27` | `crates/cross-chain` is deleted, and with it `ethers 2.0.14` and the fabricated "live" relay. The Merkle helpers moved to `common::test_support::merkle_proof` (used by `creg stress` and the node simulation tests). `creg relayer soak` is removed. L1 anchoring stays in `node::bridge`. | `common/src/test_support/`, `cli/src/{main,stress_test}.rs`, `node/tests/` |
+| `ECA-28`, `ECO-INV-07` | New `crates/l1-tx`. One `SignerActor` per `(chain_id, signer_address)` owns the key in zeroizing memory and serialises submissions through one bounded `mpsc` queue. Each transaction is signed and written to the EOA nonce ledger (`l1_tx_ledger`, state `signed`) **before** it is broadcast, so a crash can always rebroadcast the exact bytes. A PostgreSQL session advisory lock per signer makes a second process using the same key refuse to start. Nonces resynchronise once from the chain's pending nonce when the key was used outside the ledger. | `crates/l1-tx/` |
+| `ECA-30` | The actor's reconciler follows every open transaction until `confirmed`, `reverted` or `displaced`, with no give-up timeout. It checks receipts for every broadcast attempt, waits for a confirmation depth, returns reorged transactions to `pending`, rebroadcasts dropped ones as the same bytes, and replaces stuck ones with EIP-1559 fees raised by at least 10% (default 13%) under operator caps. Transport is `common::l1_rpc` (quorum chain id; nonce reads and submissions to the primary only). The relayer reads permit nonces, gas and receipts through the same endpoint list (`RELAYER_RPC_URL` + `RELAYER_RPC_FALLBACKS`). | `l1-tx/src/{signer,fees,rpc}.rs`, `relayer/src/main.rs` |
+| `ECA-33` (relayer) | The relayer runs on PostgreSQL (`RELAYER_DATABASE_URL`, required): `relayer_checkpoints` (next sponsor nonce per owner), `relayer_batches` (daily quota windows per wallet/IP key), `relayer_outbox` (sponsor requests and their l1-tx correlation id) and `relayer_meta`. A reservation (owner nonce check and advance, both quotas, outbox insert) is one `SERIALIZABLE` transaction with retry. An outbox reconciler maps l1-tx ledger states onto the public status record; rows imported from the sled era are followed by receipt. A sled journal in `RELAYER_DATA_DIR` blocks startup until it is exported with the standalone `tools/relayer-sled-export` (its own workspace, so `sled` stays out of the main graph) and imported via `RELAYER_LEGACY_JOURNAL_EXPORT`, or discarded with `RELAYER_LEGACY_SLED_DISCARD=true`. | `relayer/src/{main,store}.rs`, `tools/relayer-sled-export/` |
+| `ECA-31` | Faucet PoW challenges are stateless: `v1.<issued>.<random>.<difficulty>.<HMAC-SHA256 tag>`, where the tag binds the issue time, difficulty and the requester's IP bucket. Redemption is single-use through `faucet_pow_redemptions` in PostgreSQL. Issuance is limited per IP per minute (default 20) with a hard cap on tracked IPs, and difficulty rises with the global issuance rate (base 20, up to 26). Clients still solve `SHA-256(challenge‖nonce)`, so the wire contract is unchanged. | `faucet/src/pow.rs`, `faucet/src/main.rs` |
+| `ECA-32` | Hot keys never sit in config structs; they go straight from `chain-registry-secrets` into the signer actor. PostgreSQL connections (relayer and faucet) must use TLS (`sslmode=require/verify-*`, rustls), a UNIX socket or loopback; plaintext to another host needs `*_PG_ALLOW_PLAINTEXT_PRIVATE_NETWORK=true` (set only for single-host compose networks). The faucet uses a bounded `sqlx` pool instead of one mutexed `tokio_postgres` client. Faucet `/metrics` and `/admin/*` moved to a loopback operator listener (`FAUCET_ADMIN_BIND`, default `127.0.0.1:9086`); the admin token is resolved once through `chain-registry-secrets` (`FAUCET_ADMIN_TOKEN_REF`). Both services refuse to start outside testnet without a CORS allowlist (`RELAYER_ALLOWED_ORIGINS`, `FAUCET_ALLOWED_ORIGINS`). | `l1-tx/src/pg.rs`, `relayer/src/main.rs`, `faucet/src/main.rs` |
+| `ECA-33` (supply chain) | `zk-validator` is unlinked from the CLI and moved to the workspace `exclude` list (source kept; deleting it is a maintainer decision). `creg advanced zk-proof` is removed. `db-sync` drops the unused `sled` and `tokio-cron-scheduler`. `deny.toml` drops 13 advisory ignores (50 → 37): the 11 ethers-only entries and the 2 zk-validator entries. `[bans]` now denies `ethers`, `ethers-core` and `ethers-providers`, and allows `sled` only as a direct dependency of `resolver`. | `Cargo.toml`, `cli/`, `db-sync/Cargo.toml`, `deny.toml` |
+
+**Faucet correctness note.** A fee-bump replacement can be mined under a different hash than the one first journaled, while the faucet's receipt recovery and Transfer-log matching key on the hash. The faucet therefore follows the l1-tx ledger: `sync_claims_with_signer_ledger` (before every recovery pass) and the inline wait loop record the ledger's current or mined hash on the claim.
+
+**Deviations from §5:**
+- The `fxhash` and `instant` ignores (2 of the 15 in the §10 ledger) remain, because the resolver cache still uses `sled`. They go with Increment 3, which replaces that cache; `cargo tree -i sled` then becomes empty.
+- `wildcards = "deny"` and the `[licenses]` allowlist are not enabled yet. Path dependencies count as wildcards unless every crate sets `publish = false`.
+- Table names follow decision #5 as signed off (`relayer_batches`, `relayer_outbox`, `relayer_checkpoints`) rather than §5.3's working names; `relayer_batches` holds the daily quota windows.
+
+**Adversarial corpus.** `eco-adv-10` is `l1-tx/src/signer/tests.rs::eco_adv_10_concurrent_submissions_get_contiguous_nonces`: 100 concurrent sponsor and drip submissions against a mock chain with a mempool and geth's 10% replacement rule get nonces 0–99 with no `nonce too low` or `replacement underpriced` outcome, then all reach `confirmed`. It has not yet run against Anvil.
+
+**Verification (local, 2026-11-23, rustc 1.98.1, `CARGO_BUILD_JOBS=2`).** These all passed:
+- `cargo fmt --all -- --check`
+- `cargo clippy --locked --workspace --all-targets -- -D warnings`
+- `cargo clippy --locked -p chain-registry-node --features phase-c-real-fleet --all-targets -- -D warnings`
+- `cargo deny --workspace check advisories bans sources`: advisories, bans and sources ok, with 37 ignores and none unmatched.
+- `cargo tree -i ethers` and `cargo tree -i ring@0.16.20` match nothing; `cargo tree -i sled` shows only `resolver` (and its dependents).
+
+| Test run | Passed |
+| --- | --- |
+| `cargo test -p l1-tx -p chain-registry-relayer -p faucet -p common -p db-sync` | l1-tx 28, relayer 15, faucet 43, common 104 + golden vectors 10/10, db-sync 1. The PostgreSQL tests ran against a throwaway local `postgres:16-alpine` (`CREG_TEST_DATABASE_URL`). |
+| `cargo test -p chain-registry-cli` | 108 (1 ignored, pre-existing) |
+| `cargo test -p consensus --test signed_message_formats` (frozen) | Pass |
+| `cargo test -p chain-registry-node --test high_throughput_stress_test --test multi_node_testnet_simulation` | 2/2 (Merkle helpers from `common::test_support`) |
+| `cargo build --offline --manifest-path tools/relayer-sled-export/Cargo.toml` | Builds; not run against a real sled journal |
+
+**Not yet done:**
+- `creg testnet stake-*` still passes the key to Foundry `cast` on argv; moving it onto `crates/l1-tx` is open.
+- The pinned faucet and relayer images in `testnet/` predate this increment. Deploying the new faucet needs `FAUCET_ALLOWED_ORIGINS` (outside testnet) and, on the compose networks, the plaintext opt-in already added to the compose files.
