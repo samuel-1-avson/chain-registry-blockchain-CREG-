@@ -24,7 +24,6 @@ http://{$CREG_PUBLIC_API_HOST} {
 }
 
 {$CREG_PUBLIC_EXPLORER_HOST} {
-	import sepolia-public-rpc.caddy
 	handle {
 		reverse_proxy 127.0.0.1:{$CREG_3NODE_EXPLORER_PORT} {
 			flush_interval -1

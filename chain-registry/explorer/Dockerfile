@@ -45,9 +45,13 @@ RUN apk add --no-cache wget curl
 COPY --from=builder /app/dist /usr/share/nginx/html
 
 # Render only deployment variables; nginx request variables must remain intact.
+# CREG_SEPOLIA_RPC_UPSTREAM is the real L1 JSON-RPC behind the /rpc allowlist
+# (include the URI, e.g. a trailing "/"). Point it at a self-hosted Sepolia node
+# in deployments. It must never be the edge's api.../sepolia route: that route
+# forwards back into this gateway, and the edge refuses the loop (HTTP 508).
 ENV CREG_NODE_UPSTREAM=node:8080 \
-    CREG_SEPOLIA_RPC_UPSTREAM=https://api.testnet.cregnet.dev/sepolia \
-    CREG_SEPOLIA_RPC_HOST=api.testnet.cregnet.dev \
+    CREG_SEPOLIA_RPC_UPSTREAM=https://ethereum-sepolia-rpc.publicnode.com/ \
+    CREG_SEPOLIA_RPC_HOST=ethereum-sepolia-rpc.publicnode.com \
     NGINX_ENVSUBST_FILTER=^CREG_
 # ADR-019 Increment 1: main config loads njs for the /rpc method allowlist
 # (ECA-38); security headers are a snippet included in every location (ECA-35).

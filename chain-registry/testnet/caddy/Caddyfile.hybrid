@@ -13,13 +13,16 @@ import faucet-edge.caddy
 import hub.caddy
 
 {$CREG_PUBLIC_API_HOST} {
+	handle /metrics* {
+		header Content-Type application/json
+		respond `{"error":"forbidden","message":"Node Prometheus metrics are operator-internal only."}` 403
+	}
 	reverse_proxy {$CREG_WG_LOCAL_PEER}:{$CREG_LOCAL_NODE3_API_PORT} {
 		flush_interval -1
 	}
 }
 
 {$CREG_PUBLIC_EXPLORER_HOST} {
-	import sepolia-public-rpc.caddy
 	handle {
 		reverse_proxy 127.0.0.1:{$CREG_3NODE_EXPLORER_PORT} {
 			flush_interval -1

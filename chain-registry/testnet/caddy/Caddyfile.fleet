@@ -14,6 +14,10 @@ import hub.caddy
 # HTTP for Google external HTTPS LB backends (LB terminates TLS; do not redirect to HTTPS).
 http://{$CREG_PUBLIC_API_HOST} {
 	import creg-node-jsonrpc.caddy
+	handle /metrics* {
+		header Content-Type application/json
+		respond `{"error":"forbidden","message":"Node Prometheus metrics are operator-internal only."}` 403
+	}
 	reverse_proxy {$CREG_OBSERVER_API_UPSTREAM} {
 		flush_interval -1
 	}
@@ -21,13 +25,16 @@ http://{$CREG_PUBLIC_API_HOST} {
 
 {$CREG_PUBLIC_API_HOST} {
 	import creg-node-jsonrpc.caddy
+	handle /metrics* {
+		header Content-Type application/json
+		respond `{"error":"forbidden","message":"Node Prometheus metrics are operator-internal only."}` 403
+	}
 	reverse_proxy {$CREG_OBSERVER_API_UPSTREAM} {
 		flush_interval -1
 	}
 }
 
 {$CREG_PUBLIC_EXPLORER_HOST} {
-	import sepolia-public-rpc.caddy
 	handle {
 		reverse_proxy 127.0.0.1:{$CREG_3NODE_EXPLORER_PORT} {
 			flush_interval -1

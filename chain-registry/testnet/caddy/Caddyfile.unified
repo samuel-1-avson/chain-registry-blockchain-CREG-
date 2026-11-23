@@ -16,21 +16,27 @@ import hub.caddy
 {$CREG_PUBLIC_API_HOST}, rpc.testnet.cregnet.dev {
 	encode zstd gzip
 
-	# 1. Sepolia L1 Proxy (POST /sepolia) -> Upstream QuickNode/Alchemy/Publicnode
+	# 1. Sepolia L1 Proxy (POST /sepolia) -> Allowlisted Explorer /rpc Gateway.
+	# The gateway's own upstream (explorer CREG_SEPOLIA_RPC_UPSTREAM) must be a
+	# real Sepolia RPC, never this route; X-CREG-Edge-Hop refuses a loop.
 	handle_path /sepolia* {
 		@jsonrpc_post method POST
 		handle @jsonrpc_post {
-			# ADR-019 ECA-38: body cap (see sepolia-public-rpc.caddy).
+			# ADR-019 ECA-38: 64 KB body cap + route through explorer njs method allowlist & rate limiter.
 			request_body {
 				max_size 64KB
 			}
-			reverse_proxy {$CREG_SEPOLIA_PUBLIC_RPC_UPSTREAM:https://ethereum-sepolia-rpc.publicnode.com} {
-				header_up Host {$CREG_SEPOLIA_PUBLIC_RPC_UPSTREAM_HOST:ethereum-sepolia-rpc.publicnode.com}
+			@rpc_gateway_loop header X-CREG-Edge-Hop *
+			header @rpc_gateway_loop Content-Type application/json
+			respond @rpc_gateway_loop `{"jsonrpc":"2.0","id":null,"error":{"code":-32603,"message":"RPC gateway loop refused: the explorer RPC upstream points back at the edge"}}` 508
+			rewrite * /rpc
+			reverse_proxy {$CREG_EXPLORER_RPC_GATEWAY:creg-explorer-public-r27-stage:80} {
+				header_up X-CREG-Edge-Hop sepolia
 				flush_interval -1
 			}
 		}
 		header Content-Type application/json
-		respond `{"service":"CREG Unified L1 RPC Gateway","network":"sepolia","chainId":"0xaa36a7","numericChainId":11155111,"usage":"POST JSON-RPC 2.0 eth_* methods here"}` 200
+		respond `{"service":"CREG Unified L1 RPC Gateway","network":"sepolia","chainId":"0xaa36a7","numericChainId":11155111,"usage":"POST allowlisted JSON-RPC 2.0 eth_* methods here"}` 200
 	}
 
 	# 2. CREG Blockchain JSON-RPC (POST /rpc or POST /jsonrpc) -> Dedicated Observer VM
@@ -68,8 +74,10 @@ import hub.caddy
 		}
 	}
 
-	handle /metrics {
-		reverse_proxy {$CREG_PUBLIC_NODE_UPSTREAM:creg-phase-c-r7-o1:8080}
+	# ADR-019 ECA-39: never proxy node /metrics on the public edge.
+	handle /metrics* {
+		header Content-Type application/json
+		respond `{"error":"forbidden","message":"Node Prometheus metrics are operator-internal only."}` 403
 	}
 
 	# Default API root response
@@ -79,10 +87,9 @@ import hub.caddy
 	}
 }
 
-# ── Explorer Frontend & Backward-Compatible Wallet RPC ────────────────────────
+# ── Explorer Frontend & Allowlisted Wallet RPC (/rpc enforced by explorer nginx+njs) ──
 {$CREG_PUBLIC_EXPLORER_HOST} {
 	encode zstd gzip
-	import sepolia-public-rpc.caddy
 	handle {
 		reverse_proxy creg-explorer-public-r27-stage:80 {
 			flush_interval -1

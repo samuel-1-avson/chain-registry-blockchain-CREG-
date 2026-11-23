@@ -1242,6 +1242,14 @@ async fn data_fetcher_loop(app: Arc<RwLock<App>>, api_base: String, tx: mpsc::Se
     }
 }
 
+/// Maximum pending SSE bytes buffered without a frame separator (`\n\n`) in `creg console` (`ECA-18`).
+const MAX_TUI_SSE_PENDING_BYTES: usize = 256 * 1024;
+
+/// Sanitise an untrusted node/SSE string for TUI rendering (`ECA-17`, `eco-adv-07`).
+fn tui_text(input: &str, max_chars: usize) -> String {
+    common::sanitize_for_terminal(input, max_chars)
+}
+
 async fn fetch_stats(client: &reqwest::Client, api_base: &str) -> Result<NetworkStats> {
     let json = get_json_with_fallback(
         client,
@@ -1252,8 +1260,8 @@ async fn fetch_stats(client: &reqwest::Client, api_base: &str) -> Result<Network
     .await?;
 
     Ok(NetworkStats {
-        chain_id: json["chain_id"].as_str().unwrap_or("unknown").to_string(),
-        genesis_hash: json["genesis_hash"].as_str().map(|s| s.to_string()),
+        chain_id: tui_text(json["chain_id"].as_str().unwrap_or("unknown"), 128),
+        genesis_hash: json["genesis_hash"].as_str().map(|s| tui_text(s, 128)),
         spec_signature_verified: json["spec_signature_verified"].as_bool().unwrap_or(false),
         l1_rpc_configured: json["l1_rpc_configured"].as_bool().unwrap_or(false),
         tip_height: json["tip_height"].as_u64().unwrap_or(0),
@@ -1262,10 +1270,7 @@ async fn fetch_stats(client: &reqwest::Client, api_base: &str) -> Result<Network
         validator_count: json["validator_count"].as_u64().unwrap_or(0) as usize,
         total_stake: json["total_stake"].as_u64().unwrap_or(0),
         peer_count: json["peer_count"].as_u64().unwrap_or(0) as usize,
-        bridge_status: json["bridge_status"]
-            .as_str()
-            .unwrap_or("Unknown")
-            .to_string(),
+        bridge_status: tui_text(json["bridge_status"].as_str().unwrap_or("Unknown"), 128),
         l1_block: json["l1_block"].as_u64().unwrap_or(0),
         finalized_height: json
             .get("finalization_source")
@@ -1273,14 +1278,16 @@ async fn fetch_stats(client: &reqwest::Client, api_base: &str) -> Result<Network
         finalization_lag: json
             .get("finalization_source")
             .and_then(|_| json["finalization_lag"].as_u64()),
-        validator_set_source: json["validator_set_source"]
-            .as_str()
-            .unwrap_or("unknown")
-            .to_string(),
-        validator_set_sync_state: json["validator_set_sync_state"]
-            .as_str()
-            .unwrap_or("unknown")
-            .to_string(),
+        validator_set_source: tui_text(
+            json["validator_set_source"].as_str().unwrap_or("unknown"),
+            64,
+        ),
+        validator_set_sync_state: tui_text(
+            json["validator_set_sync_state"]
+                .as_str()
+                .unwrap_or("unknown"),
+            64,
+        ),
     })
 }
 
@@ -1301,30 +1308,30 @@ async fn fetch_block(client: &reqwest::Client, api_base: &str, height: u64) -> R
                 .map(|t| {
                     let record = t.get("record").unwrap_or(t);
                     let id = &record["id"];
+                    let raw_id = t["package_canonical"]
+                        .as_str()
+                        .or_else(|| t["request"]["package_canonical"].as_str())
+                        .map(str::to_string)
+                        .unwrap_or_else(|| {
+                            format!(
+                                "{}:{}@{}",
+                                id["ecosystem"].as_str().unwrap_or("?"),
+                                id["name"].as_str().unwrap_or("?"),
+                                id["version"].as_str().unwrap_or("?")
+                            )
+                        });
+                    let tx_type = tui_text(t["type"].as_str().unwrap_or("unknown"), 64);
                     TransactionInfo {
-                        _id: t["package_canonical"]
-                            .as_str()
-                            .map(str::to_string)
-                            .unwrap_or_else(|| {
-                                format!(
-                                    "{}:{}@{}",
-                                    id["ecosystem"].as_str().unwrap_or("?"),
-                                    id["name"].as_str().unwrap_or("?"),
-                                    id["version"].as_str().unwrap_or("?")
-                                )
-                            }),
-                        tx_type: t["type"].as_str().unwrap_or("unknown").to_string(),
-                        package_name: id["name"].as_str().map(|s| s.to_string()),
-                        package_version: id["version"].as_str().map(|s| s.to_string()),
-                        publisher: record["publisher_pubkey"]
-                            .as_str()
-                            .map(|s| s[..8.min(s.len())].to_string()),
-                        status: if t["type"] == "revoke" {
-                            "revoked"
+                        _id: tui_text(&raw_id, 128),
+                        package_name: id["name"].as_str().map(|s| tui_text(s, 128)),
+                        package_version: id["version"].as_str().map(|s| tui_text(s, 64)),
+                        publisher: record["publisher_pubkey"].as_str().map(|s| tui_text(s, 8)),
+                        status: if tx_type == "revoke" || tx_type == "revoke_v2" {
+                            "revoked".to_string()
                         } else {
-                            record["status"].as_str().unwrap_or("unknown")
-                        }
-                        .to_string(),
+                            tui_text(record["status"].as_str().unwrap_or("unknown"), 64)
+                        },
+                        tx_type,
                     }
                 })
                 .collect()
@@ -1333,15 +1340,12 @@ async fn fetch_block(client: &reqwest::Client, api_base: &str, height: u64) -> R
 
     Ok(BlockInfo {
         height: header["height"].as_u64().unwrap_or(0),
-        hash: json["hash"].as_str().unwrap_or("").to_string(),
-        timestamp: header["timestamp"].as_str().unwrap_or("").to_string(),
-        proposer: header["proposer_id"]
-            .as_str()
-            .unwrap_or("unknown")
-            .to_string(),
+        hash: tui_text(json["hash"].as_str().unwrap_or(""), 128),
+        timestamp: tui_text(header["timestamp"].as_str().unwrap_or(""), 64),
+        proposer: tui_text(header["proposer_id"].as_str().unwrap_or("unknown"), 128),
         tx_count: txs.len(),
         transactions: txs,
-        merkle_root: header["merkle_root"].as_str().unwrap_or("").to_string(),
+        merkle_root: tui_text(header["merkle_root"].as_str().unwrap_or(""), 128),
     })
 }
 
@@ -1358,13 +1362,13 @@ async fn fetch_validators(client: &reqwest::Client, api_base: &str) -> Result<Ve
     Ok(validators
         .iter()
         .map(|v| ValidatorInfo {
-            id: v["id"].as_str().unwrap_or("unknown").to_string(),
-            alias: v["alias"].as_str().unwrap_or("").to_string(),
+            id: tui_text(v["id"].as_str().unwrap_or("unknown"), 128),
+            alias: tui_text(v["alias"].as_str().unwrap_or(""), 128),
             stake: v["stake"].as_u64().unwrap_or(0),
             reputation: v["reputation"].as_u64().unwrap_or(50) as u8,
-            status: v["status"].as_str().unwrap_or("unknown").to_string(),
+            status: tui_text(v["status"].as_str().unwrap_or("unknown"), 64),
             is_active: true,
-            pub_key: v["pubkey"].as_str().unwrap_or("").to_string(),
+            pub_key: tui_text(v["pubkey"].as_str().unwrap_or(""), 128),
         })
         .collect())
 }
@@ -1382,7 +1386,7 @@ async fn fetch_peers(client: &reqwest::Client, api_base: &str) -> Result<Vec<Str
         .as_array()
         .map(|arr| {
             arr.iter()
-                .filter_map(|p| p.as_str().map(|s| s.to_string()))
+                .filter_map(|p| p.as_str().map(|s| tui_text(s, 256)))
                 .collect()
         })
         .unwrap_or_default())
@@ -1410,32 +1414,27 @@ async fn fetch_pending_packages(
     {
         if let Some(arr) = json["packages"].as_array() {
             for v in arr {
-                let canonical = v["canonical"].as_str().unwrap_or_default();
+                let canonical = tui_text(v["canonical"].as_str().unwrap_or_default(), 256);
                 if canonical.is_empty() {
                     continue;
                 }
                 // canonical is e.g. "npm/express@4.18.0"
                 let parts: Vec<&str> = canonical.splitn(2, ':').collect();
-                let ecosystem = parts.first().copied().unwrap_or("?").to_string();
-                let name_ver = parts.get(1).copied().unwrap_or(canonical);
+                let ecosystem = tui_text(parts.first().copied().unwrap_or("?"), 32);
+                let name_ver = parts.get(1).copied().unwrap_or(&canonical);
                 let (pkg_name, version) = if let Some(pos) = name_ver.rfind('@') {
                     (&name_ver[..pos], &name_ver[pos + 1..])
                 } else {
                     (name_ver, "?")
                 };
                 packages.push(PackageInfo {
-                    name: pkg_name.to_string(),
+                    name: tui_text(pkg_name, 128),
                     ecosystem,
-                    version: version.to_string(),
-                    status: v["status"].as_str().unwrap_or("verified").to_string(),
-                    publisher: v["publisher"]
-                        .as_str()
-                        .unwrap_or("")
-                        .chars()
-                        .take(16)
-                        .collect(),
-                    verified_at: v["published_at"].as_str().map(|s| s.to_string()),
-                    content_hash: v["content_hash"].as_str().unwrap_or("").to_string(),
+                    version: tui_text(version, 64),
+                    status: tui_text(v["status"].as_str().unwrap_or("verified"), 64),
+                    publisher: tui_text(v["publisher"].as_str().unwrap_or(""), 16),
+                    verified_at: v["published_at"].as_str().map(|s| tui_text(s, 64)),
+                    content_hash: tui_text(v["content_hash"].as_str().unwrap_or(""), 128),
                 });
             }
         }
@@ -1452,7 +1451,7 @@ async fn fetch_pending_packages(
     {
         if let Some(arr) = json["packages"].as_array() {
             for v in arr {
-                let canonical = v.as_str().unwrap_or_default().to_string();
+                let canonical = tui_text(v.as_str().unwrap_or_default(), 256);
                 if canonical.is_empty() {
                     continue;
                 }
@@ -1464,7 +1463,7 @@ async fn fetch_pending_packages(
                     continue;
                 }
                 let parts: Vec<&str> = canonical.splitn(2, ':').collect();
-                let ecosystem = parts.first().copied().unwrap_or("?").to_string();
+                let ecosystem = tui_text(parts.first().copied().unwrap_or("?"), 32);
                 let name_ver = parts.get(1).copied().unwrap_or(&canonical);
                 let (pkg_name, version) = if let Some(pos) = name_ver.rfind('@') {
                     (&name_ver[..pos], &name_ver[pos + 1..])
@@ -1472,9 +1471,9 @@ async fn fetch_pending_packages(
                     (name_ver, "?")
                 };
                 packages.push(PackageInfo {
-                    name: pkg_name.to_string(),
+                    name: tui_text(pkg_name, 128),
                     ecosystem,
-                    version: version.to_string(),
+                    version: tui_text(version, 64),
                     status: "pending".to_string(),
                     publisher: String::new(),
                     verified_at: None,
@@ -1504,16 +1503,18 @@ async fn fetch_mempool(client: &reqwest::Client, api_base: &str) -> Result<Vec<M
     if let Some(arr) = json["packages"].as_array() {
         let now = Instant::now();
         for v in arr {
-            let canonical = v.as_str().unwrap_or_default();
+            let canonical = tui_text(v.as_str().unwrap_or_default(), 256);
             if canonical.is_empty() {
                 continue;
             }
             // Parse "npm/express@4.18.0" → ecosystem + name + version
-            let (ecosystem, rest) = canonical.split_once(':').unwrap_or(("unknown", canonical));
+            let (ecosystem, rest) = canonical
+                .split_once(':')
+                .unwrap_or(("unknown", canonical.as_str()));
             let (_name, _version) = rest.rsplit_once('@').unwrap_or((rest, "?"));
             txs.push(MempoolTx {
-                id: canonical.to_string(),
-                tx_type: format!("publish({})", ecosystem),
+                id: canonical.clone(),
+                tx_type: format!("publish({})", tui_text(ecosystem, 32)),
                 _size: canonical.len(), // approximate — no real size available
                 timestamp: now,
             });
@@ -1542,22 +1543,24 @@ async fn fetch_runtime_config(client: &reqwest::Client, api_base: &str) -> Resul
         )
         .await?;
         return Ok(RuntimeIdentity {
-            node_id: health["node_id"].as_str().unwrap_or("unknown").into(),
+            node_id: tui_text(health["node_id"].as_str().unwrap_or("unknown"), 128),
             validator_pubkey: None,
-            chain_id: stats["chain_id"].as_str().unwrap_or("unknown").into(),
+            chain_id: tui_text(stats["chain_id"].as_str().unwrap_or("unknown"), 128),
             network: "unknown".into(),
-            genesis_hash: stats["genesis_hash"].as_str().map(str::to_string),
+            genesis_hash: stats["genesis_hash"].as_str().map(|s| tui_text(s, 128)),
             spec_signature_verified: stats["spec_signature_verified"].as_bool().unwrap_or(false),
             l1_rpc_configured: stats["l1_rpc_configured"].as_bool().unwrap_or(false),
             is_validator: health["is_validator"].as_bool().unwrap_or(false),
-            validator_set_source: stats["validator_set_source"]
-                .as_str()
-                .unwrap_or("unknown")
-                .into(),
-            validator_set_sync_state: stats["validator_set_sync_state"]
-                .as_str()
-                .unwrap_or("unknown")
-                .into(),
+            validator_set_source: tui_text(
+                stats["validator_set_source"].as_str().unwrap_or("unknown"),
+                64,
+            ),
+            validator_set_sync_state: tui_text(
+                stats["validator_set_sync_state"]
+                    .as_str()
+                    .unwrap_or("unknown"),
+                64,
+            ),
         });
     }
     let json = get_json_with_fallback(
@@ -1569,22 +1572,24 @@ async fn fetch_runtime_config(client: &reqwest::Client, api_base: &str) -> Resul
     .await?;
 
     Ok(RuntimeIdentity {
-        node_id: json["node_id"].as_str().unwrap_or("unknown").to_string(),
-        validator_pubkey: json["validator_pubkey"].as_str().map(|s| s.to_string()),
-        chain_id: json["chain_id"].as_str().unwrap_or("unknown").to_string(),
-        network: json["network"].as_str().unwrap_or("unknown").to_string(),
-        genesis_hash: json["genesis_hash"].as_str().map(|s| s.to_string()),
+        node_id: tui_text(json["node_id"].as_str().unwrap_or("unknown"), 128),
+        validator_pubkey: json["validator_pubkey"].as_str().map(|s| tui_text(s, 128)),
+        chain_id: tui_text(json["chain_id"].as_str().unwrap_or("unknown"), 128),
+        network: tui_text(json["network"].as_str().unwrap_or("unknown"), 64),
+        genesis_hash: json["genesis_hash"].as_str().map(|s| tui_text(s, 128)),
         spec_signature_verified: json["spec_signature_verified"].as_bool().unwrap_or(false),
         l1_rpc_configured: json["l1_rpc_configured"].as_bool().unwrap_or(false),
         is_validator: json["is_validator"].as_bool().unwrap_or(false),
-        validator_set_source: json["validator_set_source"]
-            .as_str()
-            .unwrap_or("unknown")
-            .to_string(),
-        validator_set_sync_state: json["validator_set_sync_state"]
-            .as_str()
-            .unwrap_or("unknown")
-            .to_string(),
+        validator_set_source: tui_text(
+            json["validator_set_source"].as_str().unwrap_or("unknown"),
+            64,
+        ),
+        validator_set_sync_state: tui_text(
+            json["validator_set_sync_state"]
+                .as_str()
+                .unwrap_or("unknown"),
+            64,
+        ),
     })
 }
 
@@ -1608,17 +1613,16 @@ async fn fetch_consensus_state(client: &reqwest::Client, api_base: &str) -> Resu
                 .as_u64()
                 .or_else(|| round_data["round"].as_u64())
                 .unwrap_or(0),
-            phase: round_data["phase"]
-                .as_str()
-                .unwrap_or(if round.is_some() { "UNKNOWN" } else { "IDLE" })
-                .to_uppercase(),
-            proposer: round_data["proposer"]
-                .as_str()
-                .unwrap_or("unknown")
-                .chars()
-                .take(16)
-                .collect::<String>()
-                + "…",
+            phase: tui_text(
+                round_data["phase"].as_str().unwrap_or(if round.is_some() {
+                    "UNKNOWN"
+                } else {
+                    "IDLE"
+                }),
+                32,
+            )
+            .to_uppercase(),
+            proposer: tui_text(round_data["proposer"].as_str().unwrap_or("unknown"), 16) + "…",
             prepare_votes: round_data["prepare_votes"].as_u64().unwrap_or(0) as usize,
             commit_votes: round_data["commit_votes"].as_u64().unwrap_or(0) as usize,
             quorum: json["quorum"]
@@ -1652,6 +1656,36 @@ async fn fetch_consensus_state(client: &reqwest::Client, api_base: &str) -> Resu
         total_validators: total,
         fetched_at: Instant::now(),
     })
+}
+
+fn parse_and_sanitize_tui_sse_frame(message: &str) -> Option<(String, String)> {
+    let mut event_type = String::from("Event");
+    let mut data = String::new();
+
+    for line in message.lines() {
+        if let Some(t) = line.strip_prefix("event: ") {
+            event_type = tui_text(t.trim(), 64);
+        } else if let Some(d) = line.strip_prefix("data: ") {
+            data = d.trim().to_string();
+        }
+    }
+
+    if data.is_empty() {
+        return None;
+    }
+
+    let raw_summary = if let Ok(json) = serde_json::from_str::<Value>(&data) {
+        json["message"]
+            .as_str()
+            .or(json["reason"].as_str())
+            .or(json["canonical"].as_str())
+            .or(json["type"].as_str())
+            .unwrap_or(&data)
+            .to_string()
+    } else {
+        data
+    };
+    Some((event_type, tui_text(&raw_summary, 256)))
 }
 
 async fn sse_event_listener(
@@ -1703,30 +1737,14 @@ async fn sse_event_listener(
                 let message = buffer[..pos].to_string();
                 buffer = buffer[pos + 2..].to_string();
 
-                let mut event_type = String::from("Event");
-                let mut data = String::new();
-
-                for line in message.lines() {
-                    if let Some(t) = line.strip_prefix("event: ") {
-                        event_type = t.trim().to_string();
-                    } else if let Some(d) = line.strip_prefix("data: ") {
-                        data = d.trim().to_string();
-                    }
-                }
-
-                if !data.is_empty() {
-                    // Try to extract a human-readable summary from JSON data
-                    let summary = if let Ok(json) = serde_json::from_str::<Value>(&data) {
-                        json["message"]
-                            .as_str()
-                            .or(json["type"].as_str())
-                            .unwrap_or(&data)
-                            .to_string()
-                    } else {
-                        data
-                    };
+                if let Some((event_type, summary)) = parse_and_sanitize_tui_sse_frame(&message) {
                     let _ = tx.send(DataUpdate::Event(event_type, summary)).await;
                 }
+            }
+
+            if buffer.len() > MAX_TUI_SSE_PENDING_BYTES {
+                // ECA-18 / eco-adv-08: drop stream when pending bytes exceed 256 KiB without a frame separator.
+                break;
             }
         }
 
@@ -3550,11 +3568,13 @@ fn draw_blocks_list(f: &mut Frame, app: &App, area: Rect, compact: bool) {
                 || block.proposer.to_ascii_lowercase().contains(&query)
         })
         .map(|(i, block)| {
-            let hash_short = if block.hash.len() >= 16 {
-                format!("{}..", &block.hash[..16])
+            let hash_short = if block.hash.chars().count() >= 16 {
+                let prefix: String = block.hash.chars().take(16).collect();
+                format!("{prefix}..")
             } else if block.hash.is_empty() {
-                if block.merkle_root.len() >= 16 {
-                    format!("{}..", &block.merkle_root[..16])
+                if block.merkle_root.chars().count() >= 16 {
+                    let prefix: String = block.merkle_root.chars().take(16).collect();
+                    format!("{prefix}..")
                 } else {
                     block.merkle_root.clone()
                 }
@@ -3965,7 +3985,7 @@ fn draw_validator_detail(f: &mut Frame, app: &App, area: Rect) {
             Span::styled("Public Key:  ", Style::default().fg(Theme::text_dim())),
             Span::raw(format!(
                 "{}..",
-                &validator.pub_key[..validator.pub_key.len().min(40)]
+                validator.pub_key.chars().take(40).collect::<String>()
             )),
         ]),
         Line::from(vec![
@@ -4129,16 +4149,19 @@ fn draw_packages(f: &mut Frame, app: &App, area: Rect) {
                 ]),
                 Line::from(vec![
                     Span::styled("Publisher:  ", Style::default().fg(Theme::text_dim())),
-                    Span::raw(if pkg.publisher.len() > 16 {
-                        format!("{}...", &pkg.publisher[..16])
+                    Span::raw(if pkg.publisher.chars().count() > 16 {
+                        format!("{}...", pkg.publisher.chars().take(16).collect::<String>())
                     } else {
                         pkg.publisher.clone()
                     }),
                 ]),
                 Line::from(vec![
                     Span::styled("Hash:       ", Style::default().fg(Theme::text_dim())),
-                    Span::raw(if pkg.content_hash.len() > 20 {
-                        format!("{}...", &pkg.content_hash[..20])
+                    Span::raw(if pkg.content_hash.chars().count() > 20 {
+                        format!(
+                            "{}...",
+                            pkg.content_hash.chars().take(20).collect::<String>()
+                        )
                     } else {
                         pkg.content_hash.clone()
                     }),
@@ -4760,11 +4783,7 @@ fn format_number(n: u64) -> String {
 
 fn format_timestamp(ts: &str) -> String {
     // Simple formatting - in production would parse and format properly
-    if ts.len() > 19 {
-        ts[..19].to_string()
-    } else {
-        ts.to_string()
-    }
+    tui_text(ts, 19)
 }
 
 // ============================================================================
@@ -4789,7 +4808,7 @@ async fn fetch_faucet_health(
     let json: Value = res.json().await.ok()?;
     let healthy =
         json["status"].as_str() == Some("healthy") && json["faucet"].as_str() == Some("online");
-    let reserve = json["faucet_balance"].as_str().map(|s| s.to_string());
+    let reserve = json["faucet_balance"].as_str().map(|s| tui_text(s, 64));
     Some((healthy, reserve))
 }
 
@@ -5676,5 +5695,21 @@ font-family:\"Cascadia Code\",\"JetBrains Mono\",Consolas,ui-monospace,monospace
         IS_LIGHT_THEME.store(false, Ordering::Relaxed);
 
         eprintln!("console previews written to {}", dir.display());
+    }
+
+    #[test]
+    fn tui_sse_frame_strips_osc52_cr_and_bidi() {
+        let frame = concat!(
+            "event: new_tx\u{001b}[2J\n",
+            "data: {\"message\":\"evil\\u001b]52;c;cHduZWQ=\\u0007\\r\\u202epub\"}\n\n"
+        );
+        let (event_type, summary) =
+            parse_and_sanitize_tui_sse_frame(frame).expect("valid SSE frame");
+        assert_eq!(event_type, "new_tx[2J");
+        assert!(!summary.contains('\x1b'));
+        assert!(!summary.contains('\x07'));
+        assert!(!summary.contains('\r'));
+        assert!(!summary.contains('\u{202e}'));
+        assert_eq!(summary, "evil]52;c;cHduZWQ= pub");
     }
 }

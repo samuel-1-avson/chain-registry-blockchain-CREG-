@@ -1676,7 +1676,7 @@ impl ChainStore {
                         None
                     };
                     if let Some(mut stats) = existing_stats {
-                        stats.stake_wei = stats.stake_wei.saturating_sub(*amount);
+                        stats.stake_wei = stats.stake_wei.saturating_sub(u128::from(*amount));
                         pub_stats_overlay.insert(validator_id.clone(), stats);
                     }
                 }

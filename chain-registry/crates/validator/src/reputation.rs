@@ -28,7 +28,7 @@ pub struct PublisherReputationSnapshot {
     pub total_packages: u32,
     pub verified_count: u32,
     pub revoked_count: u32,
-    pub stake_wei: u64,
+    pub stake_wei: u128,
     pub account_age_days: u32,
     #[serde(default)]
     pub revoked_pgp_fps: Vec<String>,
@@ -113,18 +113,19 @@ pub async fn assess_publisher(
     // All retries exhausted — fail *pessimistically* rather than neutrally so
     // that a brief outage cannot turn unknown attackers into trusted publishers.
     let reason = last_error.unwrap_or_else(|| "unknown".into());
+    let clean_reason = common::sanitize_for_terminal(&reason, 256);
     tracing::warn!(
         "Reputation lookup for {} failed after {} attempts: {}",
-        publisher_pubkey,
+        common::sanitize_for_terminal(publisher_pubkey, 128),
         MAX_ATTEMPTS,
-        reason
+        clean_reason
     );
     Ok(ReputationAssessment {
         confidence_delta: -25,
         publisher_pubkey: publisher_pubkey.to_string(),
         notes: vec![format!(
             "Reputation service unreachable ({}) — treating as untrusted (-25)",
-            reason
+            clean_reason
         )],
         revoked_pgp_fps: vec![],
     })
@@ -136,7 +137,7 @@ struct PublisherRecord {
     total_packages: u32,
     verified_count: u32,
     revoked_count: u32,
-    stake_wei: u64,
+    stake_wei: u128,
     first_seen_days: u32,
     /// PGP fingerprints (hex) that the publisher has declared revoked.
     /// Absent from older API versions — defaults to empty.
@@ -327,5 +328,26 @@ mod tests {
         };
         let assessment = build_assessment("pubkey", &rec);
         assert!(assessment.confidence_delta < -50);
+    }
+
+    #[test]
+    fn large_stake_above_u64_max_scores_correctly() {
+        // 100 CREG (100 * 10^18 wei) exceeds u64::MAX (~18.44 * 10^18 wei).
+        let stake_100_creg: u128 = 100_000_000_000_000_000_000;
+        assert!(stake_100_creg > u128::from(u64::MAX));
+        let snap = PublisherReputationSnapshot {
+            total_packages: 4,
+            verified_count: 4,
+            revoked_count: 0,
+            stake_wei: stake_100_creg,
+            account_age_days: 30,
+            revoked_pgp_fps: vec![],
+        };
+        let assessment = assess_publisher_from_snapshot("pubkey", Some(&snap));
+        assert_eq!(assessment.confidence_delta, 25);
+        assert!(assessment
+            .notes
+            .iter()
+            .any(|n| n.contains("100 ETH staked")));
     }
 }

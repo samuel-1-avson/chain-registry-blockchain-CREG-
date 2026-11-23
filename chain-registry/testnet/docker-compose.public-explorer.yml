@@ -8,8 +8,9 @@ services:
       - "127.0.0.1:3026:80"
     environment:
       CREG_NODE_UPSTREAM: ${CREG_PUBLIC_EXPLORER_NODE_UPSTREAM:-creg-node:8080}
-      CREG_SEPOLIA_RPC_UPSTREAM: https://api.testnet.cregnet.dev/sepolia
-      CREG_SEPOLIA_RPC_HOST: api.testnet.cregnet.dev
+      # Real L1 RPC; never api.../sepolia (it routes back into the explorer gateway).
+      CREG_SEPOLIA_RPC_UPSTREAM: ${CREG_EXPLORER_SEPOLIA_RPC_UPSTREAM:-https://ethereum-sepolia-rpc.publicnode.com/}
+      CREG_SEPOLIA_RPC_HOST: ${CREG_EXPLORER_SEPOLIA_RPC_HOST:-ethereum-sepolia-rpc.publicnode.com}
     networks:
       public-services:
         aliases: [web-explorer]

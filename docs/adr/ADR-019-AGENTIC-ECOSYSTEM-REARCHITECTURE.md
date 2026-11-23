@@ -732,7 +732,7 @@ Every increment must pass, from `chain-registry/` with `$env:LIBCLANG_PATH` and 
 
 ## 13. Implementation Status
 
-### Increment 1 — Client & Edge Stop-Bleed (implemented 2026-11-23, uncommitted)
+### Increment 1 — Client & Edge Stop-Bleed (implemented 2026-11-23, committed in `47ea7b9` + Step B follow-ups)
 
 No consensus wire type, signed message, block or header format changed. The only node changes are REST/OpenAPI additions and a fail-closed router flag. `consensus_golden_vectors.rs` and `signed_message_formats.rs` are untouched.
 
@@ -752,7 +752,7 @@ No consensus wire type, signed message, block or header format changed. The only
 | `ECA-34` (Inc 1 part) | One mapping (`txDisplayStatus`, `packageStatusVariant`): `revoke`/`revoke_v2` are red "revoked" (target taken from `request.package_canonical`), quarantine is amber, and unknown types and statuses render neutral, never success. It is used by the block, transaction, package, proof and dashboard pages. | `explorer/src/api/normalize.js`, pages |
 | `ECA-35` | A per-app `security-headers.conf` is `include`d in **every** nginx location: CSP (`script-src 'self'`, `object-src 'none'`, `base-uri 'none'`, `frame-ancestors 'none'`), HSTS, `nosniff`, `X-Frame-Options: DENY`, Referrer-Policy, Permissions-Policy and COOP. Swagger UI gets a docs-only CSP. **Deferred to Inc 7:** Trusted Types, removing `style-src 'unsafe-inline'` (the WalletConnect modal injects styles), narrowing `connect-src`, and self-hosting Google Fonts. | `explorer/security-headers*.conf`, `hub-web/security-headers.conf`, Dockerfiles |
 | `ECA-36` | hub-api: LRU-bounded limiter (`HUB_RATE_LIMIT_MAX_KEYS`, default 10 000) keyed by the trusted client address. Returns 503 in production when no address can be established. `/api/status/public` is served from a 7.5 s single-flight cache. | `hub-api/src/middleware/rateLimit.ts`, `hub-api/src/status/singleFlight.ts`, `hub-api/src/index.ts` |
-| `ECA-38` | Explorer `/rpc`: POST only, 64 KiB body cap, 10 r/s per client (burst 20), and an njs JSON-RPC method allowlist (wallet reads plus the signed-raw-transaction lifecycle used by `creg testnet stake-*`; batches of at most 20). Caddy `request_body` 64 KB caps were added on the Sepolia proxy routes. **Residual:** the production Caddy edge answers `explorer…/rpc` and `api…/sepolia` itself, so the method allowlist only applies where traffic reaches the explorer image. Closing that needs either routing Caddy `/rpc` to the explorer container or the Inc 6 self-hosted RPC gateway. | `explorer/{nginx.conf,nginx-main.conf,rpc-allowlist.js}`, `testnet/caddy/` |
+| `ECA-38` | Explorer `/rpc`: POST only, 64 KiB body cap, 10 r/s per client (burst 20), and an njs JSON-RPC method allowlist (wallet reads plus the signed-raw-transaction lifecycle used by `creg testnet stake-*`; batches of at most 20). Caddy `request_body` 64 KB caps were added on the Sepolia proxy routes. **Step B:** Caddy no longer proxies any L1 JSON-RPC itself. The explorer vhost passes `/rpc` to the explorer container, and `api…/sepolia` plus the faucet vhost's `/rpc` are forwarded to the explorer's allowlisted gateway (`CREG_EXPLORER_RPC_GATEWAY`). The explorer's own upstream (`CREG_SEPOLIA_RPC_UPSTREAM`) now defaults to a real Sepolia RPC instead of `api…/sepolia`, which would have looped; Caddy also stamps `X-CREG-Edge-Hop` on the forwarded request and answers 508 to any request that comes back carrying it. | `explorer/{nginx.conf,nginx-main.conf,rpc-allowlist.js,Dockerfile}`, `testnet/caddy/`, `testnet/docker-compose.*.yml` |
 | `ECA-39` | The router fails **closed**: a contended state lock while building the router keeps `/metrics` and API docs operator-only. | `node/api.rs` |
 
 **Adversarial corpus.** The corpus is implemented as unit tests next to the code they pin, not under `tests/ecosystem_adversarial/`:
@@ -802,7 +802,13 @@ Test results:
 - The realip trust path was not exercised: Docker NAT makes every host request arrive from a private gateway address.
 - The Caddy edits have not been loaded by Caddy.
 
-**New gaps found while implementing (not yet fixed):**
-1. `node::publisher_index::PublisherStats.stake_wei` and `validator::reputation` hold wei as `u64`, which saturates near 18.4 tokens. This is the same class as `ECA-23`, on the node side; it is an Inc 2/5 candidate.
-2. `creg testnet stake-*` still passes the key to Foundry `cast` on the child process's argv. The fix is an in-process signer via `crates/l1-tx` (Inc 6).
-3. The edge Caddy `api…/metrics` route proxies the node's `/metrics` publicly whenever the node exposes it.
+**Step B follow-ups (2026-11-23).** These close gaps found while implementing Increment 1:
+- `node::publisher_index::PublisherStats.stake_wei` and `validator::reputation` stake fields are `u128` (they were `u64`, which saturates near 18.4 tokens). The publisher index is a node-local `serde_json` index, not consensus state, and existing `u64` values deserialize unchanged. Test: `large_stake_above_u64_max_scores_correctly`.
+- `creg console` (`explorer_tui.rs`) sanitises every fetched API and SSE field through `common::sanitize_for_terminal`, truncates by scalar value, and drops an SSE stream once 256 KiB is pending without a frame separator. Test: `tui_sse_frame_strips_osc52_cr_and_bidi`. Publisher-index and reputation `tracing` lines sanitise package names, keys and remote error text.
+- Every public Caddy API vhost answers `/metrics*` with 403 (`Caddyfile.{unified,fleet,hybrid}`).
+- Caddy L1 RPC routing, as described in the `ECA-38` row.
+
+**Remaining gaps:**
+1. `creg testnet stake-*` still passes the key to Foundry `cast` on the child process's argv. The fix is an in-process signer via `crates/l1-tx` (Inc 6).
+2. The legacy cloud-edge explorer configs (`testnet/nginx/explorer-{bootstrap,fleet,hybrid}`) replace the image's nginx config and still proxy `/rpc` to a public Sepolia RPC without the method allowlist.
+3. The deployed explorer images predate Increment 1, so they lack the `/rpc` allowlist until rebuilt. Redeploy the explorer (new image and `CREG_EXPLORER_SEPOLIA_RPC_*` env) before reloading Caddy with these routes, or `/sepolia` answers 508.

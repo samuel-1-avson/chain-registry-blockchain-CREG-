@@ -29,8 +29,9 @@ services:
       CREG_3NODE_SPEC_HOST_PORT: ${CREG_3NODE_SPEC_HOST_PORT:-18888}
       CREG_3NODE_IPFS_HOST_PORT: ${CREG_3NODE_IPFS_HOST_PORT:-15001}
       CREG_WAITLIST_HOST_PORT: ${CREG_WAITLIST_HOST_PORT:-8088}
-      CREG_SEPOLIA_PUBLIC_RPC_UPSTREAM: ${CREG_SEPOLIA_PUBLIC_RPC_UPSTREAM:-https://ethereum-sepolia-rpc.publicnode.com}
-      CREG_SEPOLIA_PUBLIC_RPC_UPSTREAM_HOST: ${CREG_SEPOLIA_PUBLIC_RPC_UPSTREAM_HOST:-ethereum-sepolia-rpc.publicnode.com}
+      # ADR-019 ECA-38: faucet-host /rpc goes to the explorer container's /rpc
+      # (host networking, so loopback + the published explorer port).
+      CREG_EXPLORER_RPC_GATEWAY: ${CREG_EXPLORER_RPC_GATEWAY:-127.0.0.1:${CREG_3NODE_EXPLORER_PORT:-3017}}
     volumes:
       - ${CREG_CLOUD_CADDYFILE:-./caddy/Caddyfile.hybrid}:/etc/caddy/Caddyfile:ro
       - ./caddy/waitlist.caddy:/etc/caddy/waitlist.caddy:ro

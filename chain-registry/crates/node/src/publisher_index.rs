@@ -20,7 +20,8 @@ pub struct PublisherStats {
     /// Packages that were later revoked.
     pub revoked_count: u32,
     /// Stake in wei (managed by Validator/Publisher slashes and on-chain syncing).
-    pub stake_wei: u64,
+    /// Stored as `u128` (`ECA-23`) so stakes above `u64::MAX` wei (~18.44 CREG) cannot saturate.
+    pub stake_wei: u128,
     /// Wall-clock time of first-ever submission.
     pub first_seen_at: Option<DateTime<Utc>>,
     /// Days since first_seen_at (convenience field for reputation stage).
@@ -140,7 +141,7 @@ impl PublisherIndex {
             } => {
                 // Slashes reduce effective stake. Map validator_id to publisher.
                 if let Some(stats) = self.stats.get_mut(validator_id) {
-                    stats.stake_wei = stats.stake_wei.saturating_sub(*amount);
+                    stats.stake_wei = stats.stake_wei.saturating_sub(u128::from(*amount));
                 }
             }
 
@@ -193,14 +194,14 @@ impl PublisherIndex {
                 stats.revoked_count += 1;
                 tracing::info!(
                     "Publisher {} penalised: revocation of {}",
-                    &pubkey[..std::cmp::min(16, pubkey.len())],
-                    package_canonical,
+                    common::sanitize_for_terminal(&pubkey, 16),
+                    common::sanitize_for_terminal(package_canonical, 128),
                 );
             }
         } else {
             tracing::warn!(
                 "Revocation for '{}' has no known publisher in index",
-                package_canonical,
+                common::sanitize_for_terminal(package_canonical, 128),
             );
         }
     }
