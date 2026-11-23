@@ -113,14 +113,32 @@ pub fn build_zone_child_envs(
         &mut consensusd,
         &[
             "RUST_LOG",
-            "CREG_VALIDATOR_PRIVKEY",
+            // The names the node reads (`HotKeyRole::env_var`).
+            "CREG_VALIDATOR_KEY",
             "CREG_VALIDATOR_PQ_KEY",
+            "CREG_VALIDATOR_PRIVKEY_X25519",
+            "CREG_BRIDGE_KEY",
+            "CREG_GOVERNANCE_KEY",
             "CREG_L1_PRIVATE_KEY",
+            "CREG_SECRETS_BACKEND",
+            "CREG_VAULT_SECRET_PATH_VALIDATOR",
+            "CREG_VAULT_SECRET_PATH_VALIDATOR_PQ",
+            "CREG_VAULT_SECRET_FIELD",
             "VAULT_ADDR",
             "VAULT_TOKEN",
             "VAULT_NAMESPACE",
         ],
     );
+    // Legacy deployments set `CREG_VALIDATOR_PRIVKEY`, which the node never
+    // read; hand it over under the name it does read.
+    if !consensusd.contains_key("CREG_VALIDATOR_KEY") {
+        if let Some(legacy) = parent_env
+            .get("CREG_VALIDATOR_PRIVKEY")
+            .filter(|value| !value.is_empty())
+        {
+            consensusd.insert("CREG_VALIDATOR_KEY".into(), legacy.clone());
+        }
+    }
     consensusd.insert("CREG_DATA_DIR".into(), cfg.data_dir.clone());
     consensusd.insert("CREG_CHAIN_SPEC".into(), cfg.chain_spec.clone());
     consensusd.insert("CREG_NODE_ID".into(), cfg.node_id.clone());
@@ -161,6 +179,9 @@ pub fn build_zone_child_envs(
             "ANTHROPIC_API_KEY",
             "GEMINI_API_KEY",
             "OLLAMA_HOST",
+            // Lane C fetches committed tarballs itself (ADR-019 `ECA-03`).
+            "CREG_IPFS_URL",
+            "CREG_PRODUCTION",
         ],
     );
     agent_runner.insert("CREG_AGENT_IPC_ADDR".into(), cfg.agent_ipc_addr.clone());
@@ -402,8 +423,50 @@ mod tests {
         assert!(!envs.sandboxd.contains_key("CREG_GATEWAY_ADMIN_TOKEN"));
         assert!(!envs.agent_runner.contains_key("CREG_GATEWAY_ADMIN_TOKEN"));
 
-        assert!(envs.consensusd.contains_key("CREG_VALIDATOR_PRIVKEY"));
+        // The legacy name reaches consensus under the name the node reads.
+        assert_eq!(
+            envs.consensusd.get("CREG_VALIDATOR_KEY"),
+            Some(&"11".repeat(32))
+        );
+        assert!(!envs.consensusd.contains_key("CREG_VALIDATOR_PRIVKEY"));
         assert!(envs.agent_runner.contains_key("OPENAI_API_KEY"));
         assert!(envs.sandboxd.contains_key("CREG_SANDBOX_ENGINE"));
+    }
+
+    #[test]
+    fn node_key_names_reach_only_the_consensus_zone() {
+        let mut parent = BTreeMap::new();
+        for key in zone_ipc::CONSENSUS_SIGNING_SECRETS_ENV {
+            parent.insert((*key).to_string(), "44".repeat(32));
+        }
+        parent.insert("CREG_VALIDATOR_KEY".into(), "55".repeat(32));
+        parent.insert("CREG_IPFS_URL".into(), "http://127.0.0.1:5001".into());
+        let cfg = SupervisorConfig::from_parent_env(&parent);
+        let envs = build_zone_child_envs(&parent, &cfg);
+
+        // The current name wins over the legacy alias.
+        assert_eq!(
+            envs.consensusd.get("CREG_VALIDATOR_KEY"),
+            Some(&"55".repeat(32))
+        );
+        assert!(envs
+            .consensusd
+            .contains_key("CREG_VALIDATOR_PRIVKEY_X25519"));
+        for (zone, env, forbidden) in [
+            (ZoneId::Gateway, &envs.gateway, GATEWAY_FORBIDDEN_ENV),
+            (ZoneId::Sandbox, &envs.sandboxd, SANDBOX_FORBIDDEN_ENV),
+            (
+                ZoneId::AgentRunner,
+                &envs.agent_runner,
+                AGENT_RUNNER_FORBIDDEN_ENV,
+            ),
+        ] {
+            assert!(check_forbidden_env_btree(zone, env, forbidden).is_ok());
+        }
+        // Lane C fetches tarballs from the agent runner.
+        assert_eq!(
+            envs.agent_runner.get("CREG_IPFS_URL").map(String::as_str),
+            Some("http://127.0.0.1:5001")
+        );
     }
 }

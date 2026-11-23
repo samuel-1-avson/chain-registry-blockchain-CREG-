@@ -310,12 +310,7 @@ fn apply_finalized_pbft_block(
     state.publisher_index.apply_block(&block);
     state.on_block_committed(&block);
     let data_dir = state.config.data_dir.clone();
-    let ipfs_url = if state.config.ipfs_url.is_empty() {
-        None
-    } else {
-        Some(state.config.ipfs_url.clone())
-    };
-    crate::intelligence::schedule_for_block(&block, data_dir, ipfs_url);
+    crate::intelligence::schedule_for_block(&block, data_dir);
     Ok(())
 }
 
@@ -1958,15 +1953,9 @@ impl P2PNode {
                                                 s.publisher_index.apply_block(&final_block);
                                                 s.on_block_committed(&final_block);
                                                 let data_dir = s.config.data_dir.clone();
-                                                let ipfs_url = if s.config.ipfs_url.is_empty() {
-                                                    None
-                                                } else {
-                                                    Some(s.config.ipfs_url.clone())
-                                                };
                                                 crate::intelligence::schedule_for_block(
                                                     &final_block,
                                                     data_dir,
-                                                    ipfs_url,
                                                 );
                                             }
                                         }

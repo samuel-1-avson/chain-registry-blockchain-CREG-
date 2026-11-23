@@ -25,9 +25,28 @@ pub const ZONE_IPC_DOMAIN: &str = "creg-zone-ipc-v1";
 pub const MAX_ZONE_FRAME_BYTES: usize = 4 * 1024 * 1024;
 pub const ZONE_IPC_TOKEN_ENV: &str = "CREG_ZONE_IPC_TOKEN";
 
-pub const GATEWAY_FORBIDDEN_ENV: &[&str] = &[
+/// Every signing secret the consensus node reads, under the names it reads
+/// them (`chain_registry_secrets::HotKeyRole::env_var`, the shielded-bundle
+/// X25519 key) plus the legacy `CREG_VALIDATOR_PRIVKEY` alias. Only the
+/// consensus zone may hold these.
+pub const CONSENSUS_SIGNING_SECRETS_ENV: &[&str] = &[
+    "CREG_VALIDATOR_KEY",
     "CREG_VALIDATOR_PRIVKEY",
+    "CREG_VALIDATOR_PRIVKEY_X25519",
     "CREG_VALIDATOR_PQ_KEY",
+    "CREG_BRIDGE_KEY",
+    "CREG_GOVERNANCE_KEY",
+    "CREG_L1_PRIVATE_KEY",
+    "VAULT_TOKEN",
+];
+
+pub const GATEWAY_FORBIDDEN_ENV: &[&str] = &[
+    "CREG_VALIDATOR_KEY",
+    "CREG_VALIDATOR_PRIVKEY",
+    "CREG_VALIDATOR_PRIVKEY_X25519",
+    "CREG_VALIDATOR_PQ_KEY",
+    "CREG_BRIDGE_KEY",
+    "CREG_GOVERNANCE_KEY",
     "CREG_L1_PRIVATE_KEY",
     "VAULT_TOKEN",
     "OPENAI_API_KEY",
@@ -44,8 +63,12 @@ pub const CONSENSUS_FORBIDDEN_ENV: &[&str] = &[
 ];
 
 pub const SANDBOX_FORBIDDEN_ENV: &[&str] = &[
+    "CREG_VALIDATOR_KEY",
     "CREG_VALIDATOR_PRIVKEY",
+    "CREG_VALIDATOR_PRIVKEY_X25519",
     "CREG_VALIDATOR_PQ_KEY",
+    "CREG_BRIDGE_KEY",
+    "CREG_GOVERNANCE_KEY",
     "CREG_L1_PRIVATE_KEY",
     "VAULT_TOKEN",
     "OPENAI_API_KEY",
@@ -55,8 +78,12 @@ pub const SANDBOX_FORBIDDEN_ENV: &[&str] = &[
 ];
 
 pub const AGENT_RUNNER_FORBIDDEN_ENV: &[&str] = &[
+    "CREG_VALIDATOR_KEY",
     "CREG_VALIDATOR_PRIVKEY",
+    "CREG_VALIDATOR_PRIVKEY_X25519",
     "CREG_VALIDATOR_PQ_KEY",
+    "CREG_BRIDGE_KEY",
+    "CREG_GOVERNANCE_KEY",
     "CREG_L1_PRIVATE_KEY",
     "VAULT_TOKEN",
 ];
@@ -280,6 +307,12 @@ pub enum ZoneRequest {
         static_findings_json: String,
         initial_kernel_graph_json: Option<String>,
     },
+    /// Lane C (ADR-019 `ECA-03`): generate the non-binding intelligence
+    /// report for a committed `ChainRecord`. The agent runner fetches the
+    /// tarball itself (bounded) and checks it against `content_hash`.
+    GenerateIntelligenceReport {
+        record_json: String,
+    },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -298,6 +331,10 @@ pub enum ZoneResponse {
         sandbox_result_json: String,
     },
     AgentInvestigationResult {
+        report_json: String,
+    },
+    /// `PackageIntelligenceReport` JSON answering `GenerateIntelligenceReport`.
+    IntelligenceReportResult {
         report_json: String,
     },
     Error {
@@ -840,5 +877,26 @@ mod tests {
         assert!(
             check_forbidden_env_map(ZoneId::Sandbox, &leaked_key, SANDBOX_FORBIDDEN_ENV).is_err()
         );
+
+        // Every signing secret the node reads, under the name it reads it, is
+        // refused outside the consensus zone (the key the node actually loads
+        // is `CREG_VALIDATOR_KEY`).
+        for &secret in CONSENSUS_SIGNING_SECRETS_ENV {
+            let leaked = vec![(secret, "deadbeef")];
+            for (zone, list) in [
+                (ZoneId::Gateway, GATEWAY_FORBIDDEN_ENV),
+                (ZoneId::Sandbox, SANDBOX_FORBIDDEN_ENV),
+                (ZoneId::AgentRunner, AGENT_RUNNER_FORBIDDEN_ENV),
+            ] {
+                assert!(
+                    check_forbidden_env_map(zone, &leaked, list).is_err(),
+                    "{secret} must be refused in {zone}"
+                );
+            }
+            assert!(
+                check_forbidden_env_map(ZoneId::Consensus, &leaked, CONSENSUS_FORBIDDEN_ENV)
+                    .is_ok()
+            );
+        }
     }
 }

@@ -15,6 +15,7 @@ pub mod ai_agent;
 pub mod bundle;
 pub mod diff;
 pub mod intelligence;
+pub mod ipfs_fetch;
 pub mod kernel_sandbox;
 pub mod llm;
 pub mod manifest_audit;

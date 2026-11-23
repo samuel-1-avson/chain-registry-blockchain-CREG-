@@ -1,6 +1,6 @@
 //! Zone 2 Consensus & Signing Core Daemon (`creg-consensusd`, `ADR-018` Increment 6).
 //!
-//! Holds validator signing identity (`CREG_VALIDATOR_PRIVKEY`, `CREG_VALIDATOR_PQ_KEY`)
+//! Holds validator signing identity (`CREG_VALIDATOR_KEY`, `CREG_VALIDATOR_PQ_KEY`)
 //! and P2P/PBFT state, exposes ONLY an authenticated `zone-ipc` listener (never
 //! a public HTTP port directly), and refuses startup if LLM API keys are present (`INV-01`).
 

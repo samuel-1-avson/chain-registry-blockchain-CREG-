@@ -6,7 +6,7 @@
 //! untrusted package payloads in Zone 4.
 
 use anyhow::{bail, Context, Result};
-use common::{Finding, PackageId, PackageManifest};
+use common::{ChainRecord, Finding, PackageId, PackageIntelligenceReport, PackageManifest};
 use sha2::{Digest, Sha256};
 use std::future::Future;
 use std::pin::Pin;
@@ -90,6 +90,40 @@ impl SandboxReplayExecutor for ZoneIpcReplayExecutor {
     }
 }
 
+/// Lane C tarball bound (matches the former in-node worker).
+pub const MAX_INTELLIGENCE_TARBALL_BYTES: u64 = 512 * 1024 * 1024;
+pub const INTELLIGENCE_IPFS_TIMEOUT_SECS: u64 = 300;
+/// IPFS API used for Lane C fetches.
+pub const INTELLIGENCE_IPFS_URL_ENV: &str = "CREG_IPFS_URL";
+
+/// Lane C (ADR-019 `ECA-03`): fetch the committed tarball with the shared
+/// bounded fetcher, refuse bytes that do not match the record, and run the
+/// non-binding intelligence report here in Zone 4 instead of in consensus.
+pub async fn generate_intelligence_report(
+    record: &ChainRecord,
+    ipfs_url: Option<&str>,
+) -> Result<PackageIntelligenceReport> {
+    if record.shielded {
+        bail!("shielded packages are not analysed by Lane C");
+    }
+    let ipfs_url = ipfs_url
+        .map(str::trim)
+        .filter(|url| !url.is_empty())
+        .with_context(|| format!("{INTELLIGENCE_IPFS_URL_ENV} is not set for creg-agent-runner"))?;
+    let tarball = validator::ipfs_fetch::fetch_ipfs_bounded(
+        &record.ipfs_cid,
+        ipfs_url,
+        MAX_INTELLIGENCE_TARBALL_BYTES,
+        INTELLIGENCE_IPFS_TIMEOUT_SECS,
+    )
+    .await?;
+    let actual = hex::encode(Sha256::digest(&tarball));
+    if !actual.eq_ignore_ascii_case(record.content_hash.trim()) {
+        bail!("fetched tarball does not match the record's content hash");
+    }
+    Ok(validator::intelligence::generate_report(record, &tarball).await)
+}
+
 pub async fn handle_agent_request(
     sender: ZoneId,
     req: ZoneRequest,
@@ -100,6 +134,39 @@ pub async fn handle_agent_request(
             zone: ZoneId::AgentRunner,
             status: "ok".into(),
         },
+        ZoneRequest::GenerateIntelligenceReport { record_json } => {
+            if sender != ZoneId::Consensus {
+                return ZoneResponse::Error {
+                    code: 403,
+                    message: format!(
+                        "only consensus zone may request intelligence reports (got '{sender}')"
+                    ),
+                };
+            }
+            let record: ChainRecord = match serde_json::from_str(&record_json) {
+                Ok(record) => record,
+                Err(e) => {
+                    return ZoneResponse::Error {
+                        code: 400,
+                        message: format!("invalid record_json: {e}"),
+                    }
+                }
+            };
+            let ipfs_url = std::env::var(INTELLIGENCE_IPFS_URL_ENV).ok();
+            match generate_intelligence_report(&record, ipfs_url.as_deref()).await {
+                Ok(report) => match serde_json::to_string(&report) {
+                    Ok(report_json) => ZoneResponse::IntelligenceReportResult { report_json },
+                    Err(e) => ZoneResponse::Error {
+                        code: 500,
+                        message: format!("serialize PackageIntelligenceReport failed: {e}"),
+                    },
+                },
+                Err(e) => ZoneResponse::Error {
+                    code: 502,
+                    message: format!("intelligence report failed: {e:#}"),
+                },
+            }
+        }
         ZoneRequest::RunAgentInvestigation {
             package_canonical,
             content_hash,
@@ -268,6 +335,53 @@ mod tests {
                     .is_err()
             );
         }
+    }
+
+    fn test_runner() -> Arc<AgentRunner> {
+        Arc::new(AgentRunner::new(Arc::new(LlmProxy::new_http(
+            ValidatorAiConfig::default(),
+        ))))
+    }
+
+    fn lane_c_record(shielded: bool) -> ChainRecord {
+        ChainRecord {
+            id: PackageId::new("npm", "lane-c", "1.0.0"),
+            content_hash: hex::encode(Sha256::digest(b"tarball")),
+            ipfs_cid: "bafylanec".into(),
+            shielded,
+            ..ChainRecord::default()
+        }
+    }
+
+    #[tokio::test]
+    async fn lane_c_reports_are_consensus_only_and_fail_closed() {
+        let request = ZoneRequest::GenerateIntelligenceReport {
+            record_json: serde_json::to_string(&lane_c_record(false)).unwrap(),
+        };
+        // Only the consensus zone may ask.
+        let denied = handle_agent_request(ZoneId::Gateway, request.clone(), test_runner()).await;
+        assert!(matches!(denied, ZoneResponse::Error { code: 403, .. }));
+        // Malformed records are refused before any fetch.
+        let malformed = handle_agent_request(
+            ZoneId::Consensus,
+            ZoneRequest::GenerateIntelligenceReport {
+                record_json: "{".into(),
+            },
+            test_runner(),
+        )
+        .await;
+        assert!(matches!(malformed, ZoneResponse::Error { code: 400, .. }));
+
+        // Without an IPFS API there is no report, and shielded ciphertext
+        // is never analysed.
+        let error = generate_intelligence_report(&lane_c_record(false), None)
+            .await
+            .unwrap_err();
+        assert!(format!("{error:#}").contains(INTELLIGENCE_IPFS_URL_ENV));
+        let error = generate_intelligence_report(&lane_c_record(true), Some("http://127.0.0.1:1"))
+            .await
+            .unwrap_err();
+        assert!(format!("{error:#}").contains("shielded"));
     }
 
     #[tokio::test]

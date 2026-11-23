@@ -1416,6 +1416,18 @@ pub mod paths {
         ),
     )]
     pub async fn v4_events() {}
+
+    /// Non-binding Lane C summary for a package version: status, 0..=100
+    /// score, closed risk tier and degraded flag. LLM-authored text is not
+    /// served publicly (ADR-019 §11 #7); reports come from `creg-agent-runner`.
+    #[utoipa::path(
+        get,
+        path = "/v1/public/packages/{canonical}/intelligence",
+        tag = "packages",
+        params(("canonical" = String, Path, description = "Canonical package id, percent-encoded")),
+        responses((status = 200, body = registry_view::IntelligenceSummaryV1)),
+    )]
+    pub async fn package_intelligence() {}
 }
 
 // ─── Security schemes ─────────────────────────────────────────────────────────
@@ -1519,6 +1531,7 @@ impl Modify for SecurityAddon {
         paths::v4_package_witnesses,
         paths::v4_quarantine,
         paths::v4_events,
+        paths::package_intelligence,
     ),
     components(schemas(
         ApiError,
@@ -1582,6 +1595,9 @@ impl Modify for SecurityAddon {
         registry_view::QuarantineListV1,
         registry_view::SseEnvelopeV2,
         registry_view::SseEventKindV2,
+        registry_view::IntelligenceSummaryV1,
+        registry_view::IntelligenceStatusV1,
+        registry_view::IntelligenceRiskTierV1,
     )),
     modifiers(&SecurityAddon),
 )]
@@ -1612,8 +1628,16 @@ mod tests {
             "WitnessBundleV1",
             "QuarantineListV1",
             "SseEnvelopeV2",
+            "IntelligenceSummaryV1",
         ] {
             assert!(schemas[schema].is_object(), "missing schema {schema}");
+        }
+        // The public Lane C schema has no free-text report fields.
+        let intelligence = schemas["IntelligenceSummaryV1"]["properties"]
+            .as_object()
+            .expect("intelligence properties");
+        for prose in ["sections", "agent_trace", "package_summary", "model_used"] {
+            assert!(!intelligence.contains_key(prose), "{prose} is public");
         }
         // The SSE kind enum is closed: exactly the registry-view variants.
         let kinds = schemas["SseEventKindV2"]["enum"]

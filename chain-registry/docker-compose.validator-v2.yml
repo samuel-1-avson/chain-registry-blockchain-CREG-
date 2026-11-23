@@ -61,7 +61,9 @@ services:
       CREG_SANDBOX_IPC_ADDR: unix:///run/creg-ipc/sandbox.sock
       CREG_AGENT_IPC_ADDR: unix:///run/creg-ipc/agent.sock
       CREG_ZONE_IPC_TOKEN: ${CREG_ZONE_IPC_TOKEN}
-      CREG_VALIDATOR_PRIVKEY: ${CREG_VALIDATOR_PRIVKEY}
+      # The node reads CREG_VALIDATOR_KEY; CREG_VALIDATOR_PRIVKEY is the old
+      # name in this file and is accepted as a fallback.
+      CREG_VALIDATOR_KEY: ${CREG_VALIDATOR_KEY:-${CREG_VALIDATOR_PRIVKEY:-}}
       CREG_VALIDATOR_PQ_KEY: ${CREG_VALIDATOR_PQ_KEY}
       VAULT_ADDR: ${VAULT_ADDR:-}
       VAULT_TOKEN: ${VAULT_TOKEN:-}
@@ -123,6 +125,8 @@ services:
       ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
       GEMINI_API_KEY: ${GEMINI_API_KEY:-}
       OLLAMA_HOST: ${OLLAMA_HOST:-}
+      # Lane C intelligence reports fetch committed tarballs here (ADR-019).
+      CREG_IPFS_URL: ${CREG_IPFS_URL:-}
     volumes:
       - creg_zone_ipc:/run/creg-ipc:rw
     networks:
