@@ -145,8 +145,7 @@ pub async fn run(
 }
 
 fn parse_pkg(raw: &str) -> (String, Option<String>) {
-    if raw.starts_with('@') {
-        let rest = &raw[1..];
+    if let Some(rest) = raw.strip_prefix('@') {
         if let Some(idx) = rest.rfind('@') {
             return (
                 format!("@{}", &rest[..idx]),

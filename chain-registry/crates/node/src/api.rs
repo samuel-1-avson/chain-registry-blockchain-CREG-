@@ -52,6 +52,7 @@ use crate::{
 use utoipa::OpenApi;
 use utoipa_swagger_ui::SwaggerUi;
 
+#[cfg(test)]
 pub(crate) use crate::package_admission::verify_publish_sig;
 
 const VALIDATOR_TRANSITION_MAX_BODY_BYTES: usize = 1024 * 1024;
@@ -1016,7 +1017,6 @@ async fn query_total_rewards_distributed(
     rpc_url: &str,
     rewards_addr: &str,
 ) -> anyhow::Result<u128> {
-    use alloy::primitives::Address;
     use alloy::sol;
 
     sol! {
@@ -1033,7 +1033,6 @@ async fn query_total_rewards_distributed(
 }
 
 async fn query_rewards_pool(rpc_url: &str, pinning_addr: &str) -> anyhow::Result<u128> {
-    use alloy::primitives::Address;
     use alloy::sol;
 
     sol! {
@@ -1275,7 +1274,7 @@ fn normalize_recovery_id(v: u8) -> Result<RecoveryId, String> {
 }
 
 fn ethereum_personal_message_digest(message: &str) -> alloy::primitives::B256 {
-    let prefix = format!("\x19Ethereum Signed Message:\n{}", message.as_bytes().len());
+    let prefix = format!("\x19Ethereum Signed Message:\n{}", message.len());
     let mut bytes = Vec::with_capacity(prefix.len() + message.len());
     bytes.extend_from_slice(prefix.as_bytes());
     bytes.extend_from_slice(message.as_bytes());
@@ -2064,6 +2063,7 @@ fn metrics_history_range(range: &str) -> Option<(u64, u64)> {
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 async fn query_prometheus_history(
     client: &reqwest::Client,
     prometheus_url: &str,
@@ -3088,7 +3088,7 @@ async fn list_blocks_paginated(
                 .header("X-Limit", limit.to_string());
 
             let blocks_with_hash: Vec<serde_json::Value> =
-                blocks.iter().map(|b| block_to_json(b)).collect();
+                blocks.iter().map(block_to_json).collect();
             let body = serde_json::json!({
                 "blocks": blocks_with_hash,
                 "tip_height": tip,
@@ -3527,7 +3527,7 @@ async fn get_validator_profile(
         .iter()
         .filter(|b| b.header.proposer_id.eq_ignore_ascii_case(proposer_id))
         .take(25)
-        .map(|b| block_to_json(b))
+        .map(block_to_json)
         .collect();
 
     Json(serde_json::json!({
@@ -3744,15 +3744,15 @@ async fn search_handler(
                 break;
             }
             let pubkey = &stats.pubkey;
-            if pubkey.to_ascii_lowercase().contains(&q_lower) {
-                if !matches.iter().any(|m| m.href.contains(pubkey)) {
-                    matches.push(SearchMatch {
-                        kind: "publisher",
-                        href: format!("/publisher/{}", urlencoding::encode(pubkey)),
-                        title: pubkey.clone(),
-                        subtitle: "publisher".into(),
-                    });
-                }
+            if pubkey.to_ascii_lowercase().contains(&q_lower)
+                && !matches.iter().any(|m| m.href.contains(pubkey))
+            {
+                matches.push(SearchMatch {
+                    kind: "publisher",
+                    href: format!("/publisher/{}", urlencoding::encode(pubkey)),
+                    title: pubkey.clone(),
+                    subtitle: "publisher".into(),
+                });
             }
         }
     }
@@ -3920,6 +3920,7 @@ async fn rotate_publisher_key(
 // Delegate and transfer are authorized by both controllers over a
 // domain-separated event. Recovery requires a v2 event carrying an
 // independently verified, prior-set-quorum namespace-authority certificate.
+#[allow(clippy::large_enum_variant)]
 #[derive(Deserialize)]
 #[serde(untagged)]
 enum NamespaceLifecycleSubmission {
@@ -4461,7 +4462,7 @@ async fn attest_namespace_authority(
         return bad_request("Authority ecosystem does not match the challenge namespace");
     }
 
-    let (policy, mut validators, validator_id, validator_pubkey, validator_private_key, data_dir) = {
+    let (policy, validators, validator_id, validator_pubkey, validator_private_key, data_dir) = {
         let node = state.read().await;
         if !node.config.is_validator {
             return (
@@ -4842,7 +4843,7 @@ async fn consensus_state(State(state): State<SharedState>) -> impl IntoResponse 
                 "collecting-votes"
             };
             let age_ms = now
-                .signed_duration_since(round.first_vote_at.clone())
+                .signed_duration_since(round.first_vote_at)
                 .num_milliseconds();
             votes.sort_by(|left, right| left.validator_id.cmp(&right.validator_id));
 
@@ -4862,7 +4863,7 @@ async fn consensus_state(State(state): State<SharedState>) -> impl IntoResponse 
         .collect();
 
     // Sort descending by vote count so the most active round is first.
-    active_rounds.sort_by(|a, b| b.vote_count.cmp(&a.vote_count));
+    active_rounds.sort_by_key(|r| std::cmp::Reverse(r.vote_count));
 
     // Cap to the 10 most active rounds to keep the response bounded.
     active_rounds.truncate(10);
@@ -5141,6 +5142,7 @@ async fn receive_vote(
 // ─── Appeals & AAA ───────────────────────────────────────────────────────────
 
 #[derive(Deserialize)]
+#[allow(dead_code)]
 pub struct AuditSubmission {
     pub approved: bool,
     pub proof: String,
@@ -5241,7 +5243,7 @@ async fn richlist(State(state): State<SharedState>) -> impl IntoResponse {
         .collect();
 
     // Sort descending by stake
-    top.sort_by(|a, b| b.stake.cmp(&a.stake));
+    top.sort_by_key(|v| std::cmp::Reverse(v.stake));
 
     // Truncate to top 500
     top.truncate(500);
@@ -5304,10 +5306,7 @@ mod tests {
         );
         assert_eq!(
             validator_transition_record_status(&RecordAuthenticatedError::Persistence {
-                source: anyhow::Error::new(std::io::Error::new(
-                    std::io::ErrorKind::Other,
-                    "disk unavailable",
-                )),
+                source: anyhow::Error::new(std::io::Error::other("disk unavailable")),
             }),
             StatusCode::INTERNAL_SERVER_ERROR
         );
@@ -5573,6 +5572,7 @@ mod tests {
         event
     }
 
+    #[allow(clippy::too_many_arguments)]
     fn signed_namespace_lifecycle_event_v2(
         chain_id: &str,
         genesis_hash: &str,
@@ -6678,7 +6678,7 @@ mod tests {
     async fn private_api_acl_fails_closed_without_operator_secret() -> anyhow::Result<()> {
         let _env_lock = api_env_lock().lock().await;
         let _api_key = EnvRestore::remove(OPERATOR_API_KEY_ENV);
-        let _operator_pubkey = EnvRestore::set(OPERATOR_PUBKEY_ENV, &"ab".repeat(32));
+        let _operator_pubkey = EnvRestore::set(OPERATOR_PUBKEY_ENV, "ab".repeat(32));
         let (state, _tempdir, p2p_handle, tx_sender, _tx_receiver) = make_test_state(0).await?;
         let event_bus = new_event_bus();
         let app = router(

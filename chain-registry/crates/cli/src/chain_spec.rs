@@ -120,14 +120,12 @@ pub fn validate_spec(
 
     let computed = spec.compute_genesis_hash()?;
     let embedded = spec.genesis_hash.trim();
-    if !embedded.is_empty() {
-        if normalize_hash(embedded) != normalize_hash(&computed) {
-            bail!(
-                "genesis_hash mismatch: spec declares {} but compute_genesis_hash() yields {}",
-                embedded,
-                computed
-            );
-        }
+    if !embedded.is_empty() && normalize_hash(embedded) != normalize_hash(&computed) {
+        bail!(
+            "genesis_hash mismatch: spec declares {} but compute_genesis_hash() yields {}",
+            embedded,
+            computed
+        );
     }
     spec.validate_consensus_identity()?;
 

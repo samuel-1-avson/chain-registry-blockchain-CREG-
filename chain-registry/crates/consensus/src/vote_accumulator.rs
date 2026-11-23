@@ -503,6 +503,12 @@ pub struct VoteAccumulator {
     rounds: HashMap<String, PackageVoteState>,
 }
 
+impl Default for VoteAccumulator {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl VoteAccumulator {
     pub fn new() -> Self {
         Self {
@@ -575,7 +581,7 @@ impl VoteAccumulator {
         match phase {
             "prepare" => state
                 .record_prepare(vote, block_hash, skip_verification)
-                .map(|quorum| if quorum { None } else { None }),
+                .map(|_quorum| None),
             "commit" => state.record_commit(vote, block_hash, skip_verification),
             _ => {
                 tracing::warn!("Unknown vote phase: {}", phase);

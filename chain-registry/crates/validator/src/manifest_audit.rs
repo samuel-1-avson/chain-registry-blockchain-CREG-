@@ -694,8 +694,8 @@ fn audit_setup_py_or_cfg(
             let trimmed = line.trim_start();
             if trimmed.starts_with("name") {
                 let n = trimmed
-                    .splitn(2, '=')
-                    .nth(1)
+                    .split_once('=')
+                    .map(|x| x.1)
                     .unwrap_or("")
                     .trim()
                     .trim_matches(['"', '\'', ',', ' ']);
@@ -704,8 +704,8 @@ fn audit_setup_py_or_cfg(
                 }
             } else if trimmed.starts_with("version") && pkg_version.is_empty() {
                 let v = trimmed
-                    .splitn(2, '=')
-                    .nth(1)
+                    .split_once('=')
+                    .map(|x| x.1)
                     .unwrap_or("")
                     .trim()
                     .trim_matches(['"', '\'', ',', ' ']);

@@ -112,6 +112,7 @@ impl Default for RiskAggregator {
 }
 
 impl RiskAggregator {
+    #[allow(clippy::too_many_arguments)]
     pub fn summarize(
         &self,
         package: &PackageId,

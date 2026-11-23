@@ -48,7 +48,7 @@ mod explorer;
 mod governance_api;
 mod grpc;
 mod metrics;
-mod p2p_rate_limit;
+pub mod p2p_rate_limit;
 mod pidlock;
 mod proof;
 mod sync;

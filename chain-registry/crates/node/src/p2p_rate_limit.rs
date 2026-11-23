@@ -122,7 +122,7 @@ impl PeerBucket {
     /// Check if peer is currently banned.
     fn is_banned(&self) -> bool {
         self.banned_until
-            .map_or(false, |until| Instant::now() < until)
+            .is_some_and(|until| Instant::now() < until)
     }
 
     /// Ban the peer for the specified duration.
@@ -145,7 +145,7 @@ pub struct P2PRateLimiter {
 }
 
 /// Lock a mutex, recovering gracefully if it was poisoned.
-fn lock_peers<T>(mutex: &Mutex<T>) -> std::sync::MutexGuard<T> {
+fn lock_peers<T>(mutex: &Mutex<T>) -> std::sync::MutexGuard<'_, T> {
     match mutex.lock() {
         Ok(guard) => guard,
         Err(poisoned) => {
@@ -314,7 +314,7 @@ impl P2PRateLimiter {
     /// Check if a peer is currently banned.
     pub fn is_banned(&self, peer: PeerId) -> bool {
         let peers = lock_peers(&self.peers);
-        peers.get(&peer).map_or(false, |b| b.is_banned())
+        peers.get(&peer).is_some_and(|b| b.is_banned())
     }
 
     /// Get ban info for a peer.

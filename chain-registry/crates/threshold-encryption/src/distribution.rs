@@ -47,7 +47,7 @@ pub struct ShieldedPackageMetadata {
 }
 
 /// Access policy for shielded packages
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct AccessPolicy {
     /// List of authorized decryptor addresses
     pub authorized_decryptors: Vec<String>,
@@ -59,18 +59,6 @@ pub struct AccessPolicy {
     pub expires_at: Option<u64>,
     /// Maximum number of decryptions allowed
     pub max_decryptions: Option<u32>,
-}
-
-impl Default for AccessPolicy {
-    fn default() -> Self {
-        Self {
-            authorized_decryptors: vec![],
-            organization_only: false,
-            organization_id: None,
-            expires_at: None,
-            max_decryptions: None,
-        }
-    }
 }
 
 /// Distribution coordinator for key shares
@@ -125,8 +113,7 @@ impl ShareDistributor {
 
         // Encrypt and distribute shares
         let mut distributed = Vec::new();
-        for (i, (share, validator_id)) in shares.iter().zip(selected_validators.iter()).enumerate()
-        {
+        for (share, validator_id) in shares.iter().zip(selected_validators.iter()) {
             let public_key = self.validator_keys.get(validator_id).ok_or_else(|| {
                 ThresholdError::InvalidShare(format!(
                     "No public key for validator {}",
@@ -165,7 +152,7 @@ impl ShareDistributor {
     /// Select validators to receive shares based on access policy
     fn select_validators(
         &self,
-        access_policy: &AccessPolicy,
+        _access_policy: &AccessPolicy,
     ) -> Result<Vec<String>, ThresholdError> {
         let all_validators: Vec<String> = self.validator_keys.keys().cloned().collect();
 

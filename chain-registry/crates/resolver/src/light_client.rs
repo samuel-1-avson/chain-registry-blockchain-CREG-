@@ -678,7 +678,7 @@ pub fn build_merkle_proof(block: &Block, tx_index: usize) -> Result<MerkleProof>
 
     while level.len() > 1 {
         // Pad to even length.
-        if level.len() % 2 != 0 {
+        if !level.len().is_multiple_of(2) {
             level.push(
                 level
                     .last()
@@ -687,10 +687,14 @@ pub fn build_merkle_proof(block: &Block, tx_index: usize) -> Result<MerkleProof>
             );
         }
 
-        let sibling_idx = if idx % 2 == 0 { idx + 1 } else { idx - 1 };
+        let sibling_idx = if idx.is_multiple_of(2) {
+            idx + 1
+        } else {
+            idx - 1
+        };
         path.push(MerkleStep {
             sibling_hash: level[sibling_idx].clone(),
-            is_right: idx % 2 == 0,
+            is_right: idx.is_multiple_of(2),
         });
 
         // Build next level.

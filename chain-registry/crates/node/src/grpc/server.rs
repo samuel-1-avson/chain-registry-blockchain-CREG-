@@ -1,5 +1,6 @@
 // crates/node/src/grpc/server.rs
 // Implementation of the gRPC Services defined in node.proto.
+#![allow(dead_code)] // gRPC server handlers invoked by creg-node main binary.
 
 use futures::Stream;
 use sha2::Digest;
@@ -26,6 +27,7 @@ use common::proto::{
 /// ISSUE-011 / CR-02 / ADR-009: leftover publisher Groth16 fields must be
 /// empty/zero. Ignore-and-admit would still let placeholder proofs ride the
 /// wire; reject so admission cannot be mistaken for ZK qualification.
+#[allow(clippy::result_large_err)]
 fn reject_retired_publisher_zk_attestation(req: &SubmitRequest) -> Result<(), Status> {
     if req.publisher_attestation_proof.is_empty()
         && req.claimed_static_analysis_score == 0
@@ -218,6 +220,7 @@ impl RegistryService for MyRegistry {
     }
 }
 
+#[allow(clippy::result_large_err)]
 fn parse_submit_request_to_publish_request(
     req: SubmitRequest,
 ) -> Result<common::PublishRequest, Status> {
@@ -306,7 +309,6 @@ fn parse_submit_request_to_publish_request(
         publisher_authorization_version: req.publisher_authorization_version as u16,
         ownership_proof,
         namespace_authority_certificate,
-        ..Default::default()
     })
 }
 
@@ -341,6 +343,7 @@ pub struct MyWatcher {
     watcher_slots: Arc<Semaphore>,
 }
 
+#[allow(dead_code)]
 impl MyWatcher {
     pub fn new(event_bus: EventBus) -> Self {
         Self::with_max_watchers(event_bus, MAX_GRPC_WATCHERS)

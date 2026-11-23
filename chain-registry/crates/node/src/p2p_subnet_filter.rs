@@ -7,7 +7,7 @@
 use libp2p::{multiaddr::Protocol, Multiaddr, PeerId};
 use std::{
     collections::{HashMap, HashSet},
-    net::{IpAddr, Ipv4Addr, Ipv6Addr},
+    net::IpAddr,
 };
 
 /// Default maximum concurrent active connections per /24 (IPv4) or /48 (IPv6) subnet

@@ -1,16 +1,16 @@
 // crates/node/src/bridge.rs
 // Legacy research bridge. Production uses witnessed log checkpoints; this
 // module exits unless explicitly enabled in a development environment.
+#![allow(dead_code)]
 
 use crate::NodeState;
-use alloy::sol_types::SolCall;
 use alloy::{
     network::EthereumWallet,
     providers::{Provider, ProviderBuilder},
     signers::local::PrivateKeySigner,
     sol,
 };
-use common::{PackageStatus, Transaction};
+use common::PackageStatus;
 use sha2::Digest;
 use std::sync::Arc;
 use tokio::sync::RwLock;
@@ -191,7 +191,7 @@ pub async fn run(state: Arc<RwLock<NodeState>>) {
 }
 
 async fn tick(state: Arc<RwLock<NodeState>>, last_height: &mut u64) -> anyhow::Result<()> {
-    let (rpc_url, registry_addr, governance_addr, priv_key_opt, current_tip, data_dir) = {
+    let (rpc_url, registry_addr, governance_addr, priv_key_opt, current_tip, _data_dir) = {
         let s = state.read().await;
         (
             s.config.eth_rpc_url.clone(),
@@ -235,7 +235,7 @@ async fn tick(state: Arc<RwLock<NodeState>>, last_height: &mut u64) -> anyhow::R
 
     let contract_addr = registry_addr.parse()?;
     let contract = IRegistry::new(contract_addr, &provider);
-    let governance_contract = IGovernance::new(governance_addr.parse()?, &provider);
+    let _governance_contract = IGovernance::new(governance_addr.parse()?, &provider);
 
     // ── Rollup Batching ──────────────────────────────────────────────────────
     let mut batch_transactions = Vec::new();
@@ -289,7 +289,7 @@ async fn tick(state: Arc<RwLock<NodeState>>, last_height: &mut u64) -> anyhow::R
     let mut state_hasher = sha2::Sha256::new();
     state_hasher.update(prev_root);
     state_hasher.update(data_root);
-    let next_root: [u8; 32] = state_hasher.finalize().into();
+    let _next_root: [u8; 32] = state_hasher.finalize().into();
 
     // Legacy Groth16 checkpointing circuits are retired (ADR-018 / VNA-22).
     // Refuse rollup batch submission before generating any unverified proof.
@@ -307,7 +307,7 @@ fn merkle_root(leaves: &[[u8; 32]]) -> [u8; 32] {
     }
     let mut current: Vec<[u8; 32]> = leaves.to_vec();
     while current.len() > 1 {
-        if current.len() % 2 != 0 {
+        if !current.len().is_multiple_of(2) {
             // Duplicate last leaf for odd length (standard Merkle padding).
             if let Some(last) = current.last().copied() {
                 current.push(last);

@@ -234,7 +234,7 @@ pub async fn init(
         stem[p + 1..]
             .chars()
             .next()
-            .map_or(false, |c| c.is_ascii_digit())
+            .is_some_and(|c| c.is_ascii_digit())
     }) {
         (&stem[..dash_pos], &stem[dash_pos + 1..])
     } else {

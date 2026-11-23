@@ -402,7 +402,7 @@ async fn start_node(mode: &str) -> Result<()> {
     let compose_file = format!("docker-compose.{}yml", mode);
 
     let status = std::process::Command::new("docker-compose")
-        .args(&["-f", &compose_file, "up", "-d"])
+        .args(["-f", &compose_file, "up", "-d"])
         .status()?;
 
     if status.success() {

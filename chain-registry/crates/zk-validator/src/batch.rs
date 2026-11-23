@@ -199,6 +199,7 @@ fn keys_dir() -> PathBuf {
         .unwrap_or_else(|_| PathBuf::from("circuits"))
 }
 
+#[allow(clippy::type_complexity)]
 fn load_or_generate_keys() -> Result<Arc<(ProvingKey<Bn254>, VerifyingKey<Bn254>)>, ZkError> {
     if let Some(arc) = BATCH_KEYS.get() {
         return Ok(Arc::clone(arc));

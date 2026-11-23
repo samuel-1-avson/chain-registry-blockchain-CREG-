@@ -29,10 +29,7 @@
 
 use anyhow::{Context, Result};
 use common::{Block, ChainRecord, PackageStatus, Transaction};
-use sqlx::{postgres::PgQueryResult, PgPool};
-use std::sync::Arc;
-use tokio::sync::RwLock;
-use tracing::{info, warn};
+use sqlx::PgPool;
 
 pub mod schema;
 pub mod sync_worker;
@@ -109,7 +106,7 @@ pub async fn apply_block(pool: &PgPool, block: &Block) -> Result<()> {
          ON CONFLICT (height) DO NOTHING",
     )
     .bind(block.header.height as i64)
-    .bind(&block.hash())
+    .bind(block.hash())
     .bind(&block.header.prev_hash)
     .bind(&block.header.merkle_root)
     .bind(&block.header.proposer_id)

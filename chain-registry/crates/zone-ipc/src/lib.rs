@@ -342,7 +342,7 @@ pub fn decode_b64(input: &str) -> Result<Vec<u8>> {
         }
     }
     let clean: Vec<u8> = input.bytes().filter(|b| !b.is_ascii_whitespace()).collect();
-    if clean.len() % 4 != 0 {
+    if !clean.len().is_multiple_of(4) {
         bail!("invalid base64 length {}", clean.len());
     }
     let mut out = Vec::with_capacity((clean.len() / 4) * 3);

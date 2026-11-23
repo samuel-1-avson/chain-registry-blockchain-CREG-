@@ -930,7 +930,7 @@ impl AuthorityAdapterRequestV2 {
             ));
         }
         if self.evidence_hex.is_empty()
-            || self.evidence_hex.len() % 2 != 0
+            || !self.evidence_hex.len().is_multiple_of(2)
             || self.evidence_hex.len() / 2 > max_evidence_bytes
             || self.evidence_hex.len() / 2 > HARD_MAX_EVIDENCE_BYTES
         {
@@ -969,7 +969,7 @@ impl AuthorityAdapterRequestV2 {
             ));
         }
         if self.artifact_hex.is_empty()
-            || self.artifact_hex.len() % 2 != 0
+            || !self.artifact_hex.len().is_multiple_of(2)
             || self.artifact_hex.len() / 2 > max_artifact_bytes
             || self.artifact_hex.len() / 2 > HARD_MAX_ARTIFACT_BYTES
         {
@@ -1515,7 +1515,7 @@ fn stream_hex_payload_digest(
     hard_max_bytes: usize,
     algorithm: ArtifactDigestAlgorithm,
 ) -> Result<String, HexPayloadDigestError> {
-    if value.is_empty() || value.len() % 2 != 0 {
+    if value.is_empty() || !value.len().is_multiple_of(2) {
         return Err(HexPayloadDigestError::Encoding);
     }
     let byte_len = value.len() / 2;

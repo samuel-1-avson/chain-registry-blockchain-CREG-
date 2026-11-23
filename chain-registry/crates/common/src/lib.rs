@@ -21,6 +21,7 @@ pub mod verdict;
 pub mod vote_v4;
 
 /// gRPC and Protobuf definitions (Generated Choice)
+#[allow(clippy::large_enum_variant, clippy::result_large_err)]
 pub mod proto {
     tonic::include_proto!("node.v1");
 }
@@ -270,6 +271,7 @@ impl SignedRevocationRequest {
     }
 }
 
+#[allow(clippy::large_enum_variant)]
 #[derive(serde::Serialize, serde::Deserialize, Clone, Debug)]
 pub enum GossipMessage {
     PublishRequest(PublishRequest),

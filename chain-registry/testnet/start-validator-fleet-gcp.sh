@@ -116,13 +116,10 @@ if [[ "$use_prebuilt" -eq 0 ]]; then
   export CREG_FLEET_IMAGE="$FLEET_IMAGE"
   echo "=== Tagged creg-node:fleet from ${built_ref} ==="
 fi
-# ── MAL-001: build secure (nsjail) image on top of the resolved fleet image ──
-# Dockerfile.secure expects base tag chain-registry-app:latest; retag whatever
-# fleet image we resolved (GHCR pull or local build) and compile nsjail on it.
+# ── MAL-001: build secure (nsjail) image from canonical Dockerfile (--target secure-node) ──
 if [[ "$SECURE_SANDBOX" -eq 1 ]]; then
-  echo "=== Building secure validator image (nsjail) from ${FLEET_IMAGE} ==="
-  "${DOCKER[@]}" tag "$FLEET_IMAGE" chain-registry-app:latest
-  "${DOCKER[@]}" build -t chain-registry-node-secure:fleet -f "${REPO_ROOT}/Dockerfile.secure" "$REPO_ROOT"
+  echo "=== Building secure validator image (nsjail) from ${REPO_ROOT}/Dockerfile (--target secure-node) ==="
+  "${DOCKER[@]}" build --target secure-node -t chain-registry-node-secure:fleet -f "${REPO_ROOT}/Dockerfile" "$REPO_ROOT"
   "${DOCKER[@]}" run --rm --entrypoint nsjail chain-registry-node-secure:fleet --help >/dev/null
   echo "=== chain-registry-node-secure:fleet ready (nsjail verified) ==="
 fi

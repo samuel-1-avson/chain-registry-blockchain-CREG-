@@ -61,7 +61,7 @@ impl StructuredReviewer {
                         all_findings.push(Finding {
                             id: format!("LLM{:03}", finding_counter),
                             title: title.clone(),
-                            severity: severity.clone(),
+                            severity: *severity,
                             description: description.clone(),
                             file: selected.path.clone(),
                             line: None,

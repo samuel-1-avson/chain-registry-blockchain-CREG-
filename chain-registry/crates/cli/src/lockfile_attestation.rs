@@ -3,7 +3,7 @@
 //! Audits project dependency lockfiles (`package-lock.json`, `Cargo.lock`, `requirements.txt`)
 //! and produces a cryptographically signed `creg.lock.json` attestation for CI/CD gates.
 
-use anyhow::{bail, Result};
+use anyhow::Result;
 use common::sha256_hex;
 use serde::{Deserialize, Serialize};
 

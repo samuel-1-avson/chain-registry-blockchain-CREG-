@@ -20,7 +20,7 @@ fn make_tarball(path: &str, content: &str) -> Vec<u8> {
         let encoder = flate2::write::GzEncoder::new(&mut tar_bytes, flate2::Compression::default());
         let mut archive = tar::Builder::new(encoder);
         let mut header = tar::Header::new_gnu();
-        header.set_size(content.as_bytes().len() as u64);
+        header.set_size(content.len() as u64);
         header.set_mode(0o644);
         header.set_cksum();
         archive
@@ -283,7 +283,7 @@ fn make_request(ecosystem: &str, name: &str, version: &str) -> PublishRequest {
     );
     let signature = ed25519_key.sign(message.as_bytes());
     let digest = {
-        let prefix = format!("\x19Ethereum Signed Message:\n{}", message.as_bytes().len());
+        let prefix = format!("\x19Ethereum Signed Message:\n{}", message.len());
         let mut bytes = Vec::with_capacity(prefix.len() + message.len());
         bytes.extend_from_slice(prefix.as_bytes());
         bytes.extend_from_slice(message.as_bytes());

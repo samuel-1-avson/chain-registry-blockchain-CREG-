@@ -1841,7 +1841,7 @@ mod tests {
         std::env::set_var("CREG_SECRETS_BACKEND", "vault");
         std::env::set_var("VAULT_ADDR", "http://127.0.0.1:18200");
         std::env::set_var("VAULT_TOKEN", "test-token");
-        std::env::set_var("CREG_VALIDATOR_KEY", &"11".repeat(32));
+        std::env::set_var("CREG_VALIDATOR_KEY", "11".repeat(32));
 
         let loaded = NodeConfig::load().await;
         let errors = loaded.validate();

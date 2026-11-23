@@ -451,7 +451,7 @@ fn report_validation_result(
     propagation_source: &PeerId,
     acceptance: gossipsub::MessageAcceptance,
 ) {
-    if let Err(error) = swarm
+    if !swarm
         .behaviour_mut()
         .gossipsub
         .report_message_validation_result(message_id, propagation_source, acceptance)
@@ -459,8 +459,7 @@ fn report_validation_result(
         tracing::warn!(
             message_id = %message_id,
             peer = %propagation_source,
-            error = %error,
-            "P2P: failed to report gossipsub message validation result"
+            "P2P: gossipsub message not found when reporting validation result"
         );
     }
 }
@@ -643,7 +642,7 @@ impl P2PNode {
                     .max_transmit_size(4 * 1024 * 1024)
                     .message_id_fn(message_id_fn)
                     .build()
-                    .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))?;
+                    .map_err(std::io::Error::other)?;
 
                 let gossipsub = gossipsub::Behaviour::new(
                     gossipsub::MessageAuthenticity::Signed(key.clone()),
@@ -684,18 +683,20 @@ impl P2PNode {
         let peer_id = *swarm.local_peer_id();
         swarm.listen_on(listen_addr.parse()?)?;
 
-        let mut rate_limit_config = P2PRateLimitConfig::default();
         // Auto-ban stays off unless explicitly enabled: the limiter cannot
         // reliably recognize validators yet, and auto-ban escalated into
         // banning honest validators and stalling consensus on testnet.
-        rate_limit_config.auto_ban = matches!(
-            std::env::var("CREG_P2P_AUTO_BAN")
-                .unwrap_or_default()
-                .trim()
-                .to_ascii_lowercase()
-                .as_str(),
-            "1" | "true" | "yes" | "on"
-        );
+        let rate_limit_config = P2PRateLimitConfig {
+            auto_ban: matches!(
+                std::env::var("CREG_P2P_AUTO_BAN")
+                    .unwrap_or_default()
+                    .trim()
+                    .to_ascii_lowercase()
+                    .as_str(),
+                "1" | "true" | "yes" | "on"
+            ),
+            ..P2PRateLimitConfig::default()
+        };
         let rate_limiter = P2PRateLimiter::new(rate_limit_config);
 
         Ok((
@@ -820,16 +821,19 @@ impl P2PNode {
         loop {
             tokio::select! {
                 event = self.swarm.select_next_some() => match event {
-                    SwarmEvent::Behaviour(BehaviourEvent::Kademlia(kad::Event::OutboundQueryProgressed { result, .. })) => {
-                        match result {
-                            kad::QueryResult::Bootstrap(Ok(_)) => {
-                                kad_bootstrapped = true;
-                                tracing::info!("Kademlia bootstrap successful");
-                            }
-                            _ => {}
-                        }
+                    SwarmEvent::Behaviour(BehaviourEvent::Kademlia(
+                        kad::Event::OutboundQueryProgressed {
+                            result: kad::QueryResult::Bootstrap(Ok(_)),
+                            ..
+                        },
+                    )) => {
+                        kad_bootstrapped = true;
+                        tracing::info!("Kademlia bootstrap successful");
                     }
-                    SwarmEvent::Behaviour(BehaviourEvent::Identify(identify::Event::Received { peer_id, info })) => {
+                    SwarmEvent::Behaviour(BehaviourEvent::Kademlia(
+                        kad::Event::OutboundQueryProgressed { .. },
+                    )) => {}
+                    SwarmEvent::Behaviour(BehaviourEvent::Identify(identify::Event::Received { peer_id, info, .. })) => {
                         tracing::debug!(%peer_id, addrs = info.listen_addrs.len(), "Identify received");
                         for addr in info.listen_addrs {
                             ingest_kademlia_address(

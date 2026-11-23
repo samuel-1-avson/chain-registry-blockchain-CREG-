@@ -292,6 +292,12 @@ pub struct MessageOrderer {
     outbound_seq: HashMap<String, u64>,
 }
 
+impl Default for MessageOrderer {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl MessageOrderer {
     pub fn new() -> Self {
         Self {

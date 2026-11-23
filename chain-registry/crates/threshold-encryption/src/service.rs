@@ -4,7 +4,7 @@
 //! Coordinates M-of-N consensus for package decryption.
 
 use crate::{
-    distribution::{DecryptionRequest, DecryptionResponse, ShieldedPackageMetadata},
+    distribution::{DecryptionRequest, DecryptionResponse},
     KeyShare, ThresholdEncryption, ThresholdError,
 };
 use serde::{Deserialize, Serialize};
@@ -54,6 +54,7 @@ impl Default for ServiceConfig {
 pub struct DecryptionService {
     config: ServiceConfig,
     /// Threshold encryption instance
+    #[allow(dead_code)]
     te: ThresholdEncryption,
     /// Stored key shares (package_canonical -> decrypted_share)
     shares: Arc<RwLock<HashMap<String, KeyShare>>>,
@@ -456,12 +457,7 @@ impl DecryptionClient {
         self.request_tx
             .send(DecryptionCommand::ProcessRequest(request))
             .await
-            .map_err(|e| {
-                ThresholdError::IoError(std::io::Error::new(
-                    std::io::ErrorKind::Other,
-                    e.to_string(),
-                ))
-            })?;
+            .map_err(|e| ThresholdError::IoError(std::io::Error::other(e.to_string())))?;
 
         // Collect responses (timeout after 60 seconds)
         let mut responses = Vec::new();
@@ -569,6 +565,7 @@ impl DecryptionClient {
 }
 
 /// Create channels for service and client
+#[allow(clippy::type_complexity)]
 pub fn create_channels() -> (
     (
         mpsc::Sender<DecryptionCommand>,
@@ -600,7 +597,7 @@ mod tests {
     #[tokio::test]
     async fn test_service_status() {
         let config = ServiceConfig::default();
-        let ((cmd_tx, _resp_rx), (resp_tx, cmd_rx)) = create_channels();
+        let ((_cmd_tx, _resp_rx), (resp_tx, cmd_rx)) = create_channels();
 
         let service = DecryptionService::new(config, cmd_rx, resp_tx).unwrap();
         let status = service.get_status().await;

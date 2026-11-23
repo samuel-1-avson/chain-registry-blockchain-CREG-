@@ -44,6 +44,12 @@ pub struct CensorshipEvidence {
     pub omitted_tx_hashes: Vec<String>,
 }
 
+impl Default for ForcedInclusionTracker {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl ForcedInclusionTracker {
     pub fn new() -> Self {
         Self {

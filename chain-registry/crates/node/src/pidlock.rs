@@ -1,14 +1,15 @@
 // crates/node/src/pidlock.rs
 // Single-node-per-data-directory enforcement via PID lock file.
-//
-// On **mainnet** (`CREG_TESTNET=false`, the default) the node writes
-// `creg-node.lock` into its data directory at startup. If the file already
-// exists and the recorded process is still alive, the node refuses to start.
-// This prevents operators from accidentally running two validators on the
-// same machine which would double-sign and get slashed.
-//
-// On **testnet** (`CREG_TESTNET=true`) the lock is skipped entirely so that
-// developers can spin up multiple nodes on one machine for local testing.
+#![allow(dead_code)] // Used by creg-node main binary startup.
+                     //
+                     // On **mainnet** (`CREG_TESTNET=false`, the default) the node writes
+                     // `creg-node.lock` into its data directory at startup. If the file already
+                     // exists and the recorded process is still alive, the node refuses to start.
+                     // This prevents operators from accidentally running two validators on the
+                     // same machine which would double-sign and get slashed.
+                     //
+                     // On **testnet** (`CREG_TESTNET=true`) the lock is skipped entirely so that
+                     // developers can spin up multiple nodes on one machine for local testing.
 
 use anyhow::{bail, Context, Result};
 use std::path::{Path, PathBuf};

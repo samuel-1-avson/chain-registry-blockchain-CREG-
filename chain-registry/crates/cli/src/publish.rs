@@ -185,6 +185,7 @@ fn load_namespace_authority_material() -> Result<(
     Ok((proof, certificate))
 }
 
+#[allow(clippy::too_many_arguments)]
 pub async fn run(
     tarball_path: &Path,
     manifest_path: Option<&Path>,
@@ -403,7 +404,6 @@ pub async fn run(
             .transpose()?
             .or_else(|| std::env::var("CREG_PUBLISHER_EVM_SIGNATURE").ok())
             .unwrap_or_default(),
-        ..Default::default()
     };
 
     // Compute the manifest digest for transport and future evidence binding.
@@ -507,7 +507,7 @@ pub async fn run(
     }
 
     // ── 7. Fallback to REST (Legacy) ──────────────────────────────────────────
-    let url = format!("{}", publisher_packages_url(node_url));
+    let url = publisher_packages_url(node_url).to_string();
 
     let pb_submit = ProgressBar::with_draw_target(Some(0), ProgressDrawTarget::stderr());
     pb_submit.set_style(
@@ -549,14 +549,12 @@ pub async fn run(
 
         // Provide user-friendly error messages
         let error_msg = match status.as_u16() {
-            403 => format!(
-                "Insufficient stake. Stake 1 CREG as publisher: creg stake --amount 1 --role publisher --key-file <EOA_KEY>"
-            ),
-            409 => format!("Package already exists. Use a different version."),
+            403 => "Insufficient stake. Stake 1 CREG as publisher: creg stake --amount 1 --role publisher --key-file <EOA_KEY>".to_string(),
+            409 => "Package already exists. Use a different version.".to_string(),
             400 => format!("Invalid request: {}", body),
-            401 => format!("Unauthorized: Invalid signature or key."),
-            429 => format!("Rate limited. Please wait before submitting again."),
-            500..=599 => format!("Server error. Please try again later."),
+            401 => "Unauthorized: Invalid signature or key.".to_string(),
+            429 => "Rate limited. Please wait before submitting again.".to_string(),
+            500..=599 => "Server error. Please try again later.".to_string(),
             _ => format!("HTTP {}: {}", status, body),
         };
 
@@ -577,7 +575,7 @@ fn sign_evm_personal_message(private_key_hex: &str, message: &str) -> Result<Str
         .context("CREG_PUBLISHER_EVM_KEY must be hex")?;
     let signing_key = SigningKey::from_slice(&key_bytes)
         .context("CREG_PUBLISHER_EVM_KEY is not a valid secp256k1 key")?;
-    let prefix = format!("\x19Ethereum Signed Message:\n{}", message.as_bytes().len());
+    let prefix = format!("\x19Ethereum Signed Message:\n{}", message.len());
     let mut payload = prefix.into_bytes();
     payload.extend_from_slice(message.as_bytes());
     let digest = Keccak256::digest(payload);
@@ -711,10 +709,7 @@ fn detect_package_id(tarball_bytes: &[u8]) -> Result<PackageId> {
     for entry in archive.entries()? {
         let mut entry: tar::Entry<'_, flate2::read::GzDecoder<&[u8]>> = entry?;
         let path = entry.path()?.to_string_lossy().to_string();
-        let file_name = path
-            .rsplit(|character| character == '/' || character == '\\')
-            .next()
-            .unwrap_or(path.as_str());
+        let file_name = path.rsplit(['/', '\\']).next().unwrap_or(path.as_str());
 
         if file_name == "package.json" {
             let mut content = String::new();
@@ -883,7 +878,7 @@ fn sign_with_pgp_if_configured(tarball: &[u8]) -> Result<(Option<String>, Option
     let fingerprint = std::env::var("CREG_PGP_KEY_FINGERPRINT")
         .ok()
         .filter(|s| !s.is_empty())
-        .or_else(|| first_secret_key_fingerprint())
+        .or_else(first_secret_key_fingerprint)
         .context(
             "Could not determine PGP fingerprint. Set CREG_PGP_KEY_FINGERPRINT or import the key with gpg.",
         )?;
@@ -971,6 +966,7 @@ fn encrypt_for_validators(data: &[u8]) -> Result<(Vec<u8>, String)> {
 /// Produce a signed publish request and write it to a JSON file on disk
 /// instead of submitting it to the node.  The file can later be submitted
 /// from a network-connected machine with `creg submit-signed <file>`.
+#[allow(clippy::too_many_arguments)]
 pub async fn sign_offline(
     tarball_path: &Path,
     manifest_path: Option<&Path>,
@@ -1149,7 +1145,6 @@ pub async fn sign_offline(
             .transpose()?
             .or_else(|| std::env::var("CREG_PUBLISHER_EVM_SIGNATURE").ok())
             .unwrap_or_default(),
-        ..Default::default()
     };
 
     // 6. Write to file
@@ -1186,7 +1181,7 @@ pub async fn submit_signed(signed_file: &Path, node_url: Option<&str>) -> Result
         request.id.canonical()
     );
 
-    let url = format!("{}", publisher_packages_url(node_url));
+    let url = publisher_packages_url(node_url).to_string();
 
     let request_clone2 = request.clone();
     let url_clone2 = url.clone();

@@ -130,7 +130,6 @@ pub fn parse_signature_bytes(sig_hex: &str) -> Result<[u8; 65]> {
 
 pub fn recover_signer(digest: &[u8; 32], sig_bytes: &[u8; 65]) -> Result<String> {
     use k256::ecdsa::{RecoveryId, Signature as K256Signature, VerifyingKey};
-    use k256::elliptic_curve::sec1::ToEncodedPoint;
 
     let v = sig_bytes[64];
     let rec_byte = match v {
@@ -203,7 +202,6 @@ pub fn derive_from_private_key(
     verifying_contract: &str,
 ) -> Result<DerivedIdentity> {
     use k256::ecdsa::SigningKey as K256SigningKey;
-    use k256::elliptic_curve::sec1::ToEncodedPoint;
 
     let clean = privkey_hex
         .trim()
@@ -260,6 +258,7 @@ pub struct AuthTokenPayload {
     pub wallet: String,
     pub signature: String,
     #[serde(default)]
+    #[allow(dead_code)]
     pub state: Option<String>,
 }
 

@@ -41,7 +41,7 @@ object = { version = "=0.37.3", default-features = false, features = ["read", "s
 wasmparser = "=0.245.1"
 
 # YARA-X for pattern-based malware detection (replaces custom ONNX training)
-yara-x = "1.14"
+yara-x = { version = "1.24", default-features = false, features = ["constant-folding", "exact-atoms", "fast-regexp", "elf-module", "hash-module", "math-module", "string-module", "time-module"] }
 
 # HTTP client for OSV vulnerability database lookups
 reqwest = { workspace = true, features = ["blocking", "json"] }
@@ -54,7 +54,7 @@ anyhow = { workspace = true }
 tracing = { workspace = true }
 
 # LRU cache for OSV query results
-lru = "0.12"
+lru = "0.19"
 
 # Parallel processing
 rayon = "1.7"

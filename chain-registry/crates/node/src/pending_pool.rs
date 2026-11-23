@@ -39,6 +39,12 @@ pub struct PendingPool {
     path: Option<PathBuf>,
 }
 
+impl Default for PendingPool {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl PendingPool {
     /// In-memory pool (tests only).
     pub fn new() -> Self {
@@ -344,6 +350,10 @@ impl PendingPool {
 
     pub fn len(&self) -> usize {
         self.entries.len()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.entries.is_empty()
     }
 
     pub fn all_canonicals(&self) -> Vec<String> {

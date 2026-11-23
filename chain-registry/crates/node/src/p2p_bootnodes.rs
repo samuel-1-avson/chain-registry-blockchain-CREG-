@@ -4,10 +4,7 @@
 //! backoff, and ensures persistent Kademlia DHT routing table connectivity.
 
 use libp2p::{Multiaddr, PeerId};
-use std::{
-    collections::HashMap,
-    time::{Duration, Instant},
-};
+use std::time::{Duration, Instant};
 
 /// Health status of a bootstrap node
 #[derive(Debug, Clone)]

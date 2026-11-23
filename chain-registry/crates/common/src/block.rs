@@ -236,6 +236,7 @@ pub struct BlockSignature {
 }
 
 /// Every action recorded on the chain is a Transaction.
+#[allow(clippy::large_enum_variant)]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum Transaction {
@@ -379,7 +380,7 @@ pub fn merkle_root(txs: &[Transaction]) -> String {
     let mut hashes: Vec<String> = txs.iter().map(transaction_hash).collect();
 
     while hashes.len() > 1 {
-        if hashes.len() % 2 != 0 {
+        if !hashes.len().is_multiple_of(2) {
             let last = hashes.last().expect("hashes is non-empty").clone();
             hashes.push(last);
         }

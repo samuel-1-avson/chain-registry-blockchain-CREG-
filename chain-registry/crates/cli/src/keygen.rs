@@ -302,7 +302,7 @@ pub fn run(output_path: Option<&Path>, role: &str) -> Result<()> {
     }
 
     // ── Print summary ─────────────────────────────────────────────────────────
-    println!("\n  {} keypair generated for role: {}", "✓", role);
+    println!("\n  ✓ keypair generated for role: {}", role);
     println!("  Private key: {}", key_path.display());
     println!("  Public key:  {} (Ed25519)", pubkey_hex);
     if role == "publisher" || role == "validator" {
@@ -402,14 +402,14 @@ pub fn run_with_mnemonic(output_path: Option<&Path>, role: &str, restore: bool) 
                 .enumerate()
                 .map(|(j, w)| format!("{:>2}. {:<12}", i * 4 + j + 1, w))
                 .collect();
-            println!("  │  {}│", format!("{:<52}", line.join("  ")));
+            println!("  │  {:<52}│", line.join("  "));
         }
         println!("  └──────────────────────────────────────────────────────┘");
         println!("  Anyone with this phrase can recreate your key. Store it offline.");
     }
 
     println!();
-    println!("  {} keypair generated for role: {} (BIP39)", "✓", role);
+    println!("  ✓ keypair generated for role: {} (BIP39)", role);
     println!("  Private key: {}", key_path.display());
     println!("  Public key:  {} (Ed25519)", pubkey_hex);
     if role == "publisher" || role == "validator" {
@@ -617,6 +617,7 @@ pub fn format_hybrid_keygen_summary(
 }
 
 /// Generate a keypair for the requested signature scheme and write it to `output_path`.
+#[allow(dead_code)]
 pub fn run_with_scheme(
     output_path: Option<&Path>,
     role: &str,
@@ -667,6 +668,55 @@ pub fn run_hybrid(output_path: Option<&Path>, role: &str) -> Result<()> {
         "{}",
         format_hybrid_keygen_summary(&role, &key_path, &pubkey)
     );
+
+    Ok(())
+}
+
+fn default_key_path(role: &str) -> PathBuf {
+    dirs::home_dir()
+        .unwrap_or_else(|| PathBuf::from("."))
+        .join(".creg")
+        .join(format!("{}.key", role))
+}
+
+#[cfg(unix)]
+fn write_key_file(path: &Path, content: &str) -> Result<()> {
+    use std::io::Write;
+    use std::os::unix::fs::OpenOptionsExt;
+
+    let mut file = std::fs::OpenOptions::new()
+        .write(true)
+        .create(true)
+        .truncate(true)
+        .mode(0o600) // owner read/write only
+        .open(path)
+        .with_context(|| format!("Cannot write key to {}", path.display()))?;
+
+    file.write_all(content.as_bytes())?;
+    Ok(())
+}
+
+#[cfg(not(unix))]
+fn write_key_file(path: &Path, content: &str) -> Result<()> {
+    // Write file first
+    std::fs::write(path, content)
+        .with_context(|| format!("Cannot write key to {}", path.display()))?;
+
+    // On Windows, restrict ACL to current user only
+    #[cfg(windows)]
+    {
+        use std::process::Command;
+        let path_str = path.to_string_lossy();
+        // Remove inherited permissions and grant only the current user full control
+        let _ = Command::new("icacls")
+            .args([
+                path_str.as_ref(),
+                "/inheritance:r",
+                "/grant:r",
+                &format!("{}:F", whoami::username()),
+            ])
+            .output();
+    }
 
     Ok(())
 }
@@ -911,53 +961,4 @@ mod tests {
             assert!(!summary.contains("0x"));
         }
     }
-}
-
-fn default_key_path(role: &str) -> PathBuf {
-    dirs::home_dir()
-        .unwrap_or_else(|| PathBuf::from("."))
-        .join(".creg")
-        .join(format!("{}.key", role))
-}
-
-#[cfg(unix)]
-fn write_key_file(path: &Path, content: &str) -> Result<()> {
-    use std::io::Write;
-    use std::os::unix::fs::OpenOptionsExt;
-
-    let mut file = std::fs::OpenOptions::new()
-        .write(true)
-        .create(true)
-        .truncate(true)
-        .mode(0o600) // owner read/write only
-        .open(path)
-        .with_context(|| format!("Cannot write key to {}", path.display()))?;
-
-    file.write_all(content.as_bytes())?;
-    Ok(())
-}
-
-#[cfg(not(unix))]
-fn write_key_file(path: &Path, content: &str) -> Result<()> {
-    // Write file first
-    std::fs::write(path, content)
-        .with_context(|| format!("Cannot write key to {}", path.display()))?;
-
-    // On Windows, restrict ACL to current user only
-    #[cfg(windows)]
-    {
-        use std::process::Command;
-        let path_str = path.to_string_lossy();
-        // Remove inherited permissions and grant only the current user full control
-        let _ = Command::new("icacls")
-            .args([
-                path_str.as_ref(),
-                "/inheritance:r",
-                "/grant:r",
-                &format!("{}:F", whoami::username()),
-            ])
-            .output();
-    }
-
-    Ok(())
 }

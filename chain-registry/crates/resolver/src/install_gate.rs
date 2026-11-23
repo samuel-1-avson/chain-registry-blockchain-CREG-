@@ -177,7 +177,7 @@ pub async fn resolve_id_for_install(
 
     let url = node_url
         .map(String::from)
-        .unwrap_or_else(|| crate::default_node_url());
+        .unwrap_or_else(crate::default_node_url);
 
     let verdict = chain_client::fetch_verdict(id, &url).await?;
     let verdict = if common::compiled_consensus_encoding().is_some() {

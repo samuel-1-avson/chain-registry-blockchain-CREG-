@@ -4,10 +4,8 @@
 //! intercepts package queries, checks on-chain trust verdicts, and blocks malicious
 //! or revoked packages in real time before they reach the developer machine.
 
-use anyhow::{bail, Result};
 use common::{PackageId, TrustVerdict, VerdictStatus};
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
 
 /// Configuration for local registry proxy
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -172,7 +170,7 @@ impl RegistryProxy {
 mod tests {
     use super::*;
     use chrono::Utc;
-    use common::{FindingSeverity, VerdictSource};
+    use common::VerdictSource;
 
     #[test]
     fn test_proxy_route_parsing() {

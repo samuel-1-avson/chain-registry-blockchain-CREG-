@@ -294,6 +294,7 @@ pub fn publish_signature_message(
 /// remains available for decoding old records, but new admission should use
 /// this version so signatures cannot be replayed across services, chains,
 /// contracts, packages, or validity windows.
+#[allow(clippy::too_many_arguments)]
 pub fn publish_signature_message_v2(
     chain_id: &str,
     staking_contract: &str,
@@ -330,6 +331,7 @@ pub fn publish_signature_message_v2(
 /// Version 3 of the publisher authorization payload. It retains all v2
 /// bindings and additionally commits to the exact registry-authority evidence
 /// bundle supplied with the request.
+#[allow(clippy::too_many_arguments)]
 pub fn publish_signature_message_v3(
     chain_id: &str,
     staking_contract: &str,

@@ -16,7 +16,7 @@ if [[ "$SKIP_APP" != "1" ]] && ! docker image inspect chain-registry-app:latest 
 elif docker image inspect chain-registry-app:latest >/dev/null 2>&1; then
   echo "[build-secure] Using existing chain-registry-app:latest (set SKIP_APP_BUILD=1 or rebuild manually)"
 fi
-echo "[build-secure] Building chain-registry-node-secure:latest ..."
-docker build -t chain-registry-node-secure:latest -f Dockerfile.secure .
+echo "[build-secure] Building chain-registry-node-secure:latest (--target secure-node) ..."
+docker build --target secure-node -t chain-registry-node-secure:latest -f "$DOCKERFILE" .
 docker run --rm --entrypoint nsjail chain-registry-node-secure:latest --help >/dev/null
 echo "OK chain-registry-node-secure:latest ready"

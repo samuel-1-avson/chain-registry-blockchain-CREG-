@@ -385,6 +385,7 @@ impl WasmSandbox {
         let mut engine_config = wasmtime::Config::new();
         engine_config.consume_fuel(true);
         engine_config.epoch_interruption(true);
+        engine_config.async_stack_size(config.limits.max_stack_size.saturating_add(1024 * 1024));
         engine_config.max_wasm_stack(config.limits.max_stack_size);
 
         let engine = Engine::new(&engine_config).map_err(|e| {
@@ -792,9 +793,9 @@ impl WasmSandbox {
                 "proc_exit",
                 |mut caller: wasmtime::Caller<'_, SandboxState>,
                  code: i32|
-                 -> Result<(), anyhow::Error> {
+                 -> wasmtime::Result<()> {
                     caller.data_mut().exit_code = Some(code);
-                    anyhow::bail!("wasm-sandbox-proc-exit:{}", code)
+                    wasmtime::bail!("wasm-sandbox-proc-exit:{}", code)
                 },
             );
 

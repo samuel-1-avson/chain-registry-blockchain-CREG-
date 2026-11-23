@@ -75,7 +75,7 @@ pub fn write_receipt(project_dir: &Path, verdict: &TrustVerdict) -> Result<()> {
     let mut content = if path.exists() {
         std::fs::read_to_string(&path).context("Failed to read existing lockfile")?
     } else {
-        format!("# pkg-lock.chain — chain registry audit receipts\n# Do not edit manually. Commit this file alongside your lockfile.\n")
+        "# pkg-lock.chain — chain registry audit receipts\n# Do not edit manually. Commit this file alongside your lockfile.\n".to_string()
     };
 
     // Avoid duplicate entries for the same canonical + block_hash.
@@ -144,7 +144,7 @@ pub fn print_lockfile(project_dir: &Path) -> Result<()> {
 
     let path = find_lockfile_path(project_dir);
     println!("\n  {} ({})\n", LOCKFILE_NAME, path.display());
-    println!("  {:<55} {:<12} {}", "Package", "Status", "Block hash");
+    println!("  {:<55} {:<12} Block hash", "Package", "Status");
     println!("  {}", "─".repeat(85));
 
     for r in &receipts {

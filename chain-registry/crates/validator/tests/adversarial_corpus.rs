@@ -954,7 +954,7 @@ tier_fast = "local"
             content_hash: &content_hash,
             tarball: &tgz,
             manifest: &manifest,
-            report_findings: &[class_a.clone()],
+            report_findings: std::slice::from_ref(&class_a),
             ast_index: None,
             binary_report: None,
             initial_kernel_graph: None,

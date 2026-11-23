@@ -769,6 +769,7 @@ pub async fn replay_witness_without_llm(
 
 /// Fail-closed pre-replay authentication + wire decoding + zero-LLM sandbox
 /// verification of a wire-signed `common::TriggerWitnessV1` (`INV-04`, `ADR-018`).
+#[allow(clippy::too_many_arguments)]
 pub async fn replay_signed_witness_without_llm(
     executor: &dyn SandboxReplayExecutor,
     pkg_id: &PackageId,

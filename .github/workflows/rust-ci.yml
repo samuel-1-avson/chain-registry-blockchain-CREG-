@@ -27,6 +27,9 @@ on:
       - "chain-registry/scripts/check-security-freeze.sh"
       - "chain-registry/testnet/chain-spec*.json"
       - "chain-registry/testnet/spec-server/chain-spec*.json"
+      - "chain-registry/Dockerfile"
+      - "chain-registry/deny.toml"
+      - "chain-registry/docker-compose.validator-v2.yml"
   pull_request:
     branches: [main]
     paths:
@@ -38,6 +41,9 @@ on:
       - "chain-registry/scripts/check-security-freeze.sh"
       - "chain-registry/testnet/chain-spec*.json"
       - "chain-registry/testnet/spec-server/chain-spec*.json"
+      - "chain-registry/Dockerfile"
+      - "chain-registry/deny.toml"
+      - "chain-registry/docker-compose.validator-v2.yml"
   schedule:
     - cron: "0 6 * * *"
   workflow_dispatch:
@@ -75,7 +81,7 @@ jobs:
       - name: Install Rust toolchain (pinned)
         uses: dtolnay/rust-toolchain@master
         with:
-          toolchain: "1.93.0"
+          toolchain: "1.98.1"
           components: clippy, rustfmt
 
       - name: Install build dependencies
@@ -93,8 +99,8 @@ jobs:
             ~/.cargo/registry
             ~/.cargo/git
             chain-registry/target
-          key: ${{ runner.os }}-cargo-1.93.0-${{ hashFiles('chain-registry/Cargo.lock') }}
-          restore-keys: ${{ runner.os }}-cargo-1.93.0-
+          key: ${{ runner.os }}-cargo-1.98.1-${{ hashFiles('chain-registry/Cargo.lock') }}
+          restore-keys: ${{ runner.os }}-cargo-1.98.1-
 
       - name: Check formatting
         run: cargo fmt --all -- --check
@@ -116,7 +122,7 @@ jobs:
             ~/.cargo/registry
             ~/.cargo/git
             chain-registry/target
-          key: ${{ runner.os }}-cargo-1.93.0-${{ hashFiles('chain-registry/Cargo.lock') }}
+          key: ${{ runner.os }}-cargo-1.98.1-${{ hashFiles('chain-registry/Cargo.lock') }}
 
   phase-c-recovery:
     name: Phase C production build and durable recovery
@@ -130,7 +136,7 @@ jobs:
       - name: Install Rust toolchain (pinned)
         uses: dtolnay/rust-toolchain@master
         with:
-          toolchain: "1.93.0"
+          toolchain: "1.98.1"
           components: clippy
 
       - name: Install build dependencies
@@ -147,7 +153,7 @@ jobs:
             ~/.cargo/registry
             ~/.cargo/git
             chain-registry/target
-          key: ${{ runner.os }}-phase-c-recovery-1.93.0-${{ hashFiles('chain-registry/Cargo.lock') }}
+          key: ${{ runner.os }}-phase-c-recovery-1.98.1-${{ hashFiles('chain-registry/Cargo.lock') }}
 
       - name: Compile real fleet node binaries
         run: cargo check --locked --package chain-registry-node --bins --features phase-c-real-fleet
@@ -180,10 +186,6 @@ jobs:
   dependency-audit:
     name: Dependency advisories and sources (cargo-deny)
     runs-on: ubuntu-latest
-    # Advisory for now: the workspace pins old crates (wasmtime 18, sled) that
-    # are likely to carry findings. Triage them, then remove this line so the
-    # job becomes a gate.
-    continue-on-error: true
     steps:
       - uses: actions/checkout@v4
 

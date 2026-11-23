@@ -275,7 +275,7 @@ async fn extract_pip_deps(path: &Path) -> Result<Vec<String>> {
             continue;
         }
         // Handle package==version, package>=version, etc.
-        if let Some(idx) = line.find(|c: char| c == '=' || c == '<' || c == '>') {
+        if let Some(idx) = line.find(['=', '<', '>']) {
             let name = &line[..idx];
             let version = &line[idx..];
             deps.push(format!("{}{}", name, version));

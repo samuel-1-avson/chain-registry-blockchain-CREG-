@@ -359,9 +359,11 @@ pub fn deep_scan(
     package_info: Option<crate::osv_client::PackageInfo>,
     ecosystem: &str,
 ) -> Result<DeepScanResult, MlError> {
-    let mut scanner = DeepScanner::default();
-    scanner.package_info = package_info;
-    scanner.ecosystem = ecosystem.to_string();
+    let scanner = DeepScanner {
+        package_info,
+        ecosystem: ecosystem.to_string(),
+        ..DeepScanner::default()
+    };
     scanner.scan(tarball_bytes)
 }
 
@@ -371,9 +373,11 @@ pub fn deep_scan_unpacked(
     package_info: Option<crate::osv_client::PackageInfo>,
     ecosystem: &str,
 ) -> Result<DeepScanResult, MlError> {
-    let mut scanner = DeepScanner::default();
-    scanner.package_info = package_info;
-    scanner.ecosystem = ecosystem.to_string();
+    let scanner = DeepScanner {
+        package_info,
+        ecosystem: ecosystem.to_string(),
+        ..DeepScanner::default()
+    };
     scanner.scan_unpacked(archive)
 }
 

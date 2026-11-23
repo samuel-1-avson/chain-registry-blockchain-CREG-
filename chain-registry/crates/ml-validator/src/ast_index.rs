@@ -312,6 +312,7 @@ fn node_text(node: tree_sitter::Node<'_>, src: &[u8]) -> String {
     })
 }
 
+#[allow(clippy::too_many_arguments)]
 fn push_sink(
     index: &mut PackageAstIndexV1,
     file_hits: &mut usize,

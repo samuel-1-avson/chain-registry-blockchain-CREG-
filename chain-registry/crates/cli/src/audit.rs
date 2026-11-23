@@ -466,27 +466,25 @@ pub async fn run_fix(ecosystem: Option<&str>, node_url: Option<&str>) -> Result<
 
     let mut fixed = 0usize;
     for h in handles {
-        if let Ok((pkg, verdict)) = h.await {
-            if let Ok(v) = verdict {
-                if let VerdictStatus::Revoked { reason, .. } = &v.status {
+        if let Ok((pkg, Ok(v))) = h.await {
+            if let VerdictStatus::Revoked { reason, .. } = &v.status {
+                println!(
+                    "  {} {} is REVOKED ({})",
+                    "✗".red().bold(),
+                    pkg.canonical().red(),
+                    reason
+                );
+                // Try to find a non-revoked alternative by checking the chain
+                // for the same package name at a different version.
+                if let Ok(alt) = find_safe_alternative(&pkg, node_url).await {
+                    println!("    {} Alternative: {}", "→".cyan(), alt.green());
+                } else {
                     println!(
-                        "  {} {} is REVOKED ({})",
-                        "✗".red().bold(),
-                        pkg.canonical().red(),
-                        reason
+                        "    {} No safe alternative found automatically. Remove manually.",
+                        "⚠".yellow()
                     );
-                    // Try to find a non-revoked alternative by checking the chain
-                    // for the same package name at a different version.
-                    if let Ok(alt) = find_safe_alternative(&pkg, node_url).await {
-                        println!("    {} Alternative: {}", "→".cyan(), alt.green());
-                    } else {
-                        println!(
-                            "    {} No safe alternative found automatically. Remove manually.",
-                            "⚠".yellow()
-                        );
-                    }
-                    fixed += 1;
                 }
+                fixed += 1;
             }
         }
     }

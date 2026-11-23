@@ -19,6 +19,7 @@ impl LlmEscalationGate {
         }
     }
 
+    #[allow(clippy::result_large_err)]
     pub(super) fn ensure_package_enabled(
         entropy_alerts: Vec<EntropyAlert>,
     ) -> Result<(), LlmReview> {
@@ -29,6 +30,7 @@ impl LlmEscalationGate {
         }
     }
 
+    #[allow(clippy::result_large_err)]
     pub(super) fn reserve_package_call(entropy_alerts: Vec<EntropyAlert>) -> Result<(), LlmReview> {
         if let Ok(mut limiter) = super::RATE_LIMITER.lock() {
             if let Err(reason) = limiter.check() {

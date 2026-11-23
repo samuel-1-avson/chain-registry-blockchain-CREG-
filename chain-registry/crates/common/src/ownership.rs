@@ -907,6 +907,7 @@ impl NamespaceLifecycleEvent {
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 pub fn namespace_lifecycle_message(
     action: NamespaceLifecycleAction,
     namespace: &str,

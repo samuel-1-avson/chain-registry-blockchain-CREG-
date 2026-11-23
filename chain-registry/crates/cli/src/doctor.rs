@@ -271,12 +271,8 @@ async fn run_basic(options: DoctorOptions<'_>) -> Result<()> {
 
     append_remote_node_local_ipfs_warning(&mut checks, &node, &ipfs);
 
-    let (prof_ok, prof_msg) = check_authenticated_profile();
-    checks.push(if prof_ok {
-        DoctorCheck::pass("Authenticated profile", false, prof_msg)
-    } else {
-        DoctorCheck::pass("Authenticated profile", false, prof_msg)
-    });
+    let (_prof_ok, prof_msg) = check_authenticated_profile();
+    checks.push(DoctorCheck::pass("Authenticated profile", false, prof_msg));
 
     let (key_ok, key_msg) = check_publisher_key();
     checks.push(if key_ok {
@@ -1279,14 +1275,14 @@ fn check_isolated_sandbox() -> (bool, String) {
             return (
                 false,
                 "CREG_IS_VALIDATOR=true on native Windows has no isolated engine — \
-                 package votes abstain. Run Linux with nsjail or Dockerfile.secure."
+                 package votes abstain. Run Linux with nsjail or Dockerfile (--target secure-node)."
                     .into(),
             );
         }
         return (
             false,
             "CREG_IS_VALIDATOR=true requires nsjail or Docker — \
-             run ./scripts/install-nsjail.sh or use Dockerfile.secure"
+             run ./scripts/install-nsjail.sh or use Dockerfile (--target secure-node)"
                 .into(),
         );
     }
@@ -1300,7 +1296,7 @@ fn check_isolated_sandbox() -> (bool, String) {
     }
     (
         false,
-        "nsjail not in PATH — run ./scripts/install-nsjail.sh (Linux) or use Dockerfile.secure"
+        "nsjail not in PATH — run ./scripts/install-nsjail.sh (Linux) or use Dockerfile (--target secure-node)"
             .into(),
     )
 }

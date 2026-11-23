@@ -530,8 +530,10 @@ pub async fn run_with_trigger(
 ) -> Result<SandboxResult> {
     trigger_spec.validate()?;
 
-    let mut config = SandboxConfig::default();
-    config.trigger_spec = trigger_spec.clone();
+    let mut config = SandboxConfig {
+        trigger_spec: trigger_spec.clone(),
+        ..SandboxConfig::default()
+    };
     let start_time = Instant::now();
 
     let cache_key = compute_sandbox_cache_key(

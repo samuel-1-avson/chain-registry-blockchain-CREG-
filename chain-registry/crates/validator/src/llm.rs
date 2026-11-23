@@ -271,14 +271,14 @@ fn entropy_threshold_file() -> f64 {
 fn sanitize_content(text: &str, max_chars: usize) -> String {
     let truncated: String = text.chars().take(max_chars).collect();
     // Remove common injection escalations: role markers, system blocks, etc.
-    let sanitized = truncated
+
+    truncated
         .replace("<|system|>", "")
         .replace("<|user|>", "")
         .replace("<|assistant|>", "")
         .replace("IGNORE PREVIOUS INSTRUCTIONS", "")
         .replace("ignore previous instructions", "")
-        .replace("</s>", "");
-    sanitized
+        .replace("</s>", "")
 }
 
 /// For a single small snippet (used by static_analysis.rs), base64-encode to
@@ -688,7 +688,7 @@ fn select_files_for_analysis(
         })
         .collect();
 
-    scored.sort_by(|a, b| b.3.cmp(&a.3));
+    scored.sort_by_key(|entry| std::cmp::Reverse(entry.3));
     scored
         .into_iter()
         .take(max_files)

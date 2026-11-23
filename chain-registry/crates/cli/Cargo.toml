@@ -53,7 +53,7 @@ dirs       = "5"
 hex        = { workspace = true }
 rand       = { workspace = true }
 flate2     = "1"
-zip        = "8"
+zip        = "9"
 tar        = "0.4"
 colored   = "2"
 dialoguer = "0.11"

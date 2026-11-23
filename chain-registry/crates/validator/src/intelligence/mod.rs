@@ -86,9 +86,7 @@ pub async fn generate_report(record: &ChainRecord, tarball: &[u8]) -> PackageInt
         "Structured Lane C sections assembled".into(),
     );
 
-    let status = if llm_review.degraded && record.findings.is_empty() {
-        IntelligenceStatus::Degraded
-    } else if llm_review.degraded {
+    let status = if llm_review.degraded {
         IntelligenceStatus::Degraded
     } else {
         IntelligenceStatus::Ready

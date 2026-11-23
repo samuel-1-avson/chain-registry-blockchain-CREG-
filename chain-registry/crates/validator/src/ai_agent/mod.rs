@@ -614,7 +614,7 @@ tier_fast = "local"
         let tarball = build_tar_gz(&[("index.js", b"if (process.env.CI) { /* exfil */ }\n")]);
         let (pkg_id, manifest) = test_pkg();
         let content_hash = hex::encode(Sha256::digest(&tarball));
-        let manifest_sha256 = hex::encode(Sha256::digest(&serde_json::to_vec(&manifest).unwrap()));
+        let manifest_sha256 = hex::encode(Sha256::digest(serde_json::to_vec(&manifest).unwrap()));
 
         let mut env = std::collections::BTreeMap::new();
         env.insert("CI".into(), "true".into());

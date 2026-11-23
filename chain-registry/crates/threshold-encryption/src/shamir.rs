@@ -66,7 +66,7 @@ impl ShamirSecretSharing {
 
         // Create share structs
         Ok((1..=self.total_shares)
-            .zip(shares.into_iter())
+            .zip(shares)
             .map(|(index, value)| Share { index, value })
             .collect())
     }
@@ -237,6 +237,7 @@ impl ShamirSecretSharing {
     }
 
     /// Compute multiplicative inverse in **constant time** using the log/exp table.
+    #[allow(dead_code)]
     fn gf_inverse(a: u8) -> u8 {
         if a == 0 {
             return 0;

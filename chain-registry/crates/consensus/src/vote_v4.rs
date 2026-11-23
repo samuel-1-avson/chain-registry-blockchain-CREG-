@@ -355,6 +355,7 @@ impl WitnessReplayGuard {
         }
     }
 
+    #[allow(clippy::too_many_arguments)]
     pub fn preflight_and_reserve(
         &mut self,
         witness: &TriggerWitnessV1,
@@ -535,6 +536,7 @@ fn vote_quorum_threshold(assigned_count: usize, allow_small_cluster_quorum: bool
 /// - Class A deterministic rejections cannot be overridden by Class C approvals (`INV-03`).
 /// - Quantized Class C approvals must satisfy both quorum and model-family diversity;
 ///   single-family or abstaining rounds fail closed into `Quarantined` (72h TTL).
+#[allow(clippy::too_many_arguments)]
 pub fn aggregate_vote_v4_quorum(
     votes: &[VoteV4Envelope],
     expected_package: &str,

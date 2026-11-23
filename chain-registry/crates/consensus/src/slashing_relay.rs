@@ -24,7 +24,9 @@
 //! See `docs/adr/ADR-016-EQUIVOCATION-SLASHING.md` for the full design,
 //! including how evidence reaches `Staking.slashSeverity`.
 
-use crate::pbft::{pbft_signature_message, verify_pbft_phase_signature};
+#[cfg(test)]
+use crate::pbft::pbft_signature_message;
+use crate::pbft::verify_pbft_phase_signature;
 use anyhow::{bail, ensure, Result};
 use common::{sha256_hex, Block, BlockHeader};
 use serde::{Deserialize, Serialize};

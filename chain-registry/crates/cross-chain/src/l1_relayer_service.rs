@@ -10,9 +10,8 @@ use chrono::Utc;
 use common::sha256_hex;
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
-use std::time::Duration;
 use tokio::sync::Mutex;
-use tracing::{error, info, warn};
+use tracing::{error, info};
 
 /// Configuration for the Ethereum L1 State Root Relayer
 #[derive(Debug, Clone, Serialize, Deserialize)]

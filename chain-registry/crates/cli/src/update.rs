@@ -405,7 +405,13 @@ fn extract_binary(asset_name: &str, bytes: &[u8], staging: &Path) -> Result<Path
             let mut entry = archive
                 .by_index(index)
                 .context("could not read ZIP entry")?;
-            let Some(name) = Path::new(entry.name()).file_name().and_then(|n| n.to_str()) else {
+            let Ok(entry_name) = entry.name() else {
+                continue;
+            };
+            let Some(name) = Path::new(entry_name.as_ref())
+                .file_name()
+                .and_then(|n| n.to_str())
+            else {
                 continue;
             };
             if name == target_name {
@@ -448,7 +454,7 @@ fn extract_binary(asset_name: &str, bytes: &[u8], staging: &Path) -> Result<Path
     }
 }
 
-fn set_executable(path: &Path) -> Result<()> {
+fn set_executable(_path: &Path) -> Result<()> {
     #[cfg(unix)]
     {
         use std::os::unix::fs::PermissionsExt;

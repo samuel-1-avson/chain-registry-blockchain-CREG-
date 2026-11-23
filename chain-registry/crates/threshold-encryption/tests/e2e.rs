@@ -262,7 +262,7 @@ fn test_e2e_threshold_2_of_3() {
     // One share is insufficient.
     assert!(
         matches!(
-            te.decrypt_with_shares(&encrypted, &[share1.clone()]),
+            te.decrypt_with_shares(&encrypted, std::slice::from_ref(&share1)),
             Err(ThresholdError::InsufficientShares(1, 2))
         ),
         "1 share must be insufficient for 2-of-3"

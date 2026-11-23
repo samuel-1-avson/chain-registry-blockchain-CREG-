@@ -9,7 +9,6 @@ use alloy::{
     providers::{Provider, ProviderBuilder},
     rpc::types::TransactionRequest,
     signers::local::PrivateKeySigner,
-    signers::Signer,
     sol,
 };
 use anyhow::Context;
@@ -116,11 +115,11 @@ impl FaucetConfig {
 
         Ok((
             Self {
-                drip_amount: env_u128("FAUCET_DRIP_AMOUNT", 1000_000_000_000_000_000_000), // 1000 tCREG
+                drip_amount: env_u128("FAUCET_DRIP_AMOUNT", 1_000_000_000_000_000_000_000), // 1000 tCREG
                 native_drip_amount: env_u128("FAUCET_NATIVE_DRIP_AMOUNT", 100_000_000_000_000_000), // 0.1 ETH
                 cooldown_secs: env_u64("FAUCET_COOLDOWN_SECS", 60), // 1 minute
                 ip_cooldown_secs: env_u64("FAUCET_IP_COOLDOWN_SECS", 60),
-                max_balance: env_u128("FAUCET_MAX_BALANCE", 10000_000_000_000_000_000_000), // 10k tCREG
+                max_balance: env_u128("FAUCET_MAX_BALANCE", 10_000_000_000_000_000_000_000), // 10k tCREG
                 native_max_balance: env_u128(
                     "FAUCET_NATIVE_MAX_BALANCE",
                     1_000_000_000_000_000_000,
@@ -268,7 +267,7 @@ impl PersistentRateLimiter {
             anyhow::bail!("FAUCET_PG_URL is required; refusing to start with volatile cooldowns");
         }
 
-        let (mut client, connection) = tokio_postgres::connect(pg_url, NoTls)
+        let (client, connection) = tokio_postgres::connect(pg_url, NoTls)
             .await
             .context("connect to durable faucet cooldown database")?;
         tokio::spawn(async move {
@@ -362,6 +361,7 @@ impl PersistentRateLimiter {
 
     /// Atomically claim both cooldown keys before sending funds. Advisory locks
     /// serialize claims across replicas, including when a key has no row yet.
+    #[allow(clippy::too_many_arguments)]
     async fn claim(
         &self,
         address: &str,
@@ -750,6 +750,7 @@ impl PersistentRateLimiter {
         .transpose()
     }
 
+    #[allow(clippy::too_many_arguments)]
     async fn apply_reconciled_transfers(
         &self,
         chain_id: i64,
@@ -1602,7 +1603,7 @@ async fn verify_token_deployment(
     .await?;
     if code
         .as_str()
-        .map_or(true, |value| value == "0x" || value == "0x0")
+        .is_none_or(|value| value == "0x" || value == "0x0")
     {
         anyhow::bail!("configured token contract has no deployed bytecode");
     }
@@ -1947,9 +1948,7 @@ async fn verify_indexed_transfer_receipts(
                     expected
                         .as_str()
                         .zip(actual.as_str())
-                        .map_or(true, |(expected, actual)| {
-                            !expected.eq_ignore_ascii_case(actual)
-                        })
+                        .is_none_or(|(expected, actual)| !expected.eq_ignore_ascii_case(actual))
                 })
         {
             anyhow::bail!("indexed Transfer log topics do not match its receipt");
@@ -4393,6 +4392,7 @@ mod tests {
     }
 
     #[test]
+    #[allow(clippy::type_complexity)]
     fn token_policy_rejects_inconsistent_budgets() {
         let mutations: [(&str, fn(&mut FaucetConfig)); 6] = [
             ("zero drip", |c| c.drip_amount = 0),

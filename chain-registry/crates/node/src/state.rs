@@ -4,7 +4,7 @@
 // include it, enabling integration tests to construct and inspect the state.
 
 use std::{
-    collections::{hash_map::Entry, HashMap},
+    collections::HashMap,
     sync::Arc,
     time::{Duration, Instant},
 };
@@ -172,7 +172,7 @@ impl PackageRound {
         let Some(first_vote_at) = self
             .signatures
             .iter()
-            .map(|signature| signature.signed_at.clone())
+            .map(|signature| signature.signed_at)
             .min()
         else {
             let now = Utc::now();
@@ -185,7 +185,7 @@ impl PackageRound {
         self.last_vote_at = self
             .signatures
             .iter()
-            .map(|signature| signature.signed_at.clone())
+            .map(|signature| signature.signed_at)
             .max()
             .unwrap_or_else(Utc::now);
     }

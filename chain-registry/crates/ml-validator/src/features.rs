@@ -148,10 +148,12 @@ impl FeatureExtractor {
             .ok_or_else(|| FeatureError::ParseError("Failed to parse JS code".to_string()))?;
 
         let root = tree.root_node();
-        let mut features = PackageFeatures::default();
+        let mut features = PackageFeatures {
+            total_lines: code.lines().count() as u32,
+            ..PackageFeatures::default()
+        };
 
         // Basic metrics
-        features.total_lines = code.lines().count() as u32;
         features.code_lines = code
             .lines()
             .filter(|l| !l.trim().is_empty() && !l.trim().starts_with("//"))
@@ -212,10 +214,12 @@ impl FeatureExtractor {
             .ok_or_else(|| FeatureError::ParseError("Failed to parse Python code".to_string()))?;
 
         let root = tree.root_node();
-        let mut features = PackageFeatures::default();
+        let mut features = PackageFeatures {
+            total_lines: code.lines().count() as u32,
+            ..PackageFeatures::default()
+        };
 
         // Basic metrics
-        features.total_lines = code.lines().count() as u32;
         features.code_lines = code
             .lines()
             .filter(|l| !l.trim().is_empty() && !l.trim().starts_with("#"))
@@ -262,10 +266,12 @@ impl FeatureExtractor {
             .ok_or_else(|| FeatureError::ParseError("Failed to parse Rust code".to_string()))?;
 
         let root = tree.root_node();
-        let mut features = PackageFeatures::default();
+        let mut features = PackageFeatures {
+            total_lines: code.lines().count() as u32,
+            ..PackageFeatures::default()
+        };
 
         // Basic metrics
-        features.total_lines = code.lines().count() as u32;
         features.code_lines = code
             .lines()
             .filter(|l| !l.trim().is_empty() && !l.trim().starts_with("//"))

@@ -344,9 +344,8 @@ async fn fetch_latest_block_quorum(
 ) -> anyhow::Result<u64> {
     let mut heights = Vec::with_capacity(endpoints.len());
     for ep in endpoints {
-        match fetch_latest_block(client, ep).await {
-            Ok(h) => heights.push(h),
-            Err(_) => {}
+        if let Ok(h) = fetch_latest_block(client, ep).await {
+            heights.push(h)
         }
     }
     crate::l1_quorum::aggregate_height_with_quorum(&heights, endpoints.len())

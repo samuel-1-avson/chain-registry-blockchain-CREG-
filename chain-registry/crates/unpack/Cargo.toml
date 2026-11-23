@@ -5,7 +5,7 @@ edition = "2021"
 description = "Canonical streaming bounded raw-byte tarball extractor for Chain Registry"
 
 [dependencies]
-bytes = "=1.11.1"
+bytes = "1.12"
 common = { path = "../common" }
 flate2 = "1"
 hex = { workspace = true }

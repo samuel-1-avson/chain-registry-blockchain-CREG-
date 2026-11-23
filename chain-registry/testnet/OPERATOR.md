@@ -105,7 +105,7 @@ Each operator runs **one validator per machine** using `docker-compose.validator
 
 | Profile | Image | `CREG_DEV_SANDBOX` | Host |
 |---------|-------|-------------------|------|
-| Public validator | `Dockerfile.secure` (nsjail) | `false` | Linux |
+| Public validator | `Dockerfile` (`--target secure-node`, nsjail) | `false` | Linux |
 | Maintainer seed fleet | `chain-registry-node-secure:fleet` | `false` (legacy lab only) | Not part of public GCP profile |
 | Local Sepolia bootstrap | `docker-compose.testnet.yml` | Sepolia L1 | Local |
 

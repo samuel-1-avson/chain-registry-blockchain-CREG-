@@ -1,6 +1,7 @@
 // crates/node/src/main.rs
 // Chain registry node â€” single binary that runs all subsystems.
 #![deny(clippy::unwrap_used)]
+#![allow(dead_code)] // Re-declares library modules as private binary modules.
 #![cfg_attr(test, allow(clippy::unwrap_used, clippy::expect_used))]
 
 mod admission_scan;
@@ -65,7 +66,6 @@ use tracing_subscriber::EnvFilter;
 
 use events::new_event_bus;
 use finalized_tx::{FinalizedTxReceiver, FinalizedTxSender};
-use publisher_index::PublisherIndex;
 use state::{
     normalized_validator_key, validator_registration_status_text, BridgeStatus, NodeState,
     P2PStatus, SharedState, ValidatorRegistrationStatus,
@@ -404,7 +404,6 @@ async fn main() -> Result<()> {
     let spec_offline = std::env::var("CREG_CHAIN_SPEC_OFFLINE").unwrap_or_default() == "true";
     let pinned_genesis_hash = std::env::var("CREG_GENESIS_HASH").ok();
     let pinned_chain_id = std::env::var("CREG_CHAIN_ID").ok();
-    let mut chain_spec_signature_verified = false;
 
     let chain_spec = match chain_spec_boot::resolve_chain_spec(
         spec_url.as_deref(),
@@ -469,9 +468,9 @@ async fn main() -> Result<()> {
             .map_err(|e| anyhow::anyhow!("Failed to resolve spec signature: {}", e))?;
             spec.verify_signature(&sig, pinned_pubkey)
                 .map_err(|e| anyhow::anyhow!("Spec signature invalid: {}", e))?;
-            chain_spec_signature_verified = true;
             tracing::info!("Spec signature verified");
         }
+        let chain_spec_signature_verified = true;
 
         // Step 3: Schema validation (spec_version)
         if spec.spec_version != common::CURRENT_SPEC_VERSION {
@@ -1364,7 +1363,7 @@ async fn sync_validator_registrations_once(state: &SharedState) -> Result<()> {
                 registration.last_error = None;
                 registration.stake = stake;
                 registration.applied_on_chain = staking_state != 0;
-                registration.governance_approved = matches!(staking_state, 2 | 3 | 4);
+                registration.governance_approved = matches!(staking_state, 2..=4);
                 registration.staking_state = staking_state_label(staking_state).to_string();
 
                 let identity = registration.identity.normalized();

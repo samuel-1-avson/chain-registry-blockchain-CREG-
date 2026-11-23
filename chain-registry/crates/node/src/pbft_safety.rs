@@ -163,6 +163,7 @@ impl PbftSigningJournal {
     /// Record a locally signed PBFT message durably before it is broadcast.
     /// PREPARE locks are per view; COMMIT locks span all views at one
     /// height/parent; view-change locks are per target view.
+    #[allow(clippy::too_many_arguments)]
     pub fn record_decision(
         &self,
         phase: PbftVotePhase,
@@ -213,6 +214,7 @@ impl PbftSigningJournal {
         )
     }
 
+    #[allow(clippy::too_many_arguments)]
     fn record_decision_inner(
         &self,
         phase: PbftVotePhase,

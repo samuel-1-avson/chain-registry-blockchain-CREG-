@@ -1061,7 +1061,7 @@ fn check_escape_density(line: &str) -> Option<(usize, usize)> {
                         continue;
                     }
                 }
-            } else if next >= b'0' && next <= b'7' {
+            } else if (b'0'..=b'7').contains(&next) {
                 // Octal escape: \\[0-7]{1,3}
                 let mut len = 1;
                 if i + 2 < bytes.len() && bytes[i + 2] >= b'0' && bytes[i + 2] <= b'7' {

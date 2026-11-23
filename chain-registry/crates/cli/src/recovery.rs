@@ -173,18 +173,15 @@ fn eval_poly_gf256(coeffs: &[u8], x: u8) -> u8 {
 /// Lagrange interpolation at point `x` given a set of (x_i, y_i) pairs in GF(256).
 fn lagrange_interpolate_gf256(points: &[(u8, u8)], x: u8) -> u8 {
     let mut result: u8 = 0;
-    let k = points.len();
 
-    for i in 0..k {
-        let (xi, yi) = points[i];
+    for (i, &(xi, yi)) in points.iter().enumerate() {
         let mut numerator: u8 = 1;
         let mut denominator: u8 = 1;
 
-        for j in 0..k {
+        for (j, &(xj, _)) in points.iter().enumerate() {
             if i == j {
                 continue;
             }
-            let (xj, _) = points[j];
             numerator = gf256_mul(numerator, x ^ xj);
             denominator = gf256_mul(denominator, xi ^ xj);
         }

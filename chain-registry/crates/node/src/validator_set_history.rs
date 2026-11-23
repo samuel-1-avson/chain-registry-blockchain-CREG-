@@ -238,6 +238,7 @@ fn persist_history_bytes(data_dir: &Path, bytes: &[u8]) -> anyhow::Result<()> {
 /// Run `persist` while the exact pre-reorg history snapshot is protected from
 /// concurrent local writers. The closure durably writes the RocksDB journal,
 /// making that journal the transaction boundary for subsequent history edits.
+#[allow(dead_code)]
 pub(crate) fn with_reorg_snapshot<T>(
     data_dir: &Path,
     persist: impl FnOnce(Option<Vec<u8>>) -> anyhow::Result<T>,

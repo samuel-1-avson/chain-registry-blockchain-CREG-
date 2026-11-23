@@ -132,9 +132,8 @@ services:
     image: chain-registry-node-secure:latest
     build:
       context: .
-      dockerfile: Dockerfile.secure
-    depends_on:
-      - app-image
+      dockerfile: Dockerfile
+      target: secure-node
     command: ["true"]
     profiles:
       - build

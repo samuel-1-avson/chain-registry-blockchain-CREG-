@@ -339,7 +339,7 @@ impl PbftRound {
             &self.block.header.prev_hash,
             self.block.header.view_number,
         )?;
-        if &selected != proposer_id {
+        if selected != proposer_id {
             bail!(
                 "Proposer {} is not the selected proposer for view {} (expected {})",
                 proposer_id,
@@ -842,6 +842,12 @@ fn verify_reproposal_proof_with_depth(
         ),
         &proof.leader_signature,
     )
+}
+
+impl Default for PbftEngine {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl PbftEngine {
@@ -1925,11 +1931,11 @@ mod tests {
         assert!(engine.certified_view(1, &"11".repeat(32)).is_none());
 
         let mut completed = None;
-        for index in 1..3 {
+        for (index, key) in keys.iter().enumerate().take(3).skip(1) {
             let mut vote = first_vote.clone();
             vote.validator_id = format!("v{index}");
             vote.signature.clear();
-            let vote = signed_view_change_vote(vote, &keys[index]);
+            let vote = signed_view_change_vote(vote, key);
             completed = engine.receive_view_change(vote, &vs).unwrap();
         }
         assert_eq!(completed.unwrap().len(), 3);

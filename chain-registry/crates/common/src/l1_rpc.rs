@@ -673,8 +673,11 @@ mod tests {
     #[test]
     fn quorum_counts_unavailable_endpoints_in_the_denominator() {
         let answer = Some(json!("0x01"));
-        assert_eq!(select_quorum_index(&[answer.clone()], 1), Some(0));
-        assert_eq!(select_quorum_index(&[answer.clone()], 2), None);
+        assert_eq!(
+            select_quorum_index(std::slice::from_ref(&answer), 1),
+            Some(0)
+        );
+        assert_eq!(select_quorum_index(std::slice::from_ref(&answer), 2), None);
         assert_eq!(
             select_quorum_index(&[answer.clone(), answer.clone()], 3),
             Some(0)

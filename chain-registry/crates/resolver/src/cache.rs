@@ -18,9 +18,8 @@ fn db() -> Result<&'static Db> {
             .join("verdict-cache");
         sled::open(path).expect("Failed to open verdict cache")
     });
-    Ok(DB
-        .get()
-        .ok_or_else(|| anyhow::anyhow!("Verdict cache not initialized"))?)
+    DB.get()
+        .ok_or_else(|| anyhow::anyhow!("Verdict cache not initialized"))
 }
 
 #[derive(serde::Serialize, serde::Deserialize)]
@@ -80,7 +79,7 @@ pub fn clear() -> Result<()> {
 /// Print a summary of all cached entries.
 pub fn print_entries() -> Result<()> {
     let db = db()?;
-    println!("{:<50} {:<12} {}", "Package", "Status", "Expires");
+    println!("{:<50} {:<12} Expires", "Package", "Status");
     println!("{}", "-".repeat(90));
     for item in db.iter() {
         let (_, v) = item?;

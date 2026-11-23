@@ -37,9 +37,7 @@ pub async fn resolve_id(id: &PackageId, node_url: Option<&str>) -> Result<TrustV
     }
 
     // ── 2. Query live chain node ──────────────────────────────────────────────
-    let url = node_url
-        .map(String::from)
-        .unwrap_or_else(|| default_node_url());
+    let url = node_url.map(String::from).unwrap_or_else(default_node_url);
 
     let verdict = match chain_client::fetch_verdict(id, &url).await {
         Ok(v) => v,
@@ -69,14 +67,13 @@ pub(crate) fn parse_pkg(raw: &str) -> (String, Option<String>) {
     // Strip ecosystem prefix if present (e.g. "npm:express" -> "express")
     let mut clean = raw;
     for eco in &["npm:", "pypi:", "cargo:", "rubygems:", "maven:"] {
-        if raw.starts_with(eco) {
-            clean = &raw[eco.len()..];
+        if let Some(stripped) = raw.strip_prefix(eco) {
+            clean = stripped;
             break;
         }
     }
 
-    if clean.starts_with('@') {
-        let rest = &clean[1..];
+    if let Some(rest) = clean.strip_prefix('@') {
         if let Some(idx) = rest.rfind('@') {
             return (
                 format!("@{}", &rest[..idx]),

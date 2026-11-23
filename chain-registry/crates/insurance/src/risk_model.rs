@@ -213,7 +213,7 @@ impl RiskModel {
 
     /// Calculate risk from metrics
     pub fn calculate_from_metrics(&self, metrics: &PackageMetrics) -> f64 {
-        let mut factors: Vec<(String, f64, f64)> = vec![
+        let factors: Vec<(String, f64, f64)> = vec![
             ("age".to_string(), self.weights["age"], metrics.age_risk()),
             (
                 "dependencies".to_string(),
@@ -260,9 +260,8 @@ impl RiskModel {
         total_score += metrics.audit_benefit();
 
         // Normalize and clamp
-        let final_score = (total_score / total_weight).clamp(0.0, 100.0);
 
-        final_score
+        (total_score / total_weight).clamp(0.0, 100.0)
     }
 
     /// Fetch real package metrics from the chain node REST API.

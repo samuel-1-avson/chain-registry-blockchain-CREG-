@@ -285,6 +285,7 @@ struct WriteContext {
     signer: PrivateKeySigner,
 }
 
+#[allow(clippy::result_large_err)]
 async fn prepare_write(state: &SharedState) -> Result<WriteContext, Response> {
     let (rpc_url, governance_addr) = {
         let s = state.read().await;
@@ -321,6 +322,7 @@ async fn prepare_write(state: &SharedState) -> Result<WriteContext, Response> {
     })
 }
 
+#[allow(clippy::result_large_err)]
 async fn load_governance_signer() -> Result<PrivateKeySigner, Response> {
     let secrets = match chain_registry_secrets::SecretsProvider::from_env() {
         Ok(provider) => provider,
@@ -434,7 +436,7 @@ fn parse_calldata(raw: &str) -> Result<Bytes, (StatusCode, &'static str, String)
     if hex_part.is_empty() {
         return Ok(Bytes::new());
     }
-    if hex_part.len() % 2 != 0 || !hex_part.bytes().all(|b| b.is_ascii_hexdigit()) {
+    if !hex_part.len().is_multiple_of(2) || !hex_part.bytes().all(|b| b.is_ascii_hexdigit()) {
         return Err((
             StatusCode::BAD_REQUEST,
             "invalid_governance_proposal",
@@ -473,6 +475,7 @@ async fn dispatch_write(ctx: WriteContext, action: WriteAction) -> Response {
     }
 }
 
+#[allow(clippy::result_large_err)]
 async fn send_governance_tx(
     ctx: WriteContext,
     action: WriteAction,
@@ -519,17 +522,17 @@ async fn send_governance_tx(
                 .proposalCount()
                 .call()
                 .await
-                .map_err(|err| l1_unavailable(err))?
+                .map_err(l1_unavailable)?
                 ._0
                 .to::<u64>();
             let tx_hash = contract
                 .submit(args.target, args.calldata, args.description)
                 .send()
                 .await
-                .map_err(|err| l1_rejected(err))?
+                .map_err(l1_rejected)?
                 .watch()
                 .await
-                .map_err(|err| l1_unavailable(err))?;
+                .map_err(l1_unavailable)?;
             Ok(GovernanceWriteBody {
                 action: "submit".into(),
                 signer: format!("{signer_addr:#x}"),
@@ -545,10 +548,10 @@ async fn send_governance_tx(
                 .vote(U256::from(id), approve)
                 .send()
                 .await
-                .map_err(|err| l1_rejected(err))?
+                .map_err(l1_rejected)?
                 .watch()
                 .await
-                .map_err(|err| l1_unavailable(err))?;
+                .map_err(l1_unavailable)?;
             Ok(GovernanceWriteBody {
                 action: "vote".into(),
                 signer: format!("{signer_addr:#x}"),
@@ -564,10 +567,10 @@ async fn send_governance_tx(
                 .vote(U256::from(id), true)
                 .send()
                 .await
-                .map_err(|err| l1_rejected(err))?
+                .map_err(l1_rejected)?
                 .watch()
                 .await
-                .map_err(|err| l1_unavailable(err))?;
+                .map_err(l1_unavailable)?;
             Ok(GovernanceWriteBody {
                 action: "execute".into(),
                 signer: format!("{signer_addr:#x}"),
@@ -583,6 +586,7 @@ async fn send_governance_tx(
     }
 }
 
+#[allow(clippy::result_large_err)]
 async fn require_pending_proposal<T, P>(
     contract: &IGovernance::IGovernanceInstance<T, P>,
     id: u64,
@@ -595,7 +599,7 @@ where
         .proposalCount()
         .call()
         .await
-        .map_err(|err| l1_unavailable(err))?
+        .map_err(l1_unavailable)?
         ._0
         .to::<u64>();
     if id >= count {
@@ -609,7 +613,7 @@ where
         .getProposal(U256::from(id))
         .call()
         .await
-        .map_err(|err| l1_unavailable(err))?;
+        .map_err(l1_unavailable)?;
     match proposal.status {
         0 => Ok(()),
         1 => Err(write_error(

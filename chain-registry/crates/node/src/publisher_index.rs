@@ -43,6 +43,12 @@ pub struct PublisherIndex {
     canonical_to_pubkey: HashMap<String, String>,
 }
 
+impl Default for PublisherIndex {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl PublisherIndex {
     pub fn new() -> Self {
         Self {

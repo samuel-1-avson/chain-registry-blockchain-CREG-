@@ -7,13 +7,8 @@
 use anyhow::Result;
 use chrono::Utc;
 use colored::Colorize;
-use common::{
-    sha256_hex, Block, BlockHeader, PackageId, PackageManifest, PublishRequest, Transaction,
-};
-use consensus::{
-    pbft::PbftEngine,
-    validator_set::{ValidatorInfo, ValidatorSet},
-};
+use common::{sha256_hex, PackageId, PackageManifest, PublishRequest};
+use consensus::validator_set::{ValidatorInfo, ValidatorSet};
 use cross_chain::merkle_proof::{build_merkle_tree, generate_inclusion_proof, verify_merkle_path};
 use ed25519_dalek::{Signer, SigningKey, Verifier};
 use rand::rngs::OsRng;

@@ -1,20 +1,21 @@
 // crates/node/src/sync.rs
 // Chain synchronisation — brings a lagging node up to the network tip.
-//
-// On startup, and periodically during operation, this module:
-//   1. Asks peers for their chain tip height.
-//   2. If we are behind, fetches each missing block in order.
-//   3. Validates each block's prev_hash linkage before inserting.
-//   4. Applies each block to the publisher index.
-//
-// This is a simple linear sync. In a production network with thousands of
-// blocks, a state-snapshot sync (download a snapshot + apply delta) would
-// be more efficient, but for a registry where each block contains a handful
-// of package verification transactions, linear sync is perfectly adequate.
+#![allow(dead_code)] // Sync loop invoked by creg-node main binary.
+                     //
+                     // On startup, and periodically during operation, this module:
+                     //   1. Asks peers for their chain tip height.
+                     //   2. If we are behind, fetches each missing block in order.
+                     //   3. Validates each block's prev_hash linkage before inserting.
+                     //   4. Applies each block to the publisher index.
+                     //
+                     // This is a simple linear sync. In a production network with thousands of
+                     // blocks, a state-snapshot sync (download a snapshot + apply delta) would
+                     // be more efficient, but for a registry where each block contains a handful
+                     // of package verification transactions, linear sync is perfectly adequate.
 
 use crate::NodeState;
 use anyhow::Context;
-use common::{AuthenticatedValidatorSetSnapshot, Transaction, ValidatorSet, ValidatorVote};
+use common::{AuthenticatedValidatorSetSnapshot, Transaction, ValidatorSet};
 use std::collections::{HashMap, HashSet};
 use std::sync::{Arc, Mutex};
 use tokio::sync::RwLock;
@@ -952,7 +953,7 @@ async fn attempt_reorg_recovery(
     };
 
     // ── 2. Fetch and fully validate the peers' branch before adopting ────
-    let (validator_set, bootstrap_set, data_dir) = {
+    let (_validator_set, bootstrap_set, data_dir) = {
         let s = state.read().await;
         (
             s.validator_set.clone(),
@@ -1949,7 +1950,7 @@ mod tests {
             .validate_against(&bootstrap)
             .expect("alternate peer quorum");
         ensure_histories_are_prefix_compatible(
-            &[checkpoint.clone()],
+            std::slice::from_ref(&checkpoint),
             &[alternate_checkpoint_witness],
         )
         .expect("independently valid peer witnesses identify one logical transition");

@@ -456,8 +456,8 @@ mod tests {
     #[test]
     fn vault_exclusivity_rejects_plaintext_env_overrides() {
         let _guard = ENV_LOCK.lock().unwrap();
-        std::env::set_var("CREG_VALIDATOR_KEY", &"11".repeat(32));
-        std::env::set_var("CREG_GOVERNANCE_KEY", &"22".repeat(32));
+        std::env::set_var("CREG_VALIDATOR_KEY", "11".repeat(32));
+        std::env::set_var("CREG_GOVERNANCE_KEY", "22".repeat(32));
         let errs = validate_vault_exclusivity(SecretsBackend::Vault);
         std::env::remove_var("CREG_VALIDATOR_KEY");
         std::env::remove_var("CREG_GOVERNANCE_KEY");

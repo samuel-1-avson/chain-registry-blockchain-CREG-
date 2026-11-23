@@ -692,7 +692,6 @@ async fn process_package(
                 analysis_effective_size: committee.effective_size,
                 analysis_mandatory_contributed: mandatory_contributed,
                 analysis_committee: Some(committee_for_record),
-                ..Default::default()
             };
             // This path runs before canonical block finality. Reward sends are
             // held until a durable, governance-authorized dispatcher can bind

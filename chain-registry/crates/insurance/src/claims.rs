@@ -357,6 +357,7 @@ impl ClaimStats {
 
 /// Claims manager
 pub struct ClaimsManager {
+    #[allow(dead_code)]
     evaluator: ClaimEvaluator,
     claims: Vec<Claim>,
 }

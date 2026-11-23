@@ -236,7 +236,7 @@ fn normalise(name: &str) -> String {
     name.to_lowercase()
         .trim_start_matches('@')
         .split('/')
-        .last()
+        .next_back()
         .unwrap_or(name)
         .replace(['-', '_', '.'], "")
 }

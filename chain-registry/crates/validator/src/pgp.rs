@@ -3,7 +3,7 @@
 // Verifies a detached armored or binary PGP signature over the tarball bytes.
 
 use common::{Finding, FindingSeverity};
-use pgp::types::KeyTrait;
+use pgp::types::PublicKeyTrait;
 use pgp::{Deserializable, SignedPublicKey, StandaloneSignature};
 
 pub struct PgpResult {
@@ -66,7 +66,7 @@ pub fn verify_signature(
     };
 
     // Verify signature over the raw tarball bytes.
-    let fingerprint = hex::encode(pubkey.fingerprint());
+    let fingerprint = hex::encode(pubkey.fingerprint().as_bytes());
     match sig.verify(&pubkey, tarball) {
         Ok(()) => {
             tracing::info!("PGP: signature verified — fp {}", &fingerprint[..16]);

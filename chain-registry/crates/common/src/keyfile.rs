@@ -116,8 +116,8 @@ impl KeyFileV2 {
         let raw = KeyFileV2Raw {
             version: KEYFILE_V2_VERSION,
             scheme: SignatureScheme::HybridEd25519MlDsa44V1.id().to_string(),
-            ed25519_seed: hex::encode(&*self.ed25519_seed),
-            mldsa44_seed: hex::encode(&*self.mldsa44_seed),
+            ed25519_seed: hex::encode(*self.ed25519_seed),
+            mldsa44_seed: hex::encode(*self.mldsa44_seed),
         };
         Ok(zeroize::Zeroizing::new(serde_json::to_string(&raw)?))
     }

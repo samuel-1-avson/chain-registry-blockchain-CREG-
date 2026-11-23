@@ -16,7 +16,9 @@ use common::{
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
 
+#[allow(dead_code)]
 pub const WITNESS_ID_ENV: &str = "CREG_WITNESS_ID";
+#[allow(dead_code)]
 pub const WITNESS_KEY_ENV: &str = "CREG_WITNESS_KEY";
 pub const WITNESS_KEY_PASSPHRASE_ENV: &str = "CREG_WITNESS_KEY_PASSPHRASE";
 

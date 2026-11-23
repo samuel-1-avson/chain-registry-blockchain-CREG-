@@ -9,7 +9,7 @@
 /// 4. If no cache exists, return an error.
 pub async fn resolve_chain_spec(
     url: Option<&str>,
-    data_dir: &std::path::PathBuf,
+    data_dir: &std::path::Path,
     offline: bool,
 ) -> anyhow::Result<common::ChainSpec> {
     let cache_path = data_dir.join("chain-spec.cached.json");

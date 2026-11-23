@@ -57,6 +57,7 @@ fn validator_fixture(id: &str, seed_byte: u8) -> (Validator, SigningKey, Signing
     (val, ed_sk, hyb_sk)
 }
 
+#[allow(clippy::too_many_arguments)]
 fn signed_vote(
     id: &str,
     sk: &SigningKey,

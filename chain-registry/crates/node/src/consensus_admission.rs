@@ -227,6 +227,7 @@ impl AttestationStore {
 
 // ─── Signer ──────────────────────────────────────────────────────────────────
 
+#[allow(clippy::too_many_arguments)]
 pub async fn sign_attestation(
     priv_key: &str,
     chain_id: u64,
@@ -289,7 +290,7 @@ pub fn verify_attestation(
     if raw.len() != 65 {
         return Ok(false);
     }
-    let sig = alloy::primitives::Signature::try_from(raw.as_slice())?;
+    let sig = alloy::primitives::PrimitiveSignature::try_from(raw.as_slice())?;
     let recovered = sig.recover_address_from_prehash(&digest)?;
     Ok(recovered == claimed_signer)
 }
@@ -708,7 +709,7 @@ mod tests {
         let name_hash = keccak256(DOMAIN_NAME.as_bytes());
         let version_hash = keccak256(DOMAIN_VERSION.as_bytes());
         let expected = keccak256(
-            &(
+            (
                 type_hash,
                 name_hash,
                 version_hash,

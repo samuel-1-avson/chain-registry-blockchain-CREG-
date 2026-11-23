@@ -4,8 +4,7 @@
 # Use this file on every validator host when the shared testnet services
 # (IPFS/Postgres/Faucet/Explorer/spec-server) are running elsewhere.
 #
-# Dockerfile.secure is FROM chain-registry-app:latest. Build the base image first:
-#   docker compose -f docker-compose.validator.yml --profile build build app-image
+# Builds the canonical `secure-node` stage directly from Dockerfile:
 #   docker compose --env-file validator.env -f docker-compose.validator.yml up -d --build
 #
 # Required env vars:
@@ -92,7 +91,8 @@ services:
     <<: *secure-image
     build:
       context: .
-      dockerfile: ${CREG_DOCKERFILE:-Dockerfile.secure}
+      dockerfile: ${CREG_DOCKERFILE:-Dockerfile}
+      target: secure-node
     container_name: "${CREG_CONTAINER_NAME:-creg-validator}"
     user: "0:0"
     restart: unless-stopped

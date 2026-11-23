@@ -78,7 +78,7 @@ pub async fn generate_and_store(
         .ok_or_else(|| anyhow::anyhow!("CREG_IPFS_URL not configured"))?;
 
     let tarball = fetch_ipfs(&record.ipfs_cid, ipfs_url).await?;
-    let mut report = validator::intelligence::generate_report(record, &tarball).await;
+    let report = validator::intelligence::generate_report(record, &tarball).await;
     store.put(&report)?;
     info!(
         "{} intelligence report stored (status={:?})",

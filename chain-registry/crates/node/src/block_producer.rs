@@ -20,6 +20,7 @@ struct ProposerContext {
     prev_hash: String,
     node_id: String,
     privkey: Option<chain_registry_secrets::SecretString>,
+    #[allow(dead_code)]
     our_pubkey: Option<String>,
     validator_set_hash: String,
     package_authority: common::ValidatorSet,
@@ -143,6 +144,7 @@ fn read_commit_capture_arm() -> anyhow::Result<Option<CommitCaptureArm>> {
 }
 
 #[cfg(feature = "phase-c-real-fleet")]
+#[allow(dead_code)]
 pub(crate) fn validate_commit_capture_arm(
     config: &crate::config::NodeConfig,
 ) -> anyhow::Result<()> {

@@ -1228,7 +1228,7 @@ pub(crate) fn recover_evm_personal_signer(
         .ok_or_else(|| anyhow::anyhow!("Invalid EVM signature recovery id"))?;
     let signature =
         K256Signature::try_from(&bytes[..64]).context("Invalid EVM signature r/s values")?;
-    let prefix = format!("\x19Ethereum Signed Message:\n{}", message.as_bytes().len());
+    let prefix = format!("\x19Ethereum Signed Message:\n{}", message.len());
     let mut payload = prefix.into_bytes();
     payload.extend_from_slice(message.as_bytes());
     let digest = keccak256(payload);
@@ -1405,7 +1405,7 @@ mod tests {
                 flate2::write::GzEncoder::new(&mut tar_bytes, flate2::Compression::default());
             let mut archive = tar::Builder::new(encoder);
             let mut header = tar::Header::new_gnu();
-            header.set_size(content.as_bytes().len() as u64);
+            header.set_size(content.len() as u64);
             header.set_mode(0o644);
             header.set_cksum();
             archive.append_data(&mut header, path, content.as_bytes())?;

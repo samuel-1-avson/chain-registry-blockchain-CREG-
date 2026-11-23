@@ -12,7 +12,7 @@ steps:
     args:
       - build
       - --file
-      - Dockerfile.committed-source
+      - Dockerfile
       - --target
       - node-runtime
       - --build-arg
@@ -22,7 +22,7 @@ steps:
       - --build-arg
       - SOURCE_DATE_EPOCH=${_SOURCE_DATE_EPOCH}
       - --build-arg
-      - CARGO_TARGET_CACHE_ID=creg-phase-c-rust193-${_SOURCE_MANIFEST_SHA256}
+      - CARGO_TARGET_CACHE_ID=creg-phase-c-rust198-${_SOURCE_MANIFEST_SHA256}
       - --tag
       - ${_IMAGE}
       - .

@@ -25,7 +25,7 @@ use aes_gcm::{
     aead::{Aead, KeyInit},
     Aes256Gcm, Nonce,
 };
-use rand::{CryptoRng, RngCore};
+use rand::RngCore;
 use sha2::{Digest, Sha256};
 use std::collections::HashMap;
 use thiserror::Error;

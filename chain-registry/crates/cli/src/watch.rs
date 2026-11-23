@@ -250,8 +250,8 @@ fn should_display(event: &SseEvent, filter: Option<&str>) -> bool {
         .and_then(|v| v.as_str())
         .unwrap_or("");
 
-    if f.starts_with("pkg:") {
-        return canonical.contains(&f[4..]);
+    if let Some(pkg_query) = f.strip_prefix("pkg:") {
+        return canonical.contains(pkg_query);
     }
     match f.to_ascii_lowercase().as_str() {
         "" | "all" => return true,

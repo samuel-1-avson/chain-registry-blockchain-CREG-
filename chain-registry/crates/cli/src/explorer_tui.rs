@@ -214,11 +214,8 @@ impl Theme {
         }
     }
     fn tab_active_fg() -> Color {
-        if IS_LIGHT_THEME.load(Ordering::Relaxed) {
-            Color::Rgb(15, 23, 42)
-        } else {
-            Color::Rgb(15, 23, 42)
-        }
+        let _ = IS_LIGHT_THEME.load(Ordering::Relaxed);
+        Color::Rgb(15, 23, 42)
     }
 }
 
@@ -1779,7 +1776,7 @@ fn refresh_preflight(app: &mut App) {
         Some(hash) if !hash.trim().is_empty() => checks.push(PreflightCheck {
             name: "Genesis identity".into(),
             status: PreflightStatus::Pass,
-            detail: format!("{}", short_hash(hash)),
+            detail: short_hash(hash).to_string(),
         }),
         Some(_) => checks.push(PreflightCheck {
             name: "Genesis identity".into(),
@@ -1800,9 +1797,7 @@ fn refresh_preflight(app: &mut App) {
         name: "L1 RPC".into(),
         status: if l1_rpc_configured {
             PreflightStatus::Pass
-        } else if identity.is_none() && app.last_api_success_at.is_some() {
-            PreflightStatus::Warn
-        } else if identity.is_some() {
+        } else if (identity.is_none() && app.last_api_success_at.is_some()) || identity.is_some() {
             PreflightStatus::Warn
         } else {
             PreflightStatus::Pending
@@ -2509,10 +2504,8 @@ async fn handle_key(app: &mut App, key: KeyEvent) -> bool {
             KeyCode::Backspace => {
                 app.faucet.address_input.pop();
             }
-            KeyCode::Char(c) if !ctrl => {
-                if app.faucet.address_input.len() < 64 {
-                    app.faucet.address_input.push(c);
-                }
+            KeyCode::Char(c) if !ctrl && app.faucet.address_input.len() < 64 => {
+                app.faucet.address_input.push(c);
             }
             _ => {}
         }
@@ -2642,11 +2635,9 @@ async fn handle_key(app: &mut App, key: KeyEvent) -> bool {
                     app.selected_block = *last;
                 }
             }
-            KeyCode::Enter | KeyCode::Char('d') => {
-                if !app.blocks.is_empty() {
-                    app.previous_view = Some(app.current_view);
-                    app.current_view = View::BlockDetail;
-                }
+            KeyCode::Enter | KeyCode::Char('d') if !app.blocks.is_empty() => {
+                app.previous_view = Some(app.current_view);
+                app.current_view = View::BlockDetail;
             }
             _ => {}
         },
@@ -2673,11 +2664,9 @@ async fn handle_key(app: &mut App, key: KeyEvent) -> bool {
                 let filtered = app.matching_validators();
                 page_filtered(&mut app.selected_validator, &filtered, false);
             }
-            KeyCode::Enter | KeyCode::Char('d') => {
-                if !app.validators.is_empty() {
-                    app.previous_view = Some(app.current_view);
-                    app.current_view = View::ValidatorDetail;
-                }
+            KeyCode::Enter | KeyCode::Char('d') if !app.validators.is_empty() => {
+                app.previous_view = Some(app.current_view);
+                app.current_view = View::ValidatorDetail;
             }
             _ => {}
         },
@@ -2700,11 +2689,9 @@ async fn handle_key(app: &mut App, key: KeyEvent) -> bool {
                 let filtered = app.matching_packages();
                 page_filtered(&mut app.selected_package, &filtered, false);
             }
-            KeyCode::Enter | KeyCode::Char('d') => {
-                if !app.packages.is_empty() {
-                    app.previous_view = Some(app.current_view);
-                    app.current_view = View::PackageDetail;
-                }
+            KeyCode::Enter | KeyCode::Char('d') if !app.packages.is_empty() => {
+                app.previous_view = Some(app.current_view);
+                app.current_view = View::PackageDetail;
             }
             _ => {}
         },
@@ -2714,10 +2701,8 @@ async fn handle_key(app: &mut App, key: KeyEvent) -> bool {
                     app.selected_event += 1;
                 }
             }
-            KeyCode::Up | KeyCode::Char('k') => {
-                if app.selected_event > 0 {
-                    app.selected_event -= 1;
-                }
+            KeyCode::Up | KeyCode::Char('k') if app.selected_event > 0 => {
+                app.selected_event -= 1;
             }
             _ => {}
         },
@@ -2808,7 +2793,7 @@ fn handle_mouse(app: &mut App, mouse: crossterm::event::MouseEvent) {
     match mouse.kind {
         MouseEventKind::Down(crossterm::event::MouseButton::Left) => {
             let row = mouse.row;
-            if row >= HEADER_HEIGHT && row < HEADER_HEIGHT + TAB_HEIGHT {
+            if (HEADER_HEIGHT..HEADER_HEIGHT + TAB_HEIGHT).contains(&row) {
                 if let Some(view) = tab_at_column(mouse.column, app.last_width.max(1)) {
                     app.current_view = view;
                 }
@@ -2830,10 +2815,8 @@ fn handle_mouse(app: &mut App, mouse: crossterm::event::MouseEvent) {
                             app.selected_package = index;
                         }
                     }
-                    View::Events => {
-                        if index < app.events.len() {
-                            app.selected_event = index;
-                        }
+                    View::Events if index < app.events.len() => {
+                        app.selected_event = index;
                     }
                     _ => {}
                 }
@@ -2854,10 +2837,8 @@ fn handle_mouse(app: &mut App, mouse: crossterm::event::MouseEvent) {
                 let filtered = app.matching_packages();
                 move_filtered(&mut app.selected_package, &filtered, true);
             }
-            View::Events => {
-                if app.selected_event < app.events.len().saturating_sub(1) {
-                    app.selected_event += 1;
-                }
+            View::Events if app.selected_event < app.events.len().saturating_sub(1) => {
+                app.selected_event += 1;
             }
             _ => {}
         },
@@ -2876,10 +2857,8 @@ fn handle_mouse(app: &mut App, mouse: crossterm::event::MouseEvent) {
                 let filtered = app.matching_packages();
                 move_filtered(&mut app.selected_package, &filtered, false);
             }
-            View::Events => {
-                if app.selected_event > 0 {
-                    app.selected_event -= 1;
-                }
+            View::Events if app.selected_event > 0 => {
+                app.selected_event -= 1;
             }
             _ => {}
         },
@@ -4515,7 +4494,7 @@ fn draw_operator(f: &mut Frame, app: &App, area: Rect) {
         .count();
 
     let summary = Paragraph::new(vec![
-        Line::from(format!("Mode: validator console")),
+        Line::from("Mode: validator console".to_string()),
         Line::from(format!(
             "Validators online: {}/{}",
             active_validators,

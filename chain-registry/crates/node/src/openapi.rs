@@ -586,6 +586,7 @@ pub struct NamespaceLifecycleEventV2 {
 /// Untagged lifecycle request accepted by the generic and action-specific
 /// routes. `schema_version` and the v2 chain-bound fields distinguish the two
 /// wire formats; no wrapper object or variant tag is present in JSON.
+#[allow(clippy::large_enum_variant)]
 #[derive(serde::Serialize, ToSchema)]
 #[serde(untagged)]
 pub enum NamespaceLifecycleSubmission {
@@ -656,6 +657,7 @@ pub struct ValidatorProfile {
 // never called — axum wires the real handlers in `api.rs`. The pairing is
 // maintained by convention: the stub's `path = "..."` must match the router.
 
+#[allow(dead_code, unused_imports)]
 pub mod paths {
     use super::*;
 

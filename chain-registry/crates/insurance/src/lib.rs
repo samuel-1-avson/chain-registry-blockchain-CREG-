@@ -21,7 +21,7 @@ use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use thiserror::Error;
-use tracing::{debug, info, warn};
+use tracing::{debug, info};
 
 pub mod claims;
 pub mod risk_model;
@@ -124,8 +124,8 @@ impl Policy {
         let total = (self.expires_at - self.created_at).num_days();
 
         // Pro-rata refund minus 10% fee
-        let refund = (self.premium * remaining as f64 / total as f64) * 0.9;
-        refund
+
+        (self.premium * remaining as f64 / total as f64) * 0.9
     }
 }
 

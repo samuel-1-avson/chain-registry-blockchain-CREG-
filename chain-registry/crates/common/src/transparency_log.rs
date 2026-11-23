@@ -460,6 +460,7 @@ impl WitnessedTreeHead {
 /// Verify the complete client trust statement: a particular immutable event
 /// is included in a fresh, independently witnessed tree head, and that head
 /// extends the caller's persisted checkpoint without rewriting history.
+#[allow(clippy::too_many_arguments)]
 pub fn verify_witnessed_inclusion(
     event: &TransparencyEvent,
     inclusion: &InclusionProof,

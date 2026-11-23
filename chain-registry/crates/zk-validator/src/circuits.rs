@@ -391,7 +391,7 @@ pub struct BatchValidationCircuit {
 
 impl ConstraintSynthesizer<Fr> for BatchValidationCircuit {
     fn generate_constraints(self, cs: ConstraintSystemRef<Fr>) -> Result<(), SynthesisError> {
-        for (_i, package) in self.packages.iter().enumerate() {
+        for package in self.packages.iter() {
             // In arkworks 0.4, we create a namespace differently
             package.clone().generate_constraints(cs.clone())?;
         }

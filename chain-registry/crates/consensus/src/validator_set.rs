@@ -27,6 +27,12 @@ pub struct ValidatorSet {
     pub(crate) validators: HashMap<String, ValidatorInfo>,
 }
 
+impl Default for ValidatorSet {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl ValidatorSet {
     pub fn new() -> Self {
         Self {
@@ -53,6 +59,10 @@ impl ValidatorSet {
 
     pub fn len(&self) -> usize {
         self.validators.values().filter(|v| v.is_active).count()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.len() == 0
     }
 
     pub fn active_ids(&self) -> Vec<String> {

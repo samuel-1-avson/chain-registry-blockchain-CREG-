@@ -2,6 +2,7 @@
 // Persistent storage for the blockchain using RocksDB.
 // Stores blocks by height and by hash, and a package index by canonical ID.
 // Replaced sled for better write amplification, compaction, and snapshot support.
+#![allow(dead_code)] // Reorg and diagnostic methods shared across node binary targets.
 
 use anyhow::{Context, Result};
 use chrono::{DateTime, Utc};
@@ -11,7 +12,6 @@ use common::{
     TRANSPARENCY_LOG_VERSION,
 };
 use rocksdb::{checkpoint::Checkpoint, ColumnFamilyDescriptor, Options, WriteOptions, DB};
-use semver;
 use std::{
     collections::{BTreeMap, HashMap, HashSet},
     path::{Path, PathBuf},
@@ -3108,15 +3108,17 @@ impl ChainStore {
         let cf = self.db.cf_handle(CF_PACKAGES).context("cf packages")?;
         let mut matching = Vec::new();
 
-        let iter_box: Box<dyn Iterator<Item = Result<(Box<[u8]>, Box<[u8]>), rocksdb::Error>>> =
-            if let Some(eco) = ecosystem {
-                Box::new(
-                    self.db
-                        .prefix_iterator_cf(&cf, format!("{}:", eco).as_bytes()),
-                )
-            } else {
-                Box::new(self.db.iterator_cf(&cf, rocksdb::IteratorMode::Start))
-            };
+        #[allow(clippy::type_complexity)]
+        let iter_box: Box<
+            dyn Iterator<Item = Result<(Box<[u8]>, Box<[u8]>), rocksdb::Error>>,
+        > = if let Some(eco) = ecosystem {
+            Box::new(
+                self.db
+                    .prefix_iterator_cf(&cf, format!("{}:", eco).as_bytes()),
+            )
+        } else {
+            Box::new(self.db.iterator_cf(&cf, rocksdb::IteratorMode::Start))
+        };
 
         for item in iter_box {
             let (key, bytes) = item?;
@@ -3129,12 +3131,12 @@ impl ChainStore {
             let record: ChainRecord = serde_json::from_slice(&bytes)?;
 
             if let Some(st) = status {
-                let matches = match (st, &record.status) {
-                    (PackageStatus::Verified, PackageStatus::Verified) => true,
-                    (PackageStatus::Pending, PackageStatus::Pending) => true,
-                    (PackageStatus::Revoked { .. }, PackageStatus::Revoked { .. }) => true,
-                    _ => false,
-                };
+                let matches = matches!(
+                    (st, &record.status),
+                    (PackageStatus::Verified, PackageStatus::Verified)
+                        | (PackageStatus::Pending, PackageStatus::Pending)
+                        | (PackageStatus::Revoked { .. }, PackageStatus::Revoked { .. })
+                );
                 if !matches {
                     continue;
                 }

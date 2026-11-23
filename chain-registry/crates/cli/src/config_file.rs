@@ -237,7 +237,7 @@ pub fn effective_ipfs_url(cli_override: Option<&str>) -> String {
     cli_override
         .map(String::from)
         .or_else(|| Config::load().ok().map(|c| c.ipfs_url()))
-        .unwrap_or_else(|| default_ipfs_url())
+        .unwrap_or_else(default_ipfs_url)
 }
 
 /// Host portion of a service URL (lowercased), if parseable.

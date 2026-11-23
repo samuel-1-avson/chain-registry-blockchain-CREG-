@@ -394,30 +394,30 @@ impl ValidatorAiConfig {
                         ordered_names.push("openai_api".to_string());
                     }
                 }
-                "openrouter" => {
-                    if std::env::var("OPENROUTER_API_KEY").is_ok_and(|k| !k.trim().is_empty()) {
-                        let model = std::env::var("CREG_LLM_MODEL")
-                            .unwrap_or_else(|_| "anthropic/claude-sonnet-4-6".into());
-                        let base_url = std::env::var("CREG_LLM_API_URL")
-                            .ok()
-                            .filter(|v| !v.trim().is_empty());
-                        cfg.providers.insert(
-                            "openrouter_api".into(),
-                            ProviderProfile {
-                                kind: ProviderKind::OpenRouter,
-                                base_url,
-                                model,
-                                model_family: "openrouter".into(),
-                                api_key_secret_ref: Some("env:OPENROUTER_API_KEY".into()),
-                                max_concurrent_requests: 8,
-                                timeout_secs: 30,
-                                cost_per_1k_input_usd: 0.003,
-                                cost_per_1k_output_usd: 0.015,
-                                allow_private_network: false,
-                            },
-                        );
-                        ordered_names.push("openrouter_api".to_string());
-                    }
+                "openrouter"
+                    if std::env::var("OPENROUTER_API_KEY").is_ok_and(|k| !k.trim().is_empty()) =>
+                {
+                    let model = std::env::var("CREG_LLM_MODEL")
+                        .unwrap_or_else(|_| "anthropic/claude-sonnet-4-6".into());
+                    let base_url = std::env::var("CREG_LLM_API_URL")
+                        .ok()
+                        .filter(|v| !v.trim().is_empty());
+                    cfg.providers.insert(
+                        "openrouter_api".into(),
+                        ProviderProfile {
+                            kind: ProviderKind::OpenRouter,
+                            base_url,
+                            model,
+                            model_family: "openrouter".into(),
+                            api_key_secret_ref: Some("env:OPENROUTER_API_KEY".into()),
+                            max_concurrent_requests: 8,
+                            timeout_secs: 30,
+                            cost_per_1k_input_usd: 0.003,
+                            cost_per_1k_output_usd: 0.015,
+                            allow_private_network: false,
+                        },
+                    );
+                    ordered_names.push("openrouter_api".to_string());
                 }
                 _ => {}
             }

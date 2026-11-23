@@ -280,8 +280,7 @@ fn delegate_to_real_pm(ecosystem: &str, raw_package: &str) -> Result<()> {
 /// Splits "express@4.18.0" → ("express", Some("4.18.0"))
 fn parse_package_arg(raw: &str) -> (String, Option<String>) {
     // Handle scoped npm packages: @scope/pkg@version
-    if raw.starts_with('@') {
-        let rest = &raw[1..];
+    if let Some(rest) = raw.strip_prefix('@') {
         if let Some(idx) = rest.rfind('@') {
             let name = format!("@{}", &rest[..idx]);
             let version = rest[idx + 1..].to_string();

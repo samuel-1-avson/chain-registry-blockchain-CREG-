@@ -44,6 +44,7 @@ impl Default for GossipConfig {
     }
 }
 
+#[allow(unused_imports)]
 pub use consensus::vote_accumulator::{
     canonical_authorized_vote_message, canonical_vote_message, vote_metadata_digest,
     AUTHORIZED_VOTE_MESSAGE_DOMAIN, VOTE_MESSAGE_DOMAIN,

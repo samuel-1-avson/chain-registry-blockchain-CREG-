@@ -246,9 +246,7 @@ pub fn evaluate_package_freshness(
             ),
         ));
     }
-    let Some(previous) = previous else {
-        return None;
-    };
+    let previous = previous?;
     let incoming_revoked = matches!(verdict.status, VerdictStatus::Revoked { .. });
     if previous.kind == PackageFreshnessKind::Revoked && !incoming_revoked {
         return Some(block(
@@ -978,11 +976,7 @@ mod tests {
             .map(|sequence| TransparencyEvent {
                 version: TRANSPARENCY_LOG_VERSION,
                 sequence,
-                kind: if sequence == 0 {
-                    "package-finalized".into()
-                } else {
-                    "package-finalized".into()
-                },
+                kind: "package-finalized".into(),
                 subject: if sequence == 1 {
                     pkg().canonical()
                 } else {

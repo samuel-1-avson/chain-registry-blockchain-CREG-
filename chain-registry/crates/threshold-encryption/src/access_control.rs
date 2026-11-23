@@ -123,17 +123,14 @@ pub enum Role {
 impl Role {
     /// Check if this role has a specific permission
     pub fn has_permission(&self, permission: Permission) -> bool {
-        match (self, permission) {
-            (Role::Admin, _) => true,
-            (Role::Publisher, Permission::Publish) => true,
-            (Role::Publisher, Permission::Read) => true,
-            (Role::Reader, Permission::Read) => true,
-            (Role::Reader, Permission::Decrypt) => true,
-            (Role::Validator, Permission::Validate) => true,
-            (Role::Validator, Permission::Read) => true,
-            (Role::Observer, Permission::Read) => true,
-            _ => false,
-        }
+        matches!(
+            (self, permission),
+            (Role::Admin, _)
+                | (Role::Publisher, Permission::Publish | Permission::Read)
+                | (Role::Reader, Permission::Read | Permission::Decrypt)
+                | (Role::Validator, Permission::Validate | Permission::Read)
+                | (Role::Observer, Permission::Read)
+        )
     }
 }
 

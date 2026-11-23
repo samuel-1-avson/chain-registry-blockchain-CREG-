@@ -67,9 +67,9 @@ impl IpfsVerifier {
     ) -> [u8; 32] {
         let mut hasher = Sha256::new();
         hasher.update(cid.as_bytes());
-        hasher.update(&[if is_available { 1 } else { 0 }]);
-        hasher.update(&timestamp.to_le_bytes());
-        hasher.update(&provider_count.to_le_bytes());
+        hasher.update([if is_available { 1 } else { 0 }]);
+        hasher.update(timestamp.to_le_bytes());
+        hasher.update(provider_count.to_le_bytes());
         hasher.finalize().into()
     }
 }

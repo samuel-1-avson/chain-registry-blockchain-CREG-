@@ -12,7 +12,7 @@ pub fn print_verdict(v: &TrustVerdict) {
         VerdictStatus::Unknown => label.dimmed().bold().to_string(),
     };
 
-    println!("\n  {} {} {}", "▶", colored_label, canonical.dimmed());
+    println!("\n  ▶ {} {}", colored_label, canonical.dimmed());
 
     match &v.status {
         VerdictStatus::Verified {

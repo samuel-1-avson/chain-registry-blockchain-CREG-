@@ -50,7 +50,11 @@ $phaseCArchive = Join-Path $phaseCStage 'committed-source.tar'
 $phaseCArchivePaths = @(
     'chain-registry/Cargo.toml',
     'chain-registry/Cargo.lock',
+    'chain-registry/Dockerfile',
     'chain-registry/crates',
+    'chain-registry/config',
+    'chain-registry/rules',
+    'chain-registry/validators',
     'chain-registry/docker-compose.yml',
     'chain-registry/docker-compose.light.yml',
     'chain-registry/testnet/phase-c/r7/chain-spec.json',
@@ -79,8 +83,8 @@ $phaseCFiles = @(
         }
     }
 )
-$phaseCRecipeName = 'Dockerfile.committed-source'
-$phaseCRecipe = Join-Path $PSScriptRoot $phaseCRecipeName
+$phaseCRecipeName = 'Dockerfile'
+$phaseCRecipe = Join-Path (Split-Path -Parent (Split-Path -Parent $PSScriptRoot)) $phaseCRecipeName
 Copy-Item -LiteralPath $phaseCRecipe -Destination (Join-Path $phaseCContext $phaseCRecipeName)
 $phaseCCloudBuildName = if ($Target -eq 'node-runtime') {
     'cloudbuild-node-candidate.yaml'
@@ -97,10 +101,10 @@ $phaseCManifest = [ordered]@{
     source_selection = 'git archive; compiler inputs only; working tree excluded'
     archive_sha256 = Get-PhaseCSha256 $phaseCArchive
     cargo_lock_sha256 = Get-PhaseCSha256 (Join-Path $phaseCContext 'Cargo.lock')
-    rust_toolchain = '1.93.0'
-    rust_toolchain_image = 'rust:1.93.0-slim-bookworm@sha256:776861219cd851131c1cec3bbd7cbeb16b99a794048097eb69ad9682a8ed0d57'
+    rust_toolchain = '1.98.1'
+    rust_toolchain_image = 'rust:1.98.1-slim-bookworm'
     native_builder_image = 'ubuntu:24.04@sha256:a853f94d226358a79c740cfc7bce0c289748f3fe3488d921d038ccd752c61b60'
-    runtime_image = 'us-central1-docker.pkg.dev/gen-lang-client-0022105784/creg-testnet/creg-node@sha256:ca4d04e77e9680cb878800f2ea72c1ce7dac6bb3575a55c9921a7314975fb1ef'
+    runtime_image = 'ubuntu:24.04@sha256:a853f94d226358a79c740cfc7bce0c289748f3fe3488d921d038ccd752c61b60'
     platform = 'linux/amd64'
     node_features = @('phase-c-real-fleet')
     cli_features = @('common/phase-c-canonical-transactions')
@@ -145,7 +149,7 @@ $phaseCDockerArgs = @(
     '--build-arg', ('SOURCE_REVISION=' + $Revision),
     '--build-arg', ('SOURCE_MANIFEST_SHA256=' + $phaseCManifestSha),
     '--build-arg', ('SOURCE_DATE_EPOCH=' + $phaseCSourceEpoch),
-    '--build-arg', ('CARGO_TARGET_CACHE_ID=creg-phase-c-rust193-' + $phaseCManifestSha),
+    '--build-arg', ('CARGO_TARGET_CACHE_ID=creg-phase-c-rust198-' + $phaseCManifestSha),
     '--progress=plain', '--tag', $ImageTag, $phaseCContext
 )
 $phaseCRecord = [ordered]@{

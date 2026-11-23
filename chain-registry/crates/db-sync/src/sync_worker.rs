@@ -7,8 +7,6 @@ use std::sync::Arc;
 use tokio::time::{interval, Duration};
 use tracing::{info, warn};
 
-use crate::{apply_block, schema};
-
 /// Shared chain store handle used by the sync worker.
 pub type ChainStoreHandle = Arc<tokio::sync::RwLock<dyn ChainStoreProxy>>;
 

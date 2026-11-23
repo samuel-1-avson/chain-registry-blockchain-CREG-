@@ -39,8 +39,8 @@ if ($RebuildApp -or (-not $SkipAppBuild -and -not $appExists)) {
     Log "Using existing chain-registry-app:latest (pass -RebuildApp to rebuild base image)"
 }
 
-Log "Building chain-registry-node-secure:latest from Dockerfile.secure ..."
-docker build -t chain-registry-node-secure:latest -f Dockerfile.secure .
+Log "Building chain-registry-node-secure:latest (--target secure-node) from $Dockerfile ..."
+docker build --target secure-node -t chain-registry-node-secure:latest -f $Dockerfile .
 if ($LASTEXITCODE -ne 0) { throw "docker build secure failed" }
 
 Log "Verifying nsjail in secure image (nsjail has no --version; use --help) ..."

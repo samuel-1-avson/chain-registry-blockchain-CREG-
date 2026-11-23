@@ -3,8 +3,9 @@
 // Spins up a real in-process node and drives the full publish → verify lifecycle.
 
 use chrono::Utc;
-use common::{PackageId, PackageManifest, PublishRequest, VerdictStatus};
+use common::{PackageId, PackageManifest, PublishRequest};
 
+#[allow(dead_code)]
 mod helpers {
     use super::*;
     use ed25519_dalek::{Signer, SigningKey};
@@ -133,7 +134,7 @@ mod chain_store_tests {
             header: BlockHeader {
                 height: 1,
                 prev_hash: store.tip_hash().unwrap(),
-                merkle_root: common::merkle_root(&[tx.clone()]),
+                merkle_root: common::merkle_root(std::slice::from_ref(&tx)),
                 proposer_id: "test".into(),
                 timestamp: Utc::now(),
                 validator_set_hash: "dev".into(),
@@ -319,9 +320,7 @@ mod chain_store_tests {
 #[cfg(test)]
 mod consensus_tests {
     use chrono::Utc;
-    use common::{
-        Block, BlockHeader, BlockSignature, Transaction, ValidatorSignature, ValidatorVote,
-    };
+    use common::{Block, BlockHeader, BlockSignature};
     use consensus::{validator_set::ValidatorInfo, PbftEngine, ValidatorSet};
     use ed25519_dalek::{Signer, SigningKey};
     use rand::rngs::OsRng;
@@ -416,16 +415,16 @@ mod consensus_tests {
         let hash = engine.start_round(block, vs).unwrap();
 
         // Send 3 PREPARE votes.
-        for i in 0..3 {
-            let sig = validators[i].sign_vote("prepare", &hash);
-            let _ = engine.prepare(&hash, &validators[i].id, sig).unwrap();
+        for validator in validators.iter().take(3) {
+            let sig = validator.sign_vote("prepare", &hash);
+            let _ = engine.prepare(&hash, &validator.id, sig).unwrap();
         }
 
         // Send 3 COMMIT votes — should finalise.
         let mut finalised = false;
-        for i in 0..3 {
-            let sig = validators[i].sign_vote("commit", &hash);
-            finalised = engine.commit(&hash, &validators[i].id, sig).unwrap();
+        for validator in validators.iter().take(3) {
+            let sig = validator.sign_vote("commit", &hash);
+            finalised = engine.commit(&hash, &validator.id, sig).unwrap();
         }
         assert!(finalised, "Block should be finalised after quorum");
     }
@@ -452,15 +451,15 @@ mod consensus_tests {
         let hash = engine.start_round(block, vs).unwrap();
 
         // Send 3 PREPARE votes.
-        for i in 0..3 {
-            let sig = validators[i].sign_vote("prepare", &hash);
-            let _ = engine.prepare(&hash, &validators[i].id, sig).unwrap();
+        for validator in validators.iter().take(3) {
+            let sig = validator.sign_vote("prepare", &hash);
+            let _ = engine.prepare(&hash, &validator.id, sig).unwrap();
         }
 
         // Only 2 COMMIT votes — quorum not met.
-        for i in 0..2 {
-            let sig = validators[i].sign_vote("commit", &hash);
-            let _ = engine.commit(&hash, &validators[i].id, sig).unwrap();
+        for validator in validators.iter().take(2) {
+            let sig = validator.sign_vote("commit", &hash);
+            let _ = engine.commit(&hash, &validator.id, sig).unwrap();
         }
 
         let sigs = engine.finalised_sigs(&hash);

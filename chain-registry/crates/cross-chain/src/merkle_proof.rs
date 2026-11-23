@@ -96,7 +96,7 @@ pub fn generate_inclusion_proof(
     let mut current_idx = leaf_index;
 
     for level in &tree[..tree.len() - 1] {
-        let sibling_idx = if current_idx % 2 == 0 {
+        let sibling_idx = if current_idx.is_multiple_of(2) {
             if current_idx + 1 < level.len() {
                 current_idx + 1
             } else {
@@ -131,7 +131,7 @@ pub fn verify_merkle_path(
     let mut idx = leaf_index;
 
     for sibling in audit_path {
-        current = if idx % 2 == 0 {
+        current = if idx.is_multiple_of(2) {
             hash_pair(&current, sibling)
         } else {
             hash_pair(sibling, &current)
@@ -139,7 +139,7 @@ pub fn verify_merkle_path(
         idx /= 2;
     }
 
-    &current == expected_root
+    current == expected_root
 }
 
 #[cfg(test)]

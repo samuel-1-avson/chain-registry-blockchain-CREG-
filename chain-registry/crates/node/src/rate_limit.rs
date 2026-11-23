@@ -103,7 +103,7 @@ impl Bucket {
 }
 
 /// Lock a mutex, recovering gracefully if it was poisoned.
-fn lock_buckets<T>(mutex: &Mutex<T>) -> std::sync::MutexGuard<T> {
+fn lock_buckets<T>(mutex: &Mutex<T>) -> std::sync::MutexGuard<'_, T> {
     match mutex.lock() {
         Ok(guard) => guard,
         Err(poisoned) => {

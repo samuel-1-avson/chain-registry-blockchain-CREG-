@@ -401,11 +401,10 @@ impl SlashingProofGenerator {
         verify_vote_sig(&evidence.vote2_details, "vote2")?;
 
         // Check that timestamps are close (same consensus round)
-        let time_diff = if evidence.vote1_details.timestamp > evidence.vote2_details.timestamp {
-            evidence.vote1_details.timestamp - evidence.vote2_details.timestamp
-        } else {
-            evidence.vote2_details.timestamp - evidence.vote1_details.timestamp
-        };
+        let time_diff = evidence
+            .vote1_details
+            .timestamp
+            .abs_diff(evidence.vote2_details.timestamp);
 
         if time_diff > 300 {
             // 5 minutes

@@ -22,7 +22,7 @@ use common::l1_rpc::FailoverTransport;
 use k256::ecdsa::{RecoveryId, Signature as K256Signature, VerifyingKey};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
-use sled::transaction::{ConflictableTransactionError, Transactional};
+use sled::transaction::ConflictableTransactionError;
 use std::{collections::HashMap, fs, net::SocketAddr, path::PathBuf, sync::Arc, time::Duration};
 use tokio::time::sleep;
 use tower_http::cors::{AllowOrigin, Any, CorsLayer};
@@ -1408,6 +1408,7 @@ fn open_durable_journal(data_dir: &str) -> anyhow::Result<sled::Tree> {
     Ok(journal)
 }
 
+#[allow(clippy::too_many_arguments)]
 fn reserve_sponsorship(
     journal: &sled::Tree,
     owner_nonce_key: &str,
@@ -2077,6 +2078,7 @@ fn extract_revert_reason(err: &str) -> Option<String> {
     Some(tail[..end].trim().to_string())
 }
 
+#[allow(dead_code)]
 fn parse_hex_u64(value: &str) -> Result<u64, String> {
     u64::from_str_radix(value.trim_start_matches("0x"), 16)
         .map_err(|e| format!("Failed to parse hex u64: {}", e))
