@@ -1,0 +1,13 @@
+[package]
+name = "registry-view"
+version = "0.1.0"
+edition = "2021"
+description = "Versioned public read contract for CREG v4 package status, proofs, witnesses and events (ADR-019 §3.3)"
+
+[dependencies]
+common     = { path = "../common" }
+serde      = { workspace = true }
+serde_json = { workspace = true }
+
+[lints]
+workspace = true

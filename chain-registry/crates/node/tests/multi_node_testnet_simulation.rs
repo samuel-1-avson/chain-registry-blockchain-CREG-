@@ -201,6 +201,7 @@ fn test_multi_node_testnet_cluster_full_simulation() {
             vrf_proof: None,
             view_number: 0,
             view_change_certificate: vec![],
+            status_root: None,
         },
         transactions: vec![Transaction::Revoke {
             package_canonical: package_id.canonical(),

@@ -720,6 +720,7 @@ async fn process_package(
                 Transaction::PublishAuthorizedV1 {
                     record,
                     authorization,
+                    committee_qc: None,
                 }
             } else {
                 Transaction::Publish(record)
@@ -744,6 +745,7 @@ async fn process_package(
                     request,
                     evidence_hash: evidence_digest,
                     witness: None,
+                    quorum_certificate: None,
                 },
                 "REJECTED",
             )

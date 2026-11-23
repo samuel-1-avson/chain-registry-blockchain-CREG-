@@ -19,6 +19,7 @@ members = [
     "crates/zone-ipc",
     "crates/gateway",
     "crates/l1-tx",
+    "crates/registry-view",
 ]
 # Retired by ADR-009 and unlinked from every built crate by ADR-019 Increment 6
 # (ECA-33). Its source is kept for reference only; it is not built, tested or

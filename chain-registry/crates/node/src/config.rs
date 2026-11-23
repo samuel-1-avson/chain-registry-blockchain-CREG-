@@ -186,6 +186,11 @@ pub struct NodeConfig {
     /// Consensus-committed activation height for proof-retaining namespace
     /// ownership transactions. `None` keeps compatibility mode enabled.
     pub namespace_authority_activation_height: Option<u64>,
+    /// `hybrid_signature_activation_height` from the signed chain spec
+    /// (ADR-017/018/019). Below it, v4-only wire data (committee QCs,
+    /// quarantine transactions, `status_root`) is invalid. It is consensus
+    /// data, so it is taken only from the verified spec, never the env.
+    pub vote_v4_activation_height: Option<u64>,
     pub namespace_authority_policies: Vec<common::NamespaceAuthorityPolicySpec>,
     /// Startup-only provenance for consensus-critical authority policy pins.
     /// Activation is rejected unless these values came from a signature-
@@ -273,6 +278,7 @@ impl Default for NodeConfig {
             chain_id: String::new(),
             network_genesis_hash: String::new(),
             namespace_authority_activation_height: None,
+            vote_v4_activation_height: None,
             namespace_authority_policies: Vec::new(),
             namespace_authority_policy_source_verified: false,
             namespace_authority_config_errors: Vec::new(),
@@ -365,6 +371,7 @@ impl NodeConfig {
                 .trim_start_matches("0x")
                 .to_ascii_lowercase(),
             namespace_authority_activation_height,
+            vote_v4_activation_height: None,
             namespace_authority_policies,
             namespace_authority_policy_source_verified: false,
             namespace_authority_config_errors,
@@ -880,6 +887,7 @@ impl NodeConfig {
         }
         self.namespace_authority_activation_height =
             spec.consensus_params.namespace_authority_activation_height;
+        self.vote_v4_activation_height = spec.consensus_params.hybrid_signature_activation_height;
         self.namespace_authority_policies =
             spec.consensus_params.namespace_authority_policies.clone();
         self.namespace_authority_policy_source_verified = signature_verified;
@@ -1039,6 +1047,7 @@ mod tests {
             chain_id: "creg-test-1".into(),
             network_genesis_hash: String::new(),
             namespace_authority_activation_height: None,
+            vote_v4_activation_height: None,
             namespace_authority_policies: vec![],
             namespace_authority_policy_source_verified: false,
             namespace_authority_config_errors: vec![],

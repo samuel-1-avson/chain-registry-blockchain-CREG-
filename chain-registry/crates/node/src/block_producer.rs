@@ -405,6 +405,8 @@ async fn prepare_unprepared_batch(
             vrf_proof: ctx.vrf_proof.clone(),
             view_number: ctx.view_number,
             view_change_certificate: ctx.view_change_certificate.clone(),
+            // Pre-activation headers omit the status commitment (ADR-019 #1).
+            status_root: None,
         },
         transactions: Vec::new(),
         pbft_signatures: Vec::new(),
@@ -1250,6 +1252,8 @@ async fn produce_block(
             vrf_proof,
             view_number,
             view_change_certificate,
+            // Pre-activation headers omit the status commitment (ADR-019 #1).
+            status_root: None,
         };
         Block {
             header,

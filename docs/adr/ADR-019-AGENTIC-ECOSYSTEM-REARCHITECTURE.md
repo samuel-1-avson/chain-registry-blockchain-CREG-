@@ -813,6 +813,42 @@ Test results:
 2. The legacy cloud-edge explorer configs (`testnet/nginx/explorer-{bootstrap,fleet,hybrid}`) replace the image's nginx config and still proxy `/rpc` to a public Sepolia RPC without the method allowlist.
 3. The deployed explorer images predate Increment 1, so they lack the `/rpc` allowlist until rebuilt. Redeploy the explorer (new image and `CREG_EXPLORER_SEPOLIA_RPC_*` env) before reloading Caddy with these routes, or `/sepolia` answers 508.
 
+### Increment 2, part 1 — v4 wire layer, verifiers and read contract (implemented 2026-11-23)
+
+Decisions applied: #1 (`status_root` as `Option<[u8; 32]>`, two-level tree), #3 (committee QC on the approval, `PublishAuthorizedV1.committee_qc`), #4 (`QuarantineV1` / `QuarantineResolutionV1`) and #7 (`legacy_v3_quorum` label). Increment 2 is split in three parts because it changes consensus: this part adds the wire types, verifiers and read contract with **no change to pre-activation behaviour**; part 2 wires the node producer and block application; part 3 serves the v4 routes and SSE v2 and moves Lane C out of `creg-consensusd`.
+
+| Area | What shipped | Where |
+| --- | --- | --- |
+| Closed vocabularies (`ECA-06`) | `KernelViolationCode` (the sandbox's 9 codes, with static titles) and `CregFindingCategoryV1` promoted into `common`. Unknown values fail to decode. | `common/src/committee.rs` |
+| Committee QC (`ECA-02`) | `CommitteeQuorumCertificateV1` / `QcSignatureV1` with domains for revocation, quarantine, quarantine resolution and approval. The signed message binds the domain, package, content hash, evidence digest, committee digest, authority height, witness digest and (for resolutions) the decision. Verification counts only distinct committee members that are active in the authority set, whose key id matches and whose signature verifies; garbage or outsider signatures are skipped, never fatal. Hybrid signatures are required exactly from activation, and Ed25519-only halves do not count after it. `consensus::verify_committee_qc` is the single entry point (`ECO-INV-03`). | `common/src/committee.rs`, `consensus/src/vote_v4.rs` |
+| Status commitment (`ECA-10`) | Two-level compact sparse Merkle tree: package key → root of that package's version tree → `StatusLeafV1` (`verified` / `quarantined{expires_at_unix, reason_code}` / `revoked{certified}`). Single-entry subtrees collapse, so proofs are about `log2(n)` siblings. `StatusProofV2` proves a leaf, an absent version, or an absent package. | `common/src/status_tree.rs` |
+| Wire fields | `BlockHeader.status_root` and `PreparedBlockHeader.status_root` (hex, omitted when `None`); `PublishAuthorizedV1.committee_qc`; `RevokeV2.quorum_certificate`; new `Transaction::QuarantineV1` and `Transaction::QuarantineResolutionV1`. All new fields use `serde(default, skip_serializing_if)`, so historical header and transaction bytes, hashes and the frozen vectors are unchanged (tests: `absent_status_root_keeps_header_bytes_and_present_one_is_bound`, `new_wire_fields_are_omitted_when_unused`). | `common/src/block.rs` |
+| Activation guard | `NodeConfig.vote_v4_activation_height` comes only from the signed spec. `namespace_consensus::reject_unvalidated_vote_v4_data` runs inside `validate_block` (proposals, sync and inserts) and refuses `status_root` and every v4-only transaction field at every height: before activation they are invalid, and after activation this build cannot yet validate them, so it refuses them rather than accepting unchecked data. Existing post-activation behaviour (hybrid PBFT signatures) is unchanged. | `node/src/{config,namespace_consensus}.rs` |
+| Read contract (`ECA-05`) | New `crates/registry-view`: `PackageViewV4`, `PackageStatusViewV1` (the `ECO-INV-02` lattice, with deterministic quarantine expiry), `ProofBundleV2`, `RevocationStatusV2`, `WitnessViewV1` / `WitnessBundleV1` (violations rendered from the static dictionary; unknown codes become `UNKNOWN(<sha256-8>)`), `CommitteeSummaryV1`, `QuorumLabelV1`, `evidence_class()`, and `SseEnvelopeV2` with `<height>.<tx_index>` ids. `DisplayText` now re-sanitises on decode (`ECO-INV-05`). | `crates/registry-view/`, `common/src/display_text.rs` |
+
+**Adversarial coverage added:** `eco-adv-05` (`committee::tests::eco_adv_05_single_signer_and_outsiders_never_reach_quorum`), `eco-adv-03` at the proof level (`status_tree::tests::eco_adv_03_status_proofs_bind_the_current_state`), and an `eco-adv-04` analogue for certificates (`hybrid_is_required_after_activation_and_refused_before`).
+
+**Verification (local, 2026-11-23).** `cargo fmt --check`, both clippy gates (`-D warnings`) and `cargo deny` (advisories, bans and sources ok) pass. Tests:
+- `common` 98, including golden vectors 10/10 (frozen, unchanged);
+- `registry-view` 6;
+- `consensus` 77, including `signed_message_formats` 6/6 (frozen, unchanged) and `vote_v4_hybrid_convergence` 5/5;
+- node lib under `phase-c-real-fleet` 307 (1 ignored);
+- node `integration` 11, `high_throughput_stress_test` 1 and `multi_node_testnet_simulation` 1;
+- resolver 52.
+
+**Remaining for Increment 2:**
+- *Part 2 (node):*
+  - produce votes as `VoteV4Envelope` from activation and aggregate with `aggregate_vote_v4_quorum`;
+  - persist `WitnessReplayGuard` state in `cf_meta`;
+  - collect committee QC signatures over gossip;
+  - emit `QuarantineV1`, `QuarantineResolutionV1` and certified `RevokeV2`;
+  - apply deterministic quarantine expiry at `header.timestamp`;
+  - compute `status_root` in the producer and check it in validation;
+  - tighten `validate_revoke_v2` after activation (owner/controller or QC);
+  - index witnesses (`witness:<package>:<version>`, `witness_id:<hex32>`);
+  - lift the activation guard once all of the above validates.
+- *Part 3:* serve `/v1/public/v4/packages/:name/:version/{status,proof-bundle,witnesses}` and `/v1/public/v4/quarantine`, add SSE v2, generate OpenAPI from `registry-view`, and move Lane C (`node/src/intelligence/*`) into `creg-agent-runner`.
+
 ### Increment 6 — L1 Services Modernization & Supply-Chain Burn-Down (implemented 2026-11-23)
 
 Decisions applied: #5 (relayer store = PostgreSQL) and #6 (single faucet instance, stateless HMAC PoW, shared `sqlx` pool). No consensus wire type, signed message, block or header format changed; the frozen test files are untouched.

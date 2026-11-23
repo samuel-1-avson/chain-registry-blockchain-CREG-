@@ -750,6 +750,7 @@ mod tests {
                 vrf_proof: None,
                 view_number: 0,
                 view_change_certificate: vec![],
+                status_root: None,
             },
             transactions: txs,
             pbft_signatures: vec![],
@@ -789,6 +790,7 @@ mod tests {
                 vrf_proof: None,
                 view_number: 0,
                 view_change_certificate: vec![],
+                status_root: None,
             },
             transactions: vec![],
             pbft_signatures: vec![],
@@ -813,6 +815,7 @@ mod tests {
             vrf_proof: None,
             view_number: 0,
             view_change_certificate: vec![],
+            status_root: None,
         };
 
         assert!(verify_header_chain(&[(header, "bad-hash".into())], &genesis).is_err());
@@ -866,6 +869,7 @@ mod tests {
             vrf_proof: None,
             view_number: 0,
             view_change_certificate: vec![],
+            status_root: None,
         };
 
         let block_hash =

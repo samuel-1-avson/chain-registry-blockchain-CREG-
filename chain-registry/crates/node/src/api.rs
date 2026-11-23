@@ -3176,6 +3176,10 @@ async fn get_transaction(
                 } => canonical_prefix.clone(),
                 common::Transaction::NamespaceLifecycle(event) => event.namespace.clone(),
                 common::Transaction::NamespaceLifecycleV2(event) => event.namespace.clone(),
+                common::Transaction::QuarantineV1 { record, .. } => record.id.canonical(),
+                common::Transaction::QuarantineResolutionV1 {
+                    package_canonical, ..
+                } => package_canonical.clone(),
             };
 
             if tx_canonical == canonical {
@@ -3305,6 +3309,8 @@ fn tx_kind_label(tx: &Transaction) -> &'static str {
         Transaction::RotatePublisherKey { .. } => "rotate-key",
         Transaction::NamespaceLifecycle(_) => "namespace-lifecycle",
         Transaction::NamespaceLifecycleV2(_) => "namespace-lifecycle-v2",
+        Transaction::QuarantineV1 { .. } => "quarantine-v1",
+        Transaction::QuarantineResolutionV1 { .. } => "quarantine-resolution-v1",
     }
 }
 
@@ -3312,6 +3318,10 @@ fn tx_canonical(tx: &Transaction) -> Option<String> {
     match tx {
         Transaction::Publish(rec) => Some(rec.id.canonical()),
         Transaction::PublishAuthorizedV1 { record, .. } => Some(record.id.canonical()),
+        Transaction::QuarantineV1 { record, .. } => Some(record.id.canonical()),
+        Transaction::QuarantineResolutionV1 {
+            package_canonical, ..
+        } => Some(package_canonical.clone()),
         Transaction::Revoke {
             package_canonical, ..
         } => Some(package_canonical.clone()),
@@ -4166,6 +4176,7 @@ async fn submit_namespace_lifecycle_inner(
                         vrf_proof: None,
                         view_number: 0,
                         view_change_certificate: vec![],
+                        status_root: None,
                     },
                     transactions: vec![tx.clone()],
                     pbft_signatures: vec![],
@@ -7068,6 +7079,7 @@ mod tests {
                     vrf_proof: None,
                     view_number: 0,
                     view_change_certificate: vec![],
+                    status_root: None,
                 },
                 transactions: Vec::new(),
                 pbft_signatures: Vec::new(),

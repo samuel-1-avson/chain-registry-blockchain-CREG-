@@ -3,6 +3,7 @@
 
 pub mod block;
 pub mod chain_spec;
+pub mod committee;
 pub mod consensus_encoding;
 pub mod crypto;
 pub mod display_text;
@@ -16,6 +17,7 @@ pub mod l1_rpc;
 pub mod ownership;
 pub mod package;
 pub mod shielded_wire;
+pub mod status_tree;
 pub mod test_support;
 pub mod transparency_log;
 pub mod validator_snapshot;
@@ -30,6 +32,11 @@ pub mod proto {
 
 pub use block::*;
 pub use chain_spec::*;
+pub use committee::{
+    committee_digest, CommitteeQuorumCertificateV1, CregFindingCategoryV1, KernelViolationCode,
+    QcSignatureV1, QuarantineOutcomeV1, APPROVAL_QC_DOMAIN, QUARANTINE_QC_DOMAIN,
+    QUARANTINE_RESOLUTION_QC_DOMAIN, REVOKE_QC_DOMAIN,
+};
 pub use consensus_encoding::*;
 pub use display_text::{sanitize_for_terminal, DisplayText, DEFAULT_DISPLAY_MAX_CHARS};
 pub use error::*;
@@ -39,6 +46,7 @@ pub use intelligence::*;
 pub use ownership::*;
 pub use package::*;
 pub use shielded_wire::*;
+pub use status_tree::{StatusLeafStateV1, StatusLeafV1, StatusProofV2, StatusTree};
 pub use transparency_log::*;
 pub use validator_snapshot::*;
 pub use verdict::*;

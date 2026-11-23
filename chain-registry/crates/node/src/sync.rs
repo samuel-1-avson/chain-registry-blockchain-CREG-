@@ -1428,6 +1428,7 @@ pub(crate) fn verify_block_signatures(
             Transaction::PublishAuthorizedV1 {
                 record,
                 authorization,
+                ..
             } => (
                 record,
                 Some(authorization.authorization_digest(&record.id, &record.content_hash)),
@@ -1616,6 +1617,7 @@ mod tests {
                 vrf_proof: None,
                 view_number: 0,
                 view_change_certificate: vec![],
+                status_root: None,
             },
             transactions: vec![tx],
             pbft_signatures: vec![],
@@ -1668,6 +1670,7 @@ mod tests {
                 vrf_proof: None,
                 view_number: 0,
                 view_change_certificate: vec![],
+                status_root: None,
             },
             transactions: vec![],
             pbft_signatures: vec![],

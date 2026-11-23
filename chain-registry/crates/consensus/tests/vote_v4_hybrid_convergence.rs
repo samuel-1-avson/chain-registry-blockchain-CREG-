@@ -358,6 +358,7 @@ fn fifty_validator_view_change_dedup_stays_under_4mib_and_reconstructs() {
         vrf_output: None,
         vrf_proof: None,
         view_number: 0,
+        status_root: None,
     };
 
     let mut sigs: Vec<BlockSignature> = Vec::with_capacity(34);

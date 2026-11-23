@@ -18,6 +18,7 @@ pub fn transaction(request: &SignedRevocationRequest, content_hash: &str) -> Tra
         request: request.clone(),
         evidence_hash: content_hash.to_owned(),
         witness: None,
+        quorum_certificate: None,
     }
 }
 

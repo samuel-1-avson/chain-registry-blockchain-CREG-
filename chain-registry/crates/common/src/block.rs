@@ -46,6 +46,7 @@ impl Block {
                 vrf_proof: None,
                 view_number: 0,
                 view_change_certificate: vec![],
+                status_root: None,
             },
             transactions: vec![],
             pbft_signatures: vec![],
@@ -96,6 +97,16 @@ pub struct BlockHeader {
     /// prepared certificate it reports.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub view_change_certificate: Vec<ViewChangeVote>,
+    /// ADR-019 decision #1 (`ECA-10`): root of the two-level package status
+    /// tree (`crate::status_tree`) after applying this block. Omitted before
+    /// `hybrid_signature_activation_height`, so historical header bytes and
+    /// hashes are unchanged; mandatory at and after it.
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        with = "crate::status_tree::hex32_opt"
+    )]
+    pub status_root: Option<[u8; 32]>,
 }
 
 fn is_zero_u32(value: &u32) -> bool {
@@ -119,6 +130,14 @@ pub struct PreparedBlockHeader {
     pub vrf_proof: Option<String>,
     #[serde(default, skip_serializing_if = "is_zero_u32")]
     pub view_number: u32,
+    /// Same commitment as [`BlockHeader::status_root`]; it is part of the
+    /// block hash, so a prepared certificate must carry it.
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        with = "crate::status_tree::hex32_opt"
+    )]
+    pub status_root: Option<[u8; 32]>,
 }
 
 impl From<&BlockHeader> for PreparedBlockHeader {
@@ -133,6 +152,7 @@ impl From<&BlockHeader> for PreparedBlockHeader {
             vrf_output: header.vrf_output.clone(),
             vrf_proof: header.vrf_proof.clone(),
             view_number: header.view_number,
+            status_root: header.status_root,
         }
     }
 }
@@ -181,6 +201,7 @@ impl PreparedCertificate {
                 vrf_proof: self.header.vrf_proof.clone(),
                 view_number: self.header.view_number,
                 view_change_certificate: self.original_view_change_certificate.clone(),
+                status_root: self.header.status_root,
             },
             transactions: self.transactions.clone(),
             pbft_signatures: Vec::new(),
@@ -249,6 +270,10 @@ pub enum Transaction {
     PublishAuthorizedV1 {
         record: ChainRecord,
         authorization: PublisherAuthorizationV1,
+        /// ADR-019 decision #3: committee certificate over the approval
+        /// (`APPROVAL_QC_DOMAIN`). Omitted before hybrid activation.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        committee_qc: Option<crate::committee::CommitteeQuorumCertificateV1>,
     },
     /// A previously accepted package has been revoked.
     Revoke {
@@ -264,6 +289,27 @@ pub enum Transaction {
         evidence_hash: String,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         witness: Option<crate::vote_v4::TriggerWitnessV1>,
+        /// ADR-019 (`ECA-02`): mandatory at and after hybrid activation unless
+        /// the revoker is the package owner or a namespace controller.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        quorum_certificate: Option<crate::committee::CommitteeQuorumCertificateV1>,
+    },
+    /// ADR-019 decision #4: Class C committee hold. The record keeps
+    /// `status = Pending` on the wire; the expiry is derived when the block is
+    /// applied (`header.timestamp + CLASS_C_QUARANTINE_TTL_SECS`), never chosen
+    /// by the proposer. Invalid before hybrid activation.
+    QuarantineV1 {
+        record: ChainRecord,
+        reason_code: crate::committee::CregFindingCategoryV1,
+        quorum_certificate: crate::committee::CommitteeQuorumCertificateV1,
+    },
+    /// ADR-019 decision #4: committee decision ending a quarantine before its
+    /// deadline. Invalid before hybrid activation.
+    QuarantineResolutionV1 {
+        package_canonical: String,
+        content_hash: String,
+        outcome: crate::committee::QuarantineOutcomeV1,
+        quorum_certificate: crate::committee::CommitteeQuorumCertificateV1,
     },
     /// A validator's stake was slashed for bad behaviour.
     Slash {
@@ -354,6 +400,20 @@ impl Transaction {
             _ => None,
         }
     }
+
+    /// True for transaction kinds that only exist from hybrid activation on
+    /// (ADR-019 Increment 2). Blocks below the activation height that carry
+    /// one are invalid.
+    pub fn requires_vote_v4_activation(&self) -> bool {
+        match self {
+            Self::QuarantineV1 { .. } | Self::QuarantineResolutionV1 { .. } => true,
+            Self::RevokeV2 {
+                quorum_certificate, ..
+            } => quorum_certificate.is_some(),
+            Self::PublishAuthorizedV1 { committee_qc, .. } => committee_qc.is_some(),
+            _ => false,
+        }
+    }
 }
 
 /// SHA-256 leaf hash used by both durable work and [`merkle_root`]. Phase C
@@ -440,5 +500,55 @@ mod view_hash_tests {
 
         with_certificate.header.view_number = 1;
         assert_ne!(block.hash(), with_certificate.hash());
+    }
+
+    #[test]
+    fn absent_status_root_keeps_header_bytes_and_present_one_is_bound() {
+        let block = Block::genesis();
+        let json = serde_json::to_string(&block.header).unwrap();
+        assert!(!json.contains("status_root"));
+
+        let mut with_root = block.clone();
+        with_root.header.status_root = Some([0xab; 32]);
+        assert_ne!(block.hash(), with_root.hash());
+        let json = serde_json::to_value(&with_root.header).unwrap();
+        assert_eq!(json["status_root"], "ab".repeat(32));
+        let back: BlockHeader = serde_json::from_value(json).unwrap();
+        assert_eq!(back.status_root, Some([0xab; 32]));
+
+        // A prepared certificate reconstructs the same block hash.
+        let prepared = PreparedCertificate {
+            header: PreparedBlockHeader::from(&with_root.header),
+            prepared_view: 0,
+            original_view_change_certificate: vec![],
+            reproposal_proof: None,
+            transactions: vec![],
+            prepare_signatures: vec![],
+        };
+        assert_eq!(prepared.block().hash(), with_root.hash());
+    }
+
+    #[test]
+    fn new_wire_fields_are_omitted_when_unused() {
+        let revoke = Transaction::RevokeV2 {
+            request: SignedRevocationRequest {
+                chain_id: "c".into(),
+                genesis_hash: "g".into(),
+                package_canonical: "npm/x@1.0.0".into(),
+                reason: "r".into(),
+                revoker_pubkey: "p".into(),
+                signature: "s".into(),
+                signature_version: 1,
+            },
+            evidence_hash: "e".into(),
+            witness: None,
+            quorum_certificate: None,
+        };
+        let json = serde_json::to_string(&revoke).unwrap();
+        assert!(!json.contains("quorum_certificate"));
+        assert!(!revoke.requires_vote_v4_activation());
+
+        let parsed: Transaction = serde_json::from_str(&json).unwrap();
+        assert_eq!(transaction_hash(&parsed), transaction_hash(&revoke));
     }
 }

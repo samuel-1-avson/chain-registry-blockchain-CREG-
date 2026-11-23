@@ -10,7 +10,7 @@
 // one place that neutralises them before a string reaches a terminal, a TUI
 // cell or a log line.
 
-use serde::{Serialize, Serializer};
+use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use std::fmt;
 
 /// Default upper bound, in Unicode scalar values, for one rendered field.
@@ -68,6 +68,15 @@ impl AsRef<str> for DisplayText {
 impl Serialize for DisplayText {
     fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
         serializer.serialize_str(&self.0)
+    }
+}
+
+/// Decoding re-sanitises (`ECO-INV-05`): a `DisplayText` received over the
+/// read contract is never trusted to have been cleaned by the sender.
+impl<'de> Deserialize<'de> for DisplayText {
+    fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let raw = String::deserialize(deserializer)?;
+        Ok(Self::for_terminal(&raw))
     }
 }
 

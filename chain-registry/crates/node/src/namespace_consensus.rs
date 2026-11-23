@@ -24,6 +24,8 @@ pub struct NamespaceConsensusConfig {
     pub authority_policies: Vec<NamespaceAuthorityPolicySpec>,
     pub policy_source_verified: bool,
     pub validator_set_bootstrap: Option<common::ValidatorSet>,
+    /// `hybrid_signature_activation_height` from the signed spec.
+    pub vote_v4_activation_height: Option<u64>,
 }
 
 impl NamespaceConsensusConfig {
@@ -36,7 +38,13 @@ impl NamespaceConsensusConfig {
             authority_policies: config.namespace_authority_policies.clone(),
             policy_source_verified: config.namespace_authority_policy_source_verified,
             validator_set_bootstrap: Some(config.validator_set.clone()),
+            vote_v4_activation_height: config.vote_v4_activation_height,
         }
+    }
+
+    pub fn vote_v4_active_at(&self, height: u64) -> bool {
+        self.vote_v4_activation_height
+            .is_some_and(|activation| height >= activation)
     }
 
     pub fn is_active_at(&self, height: u64) -> bool {
@@ -151,6 +159,32 @@ pub fn delegation_key(namespace: &str, delegate: &str) -> String {
     format!("{}\0{}", namespace, delegate.trim().to_ascii_lowercase())
 }
 
+/// ADR-019 Increment 2 wire data (`status_root`, committee QCs, quarantine
+/// transactions) is invalid before `hybrid_signature_activation_height`. This
+/// build does not yet validate or apply it after activation either, so it is
+/// refused at every height rather than accepted unchecked.
+pub fn reject_unvalidated_vote_v4_data(
+    block: &common::Block,
+    config: &NamespaceConsensusConfig,
+) -> Result<()> {
+    let reason = if config.vote_v4_active_at(block.header.height) {
+        "is not yet validated by this node build (ADR-019 Increment 2 node wiring pending)"
+    } else {
+        "is invalid before hybrid_signature_activation_height"
+    };
+    if block.header.status_root.is_some() {
+        anyhow::bail!("block status_root {reason}");
+    }
+    if let Some(index) = block
+        .transactions
+        .iter()
+        .position(Transaction::requires_vote_v4_activation)
+    {
+        anyhow::bail!("transaction {index} carries vote-v4-only data that {reason}");
+    }
+    Ok(())
+}
+
 /// Validate every CR-07 transition in a block before any canonical or derived
 /// RocksDB write is staged. Returned effects are the only namespace state that
 /// insertion should persist.
@@ -160,6 +194,7 @@ pub fn validate_block(
     config: &NamespaceConsensusConfig,
 ) -> Result<NamespaceBlockEffects> {
     config.validate()?;
+    reject_unvalidated_vote_v4_data(block, config)?;
     let active = config.is_active_at(block.header.height);
     if active && block.header.timestamp.timestamp_subsec_nanos() != 0 {
         anyhow::bail!("post-activation block timestamp must use whole seconds");
@@ -195,6 +230,7 @@ pub fn validate_block(
             Transaction::PublishAuthorizedV1 {
                 record,
                 authorization,
+                ..
             } => {
                 let result = validate_authorized_publish(
                     chain,
@@ -676,6 +712,58 @@ fn is_lower_sha256(value: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn v4_revocation() -> Transaction {
+        let committee = common::AnalysisCommittee::default();
+        Transaction::RevokeV2 {
+            request: common::SignedRevocationRequest {
+                chain_id: "creg-testnet-1".into(),
+                genesis_hash: "0".repeat(64),
+                package_canonical: "npm/x@1.0.0".into(),
+                reason: "r".into(),
+                revoker_pubkey: "p".into(),
+                signature: "s".into(),
+                signature_version: 1,
+            },
+            evidence_hash: "e".into(),
+            witness: None,
+            quorum_certificate: Some(common::CommitteeQuorumCertificateV1::new(
+                common::REVOKE_QC_DOMAIN,
+                "npm/x@1.0.0",
+                &"aa".repeat(32),
+                &"bb".repeat(32),
+                &committee,
+                1,
+            )),
+        }
+    }
+
+    #[test]
+    fn vote_v4_only_data_is_refused_before_and_after_activation() {
+        let mut block = common::Block::genesis();
+        block.header.height = 5;
+        let pre = NamespaceConsensusConfig::default();
+        assert!(reject_unvalidated_vote_v4_data(&block, &pre).is_ok());
+
+        let mut with_root = block.clone();
+        with_root.header.status_root = Some([1; 32]);
+        let error = reject_unvalidated_vote_v4_data(&with_root, &pre).unwrap_err();
+        assert!(error.to_string().contains("invalid before"), "{error}");
+
+        let mut with_qc = block.clone();
+        with_qc.transactions.push(v4_revocation());
+        assert!(reject_unvalidated_vote_v4_data(&with_qc, &pre).is_err());
+
+        // After activation this build still refuses rather than accepting
+        // unvalidated v4 data.
+        let post = NamespaceConsensusConfig {
+            vote_v4_activation_height: Some(1),
+            ..NamespaceConsensusConfig::default()
+        };
+        let error = reject_unvalidated_vote_v4_data(&with_qc, &post).unwrap_err();
+        assert!(error.to_string().contains("not yet validated"), "{error}");
+        assert!(reject_unvalidated_vote_v4_data(&block, &post).is_ok());
+    }
     use chrono::DateTime;
 
     #[test]
@@ -806,6 +894,7 @@ mod tests {
                 vrf_proof: None,
                 view_number: 0,
                 view_change_certificate: Vec::new(),
+                status_root: None,
             },
             transactions: b1_txs,
             pbft_signatures: Vec::new(),
@@ -833,6 +922,7 @@ mod tests {
                 stake: 100,
                 ..Default::default()
             }])),
+            vote_v4_activation_height: None,
         };
 
         let make_block2 = |tx: Transaction| -> common::Block {
@@ -849,6 +939,7 @@ mod tests {
                     vrf_proof: None,
                     view_number: 0,
                     view_change_certificate: Vec::new(),
+                    status_root: None,
                 },
                 transactions: txs,
                 pbft_signatures: Vec::new(),
@@ -877,6 +968,7 @@ mod tests {
                 request: owner_req.clone(),
                 evidence_hash: "1".repeat(64),
                 witness: None,
+                quorum_certificate: None,
             }),
             &config,
         )
@@ -890,6 +982,7 @@ mod tests {
                 request: val_req,
                 evidence_hash: "2".repeat(64),
                 witness: None,
+                quorum_certificate: None,
             }),
             &config,
         )
@@ -904,6 +997,7 @@ mod tests {
                 request: forged_req,
                 evidence_hash: "3".repeat(64),
                 witness: None,
+                quorum_certificate: None,
             }),
             &config,
         )
@@ -917,6 +1011,7 @@ mod tests {
                 request: outsider_req,
                 evidence_hash: "4".repeat(64),
                 witness: None,
+                quorum_certificate: None,
             }),
             &config,
         )

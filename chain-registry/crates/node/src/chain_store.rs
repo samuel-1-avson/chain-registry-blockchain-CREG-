@@ -296,6 +296,7 @@ fn finalized_work_transaction_summary(transaction: &Transaction) -> serde_json::
         Transaction::PublishAuthorizedV1 {
             record,
             authorization,
+            ..
         } => (
             "publish_authorized_v1",
             Some(record.id.canonical()),
@@ -3283,6 +3284,7 @@ mod tests {
                 vrf_proof: None,
                 view_number: 0,
                 view_change_certificate: vec![],
+                status_root: None,
             },
             transactions,
             pbft_signatures: vec![],
@@ -3878,6 +3880,7 @@ mod tests {
             }],
             policy_source_verified: true,
             validator_set_bootstrap: None,
+            vote_v4_activation_height: None,
         };
         store
             .configure_namespace_consensus(config.clone())
@@ -4799,6 +4802,7 @@ mod tests {
                     vrf_proof: None,
                     view_number: 0,
                     view_change_certificate: Vec::new(),
+                    status_root: None,
                 },
                 transactions: b1_txs,
                 pbft_signatures: vec![],
@@ -4809,6 +4813,7 @@ mod tests {
                 request: revoke_req,
                 evidence_hash: pubkey.clone(),
                 witness: None,
+                quorum_certificate: None,
             }];
             let b2 = Block {
                 header: common::BlockHeader {
@@ -4822,6 +4827,7 @@ mod tests {
                     vrf_proof: None,
                     view_number: 0,
                     view_change_certificate: Vec::new(),
+                    status_root: None,
                 },
                 transactions: b2_txs,
                 pbft_signatures: vec![],

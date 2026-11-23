@@ -762,6 +762,35 @@ pub fn aggregate_vote_v4_quorum(
     })
 }
 
+/// Verify a committee quorum certificate under the consensus rules in force
+/// at `height` (ADR-019 §3.2, `ECA-02`, `ECO-INV-03`). `authority` must be
+/// the validator set authenticated at `qc.authority_height`. Hybrid
+/// signatures are required exactly when `vote_v4_active_at(height)`.
+/// Returns the number of distinct valid committee signers, which is at
+/// least `2m/3 + 1` of the committee's `m` signers on success.
+pub fn verify_committee_qc(
+    qc: &common::CommitteeQuorumCertificateV1,
+    expected_domain: &str,
+    committee: &common::AnalysisCommittee,
+    authority: &[Validator],
+    params: &ConsensusParams,
+    height: u64,
+) -> Result<usize> {
+    if qc.authority_height > height {
+        bail!(
+            "committee QC authority height {} is above the block height {}",
+            qc.authority_height,
+            height
+        );
+    }
+    qc.verify_quorum(
+        expected_domain,
+        committee,
+        authority,
+        params.vote_v4_active_at(height),
+    )
+}
+
 /// Fail-closed 72h timeout handler for `PackageStatus::Quarantined` (`ADR-018`).
 pub fn resolve_quarantine_timeout(status: &PackageStatus, now_unix: i64) -> Option<PackageStatus> {
     match status {
@@ -821,6 +850,84 @@ mod tests {
             namespace_authority_policies: vec![],
             hybrid_signature_activation_height: activation_height,
         }
+    }
+
+    #[test]
+    fn committee_qc_follows_the_activation_height_and_authority_bound() {
+        let members: Vec<_> = (0..4)
+            .map(|i| make_validator_pair(&format!("v{i}"), 60 + i as u8))
+            .collect();
+        let authority: Vec<Validator> = members.iter().map(|(v, _, _)| v.clone()).collect();
+        let committee = common::AnalysisCommittee {
+            size: 4,
+            effective_size: 4,
+            members: authority.iter().map(|v| v.id.clone()).collect(),
+            seed: "seed".into(),
+            ..Default::default()
+        };
+        let params = test_params(Some(100));
+        let base = common::CommitteeQuorumCertificateV1::new(
+            common::REVOKE_QC_DOMAIN,
+            "npm/x@1.0.0",
+            &"aa".repeat(32),
+            &"bb".repeat(32),
+            &committee,
+            90,
+        );
+
+        let mut classical = base.clone();
+        for (validator, ed_sk, _) in members.iter().take(3) {
+            classical.add_signature(classical.sign_member(&validator.id, ed_sk));
+        }
+        assert_eq!(
+            verify_committee_qc(
+                &classical,
+                common::REVOKE_QC_DOMAIN,
+                &committee,
+                &authority,
+                &params,
+                99
+            )
+            .unwrap(),
+            3
+        );
+        // At activation, Ed25519-only certificates no longer count.
+        assert!(verify_committee_qc(
+            &classical,
+            common::REVOKE_QC_DOMAIN,
+            &committee,
+            &authority,
+            &params,
+            100
+        )
+        .is_err());
+
+        let mut hybrid = base.clone();
+        for (validator, _, hyb_sk) in members.iter().take(3) {
+            hybrid.add_signature(hybrid.sign_member(&validator.id, hyb_sk));
+        }
+        assert_eq!(
+            verify_committee_qc(
+                &hybrid,
+                common::REVOKE_QC_DOMAIN,
+                &committee,
+                &authority,
+                &params,
+                100
+            )
+            .unwrap(),
+            3
+        );
+        // The authority height cannot be in the future of the block.
+        assert!(verify_committee_qc(
+            &classical,
+            common::REVOKE_QC_DOMAIN,
+            &committee,
+            &authority,
+            &params,
+            80
+        )
+        .is_err());
     }
 
     #[test]
