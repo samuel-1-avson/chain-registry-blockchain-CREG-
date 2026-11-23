@@ -31,7 +31,7 @@ jobs:
       run:
         working-directory: CREG-Contribution-Arena
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           # The Arena is tracked as a git submodule.  Checkout must materialize
           # it before setup-node resolves the lockfile used for npm caching.
@@ -77,7 +77,7 @@ jobs:
   docs-sync:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           submodules: recursive
       - uses: actions/setup-node@v4
