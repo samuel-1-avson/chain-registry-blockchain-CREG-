@@ -4184,9 +4184,11 @@ async fn submit_namespace_lifecycle_inner(
                 let config = crate::namespace_consensus::NamespaceConsensusConfig::from_node_config(
                     &state.config,
                 );
-                if let Err(error) =
-                    crate::namespace_consensus::validate_block(&state.chain, &block, &config)
-                {
+                if let Err(error) = crate::namespace_consensus::validate_block_transitions(
+                    &state.chain,
+                    &block,
+                    &config,
+                ) {
                     return (
                         StatusCode::CONFLICT,
                         Json(ErrorResponse {

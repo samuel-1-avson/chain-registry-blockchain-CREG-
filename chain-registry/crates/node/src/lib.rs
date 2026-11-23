@@ -28,6 +28,7 @@ pub mod p2p_bootnodes;
 pub mod p2p_peer_score;
 pub mod p2p_subnet_filter;
 pub mod package_admission;
+pub mod package_status;
 pub mod pbft_safety;
 pub mod pending_pool;
 pub mod publisher_index;

@@ -776,6 +776,27 @@ pub fn verify_committee_qc(
     params: &ConsensusParams,
     height: u64,
 ) -> Result<usize> {
+    verify_committee_qc_with_activation(
+        qc,
+        expected_domain,
+        committee,
+        authority,
+        params.hybrid_signature_activation_height,
+        height,
+    )
+}
+
+/// [`verify_committee_qc`] for callers that hold only the signed
+/// `hybrid_signature_activation_height` rather than the full
+/// [`ConsensusParams`] (the node's block validator). Same rules.
+pub fn verify_committee_qc_with_activation(
+    qc: &common::CommitteeQuorumCertificateV1,
+    expected_domain: &str,
+    committee: &common::AnalysisCommittee,
+    authority: &[Validator],
+    hybrid_signature_activation_height: Option<u64>,
+    height: u64,
+) -> Result<usize> {
     if qc.authority_height > height {
         bail!(
             "committee QC authority height {} is above the block height {}",
@@ -783,12 +804,9 @@ pub fn verify_committee_qc(
             height
         );
     }
-    qc.verify_quorum(
-        expected_domain,
-        committee,
-        authority,
-        params.vote_v4_active_at(height),
-    )
+    let require_hybrid =
+        hybrid_signature_activation_height.is_some_and(|activation| height >= activation);
+    qc.verify_quorum(expected_domain, committee, authority, require_hybrid)
 }
 
 /// Fail-closed 72h timeout handler for `PackageStatus::Quarantined` (`ADR-018`).

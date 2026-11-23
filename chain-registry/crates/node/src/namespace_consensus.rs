@@ -136,6 +136,8 @@ pub struct NamespaceBlockEffects {
     pub delegations: BTreeMap<String, NamespaceDelegationState>,
     pub publisher_nonce_keys: BTreeSet<String>,
     pub lifecycle_nonce_keys: BTreeSet<String>,
+    /// ADR-019 package-status transitions and `status_root` (part 2).
+    pub status: crate::package_status::StatusBlockEffects,
 }
 
 pub fn publisher_authorization_nonce_key(address: &str, nonce: &str) -> String {
@@ -160,41 +162,73 @@ pub fn delegation_key(namespace: &str, delegate: &str) -> String {
 }
 
 /// ADR-019 Increment 2 wire data (`status_root`, committee QCs, quarantine
-/// transactions) is invalid before `hybrid_signature_activation_height`. This
-/// build does not yet validate or apply it after activation either, so it is
-/// refused at every height rather than accepted unchecked.
-pub fn reject_unvalidated_vote_v4_data(
+/// transactions) is invalid before `hybrid_signature_activation_height`.
+/// From activation on it is validated by [`crate::package_status`].
+pub fn reject_pre_activation_vote_v4_data(
     block: &common::Block,
     config: &NamespaceConsensusConfig,
 ) -> Result<()> {
-    let reason = if config.vote_v4_active_at(block.header.height) {
-        "is not yet validated by this node build (ADR-019 Increment 2 node wiring pending)"
-    } else {
-        "is invalid before hybrid_signature_activation_height"
-    };
+    if config.vote_v4_active_at(block.header.height) {
+        return Ok(());
+    }
+    const REASON: &str = "is invalid before hybrid_signature_activation_height";
     if block.header.status_root.is_some() {
-        anyhow::bail!("block status_root {reason}");
+        anyhow::bail!("block status_root {REASON}");
     }
     if let Some(index) = block
         .transactions
         .iter()
         .position(Transaction::requires_vote_v4_activation)
     {
-        anyhow::bail!("transaction {index} carries vote-v4-only data that {reason}");
+        anyhow::bail!("transaction {index} carries vote-v4-only data that {REASON}");
     }
     Ok(())
 }
 
-/// Validate every CR-07 transition in a block before any canonical or derived
-/// RocksDB write is staged. Returned effects are the only namespace state that
-/// insertion should persist.
+/// Validate every CR-07 and package-status transition in a block, including
+/// the header's `status_root`, before any canonical or derived RocksDB write
+/// is staged. Returned effects are the only derived state that insertion
+/// should persist.
 pub fn validate_block(
     chain: &ChainStore,
     block: &common::Block,
     config: &NamespaceConsensusConfig,
 ) -> Result<NamespaceBlockEffects> {
+    let effects = validate_block_body(chain, block, config)?;
+    effects.status.check_header(block)?;
+    Ok(effects)
+}
+
+/// [`validate_block`] without the header's `status_root` check. Block
+/// producers seal a block with the commitment from
+/// `effects.status.status_root`.
+pub fn validate_block_body(
+    chain: &ChainStore,
+    block: &common::Block,
+    config: &NamespaceConsensusConfig,
+) -> Result<NamespaceBlockEffects> {
+    validate_block_inner(chain, block, config, true)
+}
+
+/// Every transition check of [`validate_block_body`], without computing the
+/// status root: for transaction selection and API preflights, which run once
+/// per candidate transaction.
+pub fn validate_block_transitions(
+    chain: &ChainStore,
+    block: &common::Block,
+    config: &NamespaceConsensusConfig,
+) -> Result<NamespaceBlockEffects> {
+    validate_block_inner(chain, block, config, false)
+}
+
+fn validate_block_inner(
+    chain: &ChainStore,
+    block: &common::Block,
+    config: &NamespaceConsensusConfig,
+    compute_status_root: bool,
+) -> Result<NamespaceBlockEffects> {
     config.validate()?;
-    reject_unvalidated_vote_v4_data(block, config)?;
+    reject_pre_activation_vote_v4_data(block, config)?;
     let active = config.is_active_at(block.header.height);
     if active && block.header.timestamp.timestamp_subsec_nanos() != 0 {
         anyhow::bail!("post-activation block timestamp must use whole seconds");
@@ -205,6 +239,7 @@ pub fn validate_block(
     let mut in_block_published = HashMap::<String, String>::new();
     let mut publisher_nonces = HashSet::new();
     let mut lifecycle_nonces = HashSet::new();
+    let mut revocations = BTreeMap::new();
 
     for (index, transaction) in block.transactions.iter().enumerate() {
         let outcome = match transaction {
@@ -260,23 +295,42 @@ pub fn validate_block(
                 &mut lifecycle_nonces,
                 &mut effects,
             ),
-            Transaction::RevokeV2 { request, .. } => validate_revoke_v2(
+            Transaction::RevokeV2 {
+                request,
+                quorum_certificate,
+                ..
+            } => validate_revoke_v2(
                 chain,
                 block,
                 config,
                 active,
                 request,
+                quorum_certificate.is_some(),
                 &in_block_published,
                 &loaded_controllers,
                 &effects,
-            ),
+            )
+            .map(|authority| {
+                revocations.insert(index, authority);
+            }),
             _ => Ok(()),
         };
         outcome.with_context(|| format!("invalid CR-07 transaction at block index {}", index))?;
     }
+    effects.status = crate::package_status::apply_block(
+        chain,
+        block,
+        config,
+        &revocations,
+        compute_status_root,
+    )?;
     Ok(effects)
 }
 
+/// Authenticate a `RevokeV2` signer. Owners and namespace controllers
+/// self-revoke. Before hybrid activation any active validator may revoke;
+/// from activation on a validator needs a committee certificate, which
+/// [`crate::package_status`] verifies (`ECA-02`, `ECO-INV-04`).
 #[allow(clippy::too_many_arguments)]
 fn validate_revoke_v2(
     chain: &ChainStore,
@@ -284,10 +338,12 @@ fn validate_revoke_v2(
     config: &NamespaceConsensusConfig,
     active: bool,
     request: &common::SignedRevocationRequest,
+    has_quorum_certificate: bool,
     in_block_published: &HashMap<String, String>,
     loaded_controllers: &BTreeMap<String, Option<NamespaceControllerState>>,
     effects: &NamespaceBlockEffects,
-) -> Result<()> {
+) -> Result<crate::package_status::RevocationAuthority> {
+    use crate::package_status::RevocationAuthority;
     request.verify_signature()?;
     if active && request.signature_version != 1 {
         anyhow::bail!("legacy revocation signature version is retired after activation");
@@ -303,14 +359,14 @@ fn validate_revoke_v2(
 
     if let Some(owner_pubkey) = in_block_published.get(&request.package_canonical) {
         if owner_pubkey.eq_ignore_ascii_case(&request.revoker_pubkey) {
-            return Ok(());
+            return Ok(RevocationAuthority::Owner);
         }
     } else if let Some(record) = chain.get_package(&request.package_canonical)? {
         if record
             .publisher_pubkey
             .eq_ignore_ascii_case(&request.revoker_pubkey)
         {
-            return Ok(());
+            return Ok(RevocationAuthority::Owner);
         }
     }
 
@@ -329,31 +385,39 @@ fn validate_revoke_v2(
                     .root_ed25519_pubkey
                     .eq_ignore_ascii_case(&request.revoker_pubkey)
                 {
-                    return Ok(());
+                    return Ok(RevocationAuthority::Controller);
                 }
             } else if let Some(Some(state)) = loaded_controllers.get(ns.as_str()) {
                 if state
                     .root_ed25519_pubkey
                     .eq_ignore_ascii_case(&request.revoker_pubkey)
                 {
-                    return Ok(());
+                    return Ok(RevocationAuthority::Controller);
                 }
             } else if let Some(state) = chain.namespace_controller_state(ns)? {
                 if state
                     .root_ed25519_pubkey
                     .eq_ignore_ascii_case(&request.revoker_pubkey)
                 {
-                    return Ok(());
+                    return Ok(RevocationAuthority::Controller);
                 }
             }
         }
         if let Some(legacy_owner) = chain.publisher_for_prefix(&legacy_ns) {
             if legacy_owner.eq_ignore_ascii_case(&request.revoker_pubkey) {
-                return Ok(());
+                return Ok(RevocationAuthority::Controller);
             }
         }
     }
 
+    // ADR-019 §3.2: the "any active validator" branch ends at hybrid
+    // activation; after it a validator-signed revocation must carry a
+    // committee certificate.
+    if config.vote_v4_active_at(block.header.height) && !has_quorum_certificate {
+        anyhow::bail!(
+            "revocation signer is not the owner or a controller, and carries no committee quorum certificate"
+        );
+    }
     if let Some(bootstrap) = config.validator_set_bootstrap.as_ref() {
         let authority = crate::validator_set_history::verification_set_at(
             chain.data_dir(),
@@ -365,7 +429,7 @@ fn validate_revoke_v2(
             common::validator_status_is_active(&v.status)
                 && v.pubkey.eq_ignore_ascii_case(&request.revoker_pubkey)
         }) {
-            return Ok(());
+            return Ok(RevocationAuthority::Validator);
         }
     }
 
@@ -739,30 +803,34 @@ mod tests {
     }
 
     #[test]
-    fn vote_v4_only_data_is_refused_before_and_after_activation() {
+    fn vote_v4_only_data_is_refused_before_activation() {
         let mut block = common::Block::genesis();
         block.header.height = 5;
         let pre = NamespaceConsensusConfig::default();
-        assert!(reject_unvalidated_vote_v4_data(&block, &pre).is_ok());
+        assert!(reject_pre_activation_vote_v4_data(&block, &pre).is_ok());
 
         let mut with_root = block.clone();
         with_root.header.status_root = Some([1; 32]);
-        let error = reject_unvalidated_vote_v4_data(&with_root, &pre).unwrap_err();
+        let error = reject_pre_activation_vote_v4_data(&with_root, &pre).unwrap_err();
         assert!(error.to_string().contains("invalid before"), "{error}");
 
         let mut with_qc = block.clone();
         with_qc.transactions.push(v4_revocation());
-        assert!(reject_unvalidated_vote_v4_data(&with_qc, &pre).is_err());
+        assert!(reject_pre_activation_vote_v4_data(&with_qc, &pre).is_err());
 
-        // After activation this build still refuses rather than accepting
-        // unvalidated v4 data.
+        // From activation on the data reaches `package_status`, which
+        // verifies it (see `package_status_tests`).
         let post = NamespaceConsensusConfig {
-            vote_v4_activation_height: Some(1),
+            vote_v4_activation_height: Some(5),
             ..NamespaceConsensusConfig::default()
         };
-        let error = reject_unvalidated_vote_v4_data(&with_qc, &post).unwrap_err();
-        assert!(error.to_string().contains("not yet validated"), "{error}");
-        assert!(reject_unvalidated_vote_v4_data(&block, &post).is_ok());
+        assert!(reject_pre_activation_vote_v4_data(&with_qc, &post).is_ok());
+        assert!(reject_pre_activation_vote_v4_data(&with_root, &post).is_ok());
+        let below = NamespaceConsensusConfig {
+            vote_v4_activation_height: Some(6),
+            ..NamespaceConsensusConfig::default()
+        };
+        assert!(reject_pre_activation_vote_v4_data(&with_qc, &below).is_err());
     }
     use chrono::DateTime;
 

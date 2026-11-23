@@ -417,19 +417,24 @@ async fn prepare_unprepared_batch(
             continue;
         }
         proposal.transactions.push(tx.clone());
-        let validation =
-            crate::namespace_consensus::validate_block(&s.chain, &proposal, &namespace_config)
-                .map(|_| ())
-                .and_then(|_| {
-                    // Namespace validation needs the selected prefix. Package
-                    // approval validation only needs this record and authority.
-                    let record_block = Block {
-                        header: proposal.header.clone(),
-                        transactions: vec![tx.clone()],
-                        pbft_signatures: Vec::new(),
-                    };
-                    crate::sync::verify_block_signatures(&record_block, &ctx.package_authority)
-                });
+        // The header's status_root is computed once the batch is final, in
+        // `produce_block`; selection validates everything else.
+        let validation = crate::namespace_consensus::validate_block_transitions(
+            &s.chain,
+            &proposal,
+            &namespace_config,
+        )
+        .map(|_| ())
+        .and_then(|_| {
+            // Namespace validation needs the selected prefix. Package
+            // approval validation only needs this record and authority.
+            let record_block = Block {
+                header: proposal.header.clone(),
+                transactions: vec![tx.clone()],
+                pbft_signatures: Vec::new(),
+            };
+            crate::sync::verify_block_signatures(&record_block, &ctx.package_authority)
+        });
         if let Err(error) = validation {
             proposal.transactions.pop();
             tracing::debug!(work_id = %transaction_hash(tx), error = %format!("{error:#}"),
@@ -1225,6 +1230,8 @@ async fn produce_block(
         .chain
         .get_block_by_height(tip_height)?
         .ok_or_else(|| anyhow::anyhow!("canonical parent block is unavailable"))?;
+    let namespace_config =
+        crate::namespace_consensus::NamespaceConsensusConfig::from_node_config(&s.config);
     let block = if let Some(common::GossipMessage::PbftRepropose { block, .. }) = &reproposal {
         if block.header.height != tip_height.saturating_add(1)
             || block.header.prev_hash != prev_hash
@@ -1252,18 +1259,23 @@ async fn produce_block(
             vrf_proof,
             view_number,
             view_change_certificate,
-            // Pre-activation headers omit the status commitment (ADR-019 #1).
+            // Filled below: the root after this block from hybrid activation
+            // on, omitted before it (ADR-019 #1).
             status_root: None,
         };
-        Block {
+        let mut block = Block {
             header,
             transactions: txs,
             pbft_signatures: vec![],
-        }
+        };
+        block.header.status_root =
+            crate::namespace_consensus::validate_block_body(&s.chain, &block, &namespace_config)
+                .context("refusing to propose a block with an invalid state transition")?
+                .status
+                .status_root;
+        block
     };
 
-    let namespace_config =
-        crate::namespace_consensus::NamespaceConsensusConfig::from_node_config(&s.config);
     crate::namespace_consensus::validate_block(&s.chain, &block, &namespace_config)
         .context("refusing to propose a block with an invalid namespace transition")?;
     crate::sync::verify_block_signatures(&block, &package_authority)

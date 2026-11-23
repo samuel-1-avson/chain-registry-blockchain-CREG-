@@ -35,6 +35,7 @@ mod p2p_peer_score;
 mod p2p_rate_limit;
 mod p2p_subnet_filter;
 mod package_admission;
+mod package_status;
 mod pbft_safety;
 mod pending_pool;
 mod pidlock;
@@ -683,9 +684,13 @@ async fn main() -> Result<()> {
     chain.configure_namespace_consensus(
         namespace_consensus::NamespaceConsensusConfig::from_node_config(&config),
     )?;
-    if config.namespace_authority_activation_height.is_some() {
+    if config.namespace_authority_activation_height.is_some()
+        || chain.package_status_index_is_stale()?
+    {
         // Fail closed before serving or joining consensus if canonical history
         // cannot deterministically rebuild the authoritative namespace state.
+        // A store that predates the ADR-019 package-status index is rebuilt
+        // once so the first post-activation status_root covers every version.
         chain.rebuild_package_index()?;
     }
     let chain_for_sync = chain.clone();

@@ -67,6 +67,19 @@ const CF_TRANSPARENCY_LEAVES: &str = "transparency_leaves";
 const CF_TRANSPARENCY_HEADS: &str = "transparency_heads";
 const CF_REORG_JOURNAL: &str = "reorg_journal";
 const CF_PUBLISHER_INDEX: &str = "publisher_index";
+/// ADR-019 package-status index: `l\0<canonical>` -> `StatusLeafV1`,
+/// `x\0<expires_at be64><canonical>` quarantine deadlines, and the
+/// `m\0root` / `m\0tip` markers. Derived from the chain; cleared on rebuild.
+const CF_PACKAGE_STATUS: &str = "package_status_v1";
+/// ADR-019 decision #3 `cf_meta`: `witness:<package>:<version>` and
+/// `witness_id:<hex32>` (derived, cleared on rebuild).
+const CF_META: &str = "meta";
+const STATUS_LEAF_PREFIX: &[u8] = b"l\0";
+const STATUS_EXPIRY_PREFIX: &[u8] = b"x\0";
+const STATUS_ROOT_KEY: &[u8] = b"m\0root";
+const STATUS_TIP_KEY: &[u8] = b"m\0tip";
+const META_WITNESS_PREFIX: &str = "witness:";
+const META_WITNESS_ID_PREFIX: &str = "witness_id:";
 const PUB_IDX_STATS_PREFIX: &str = "stats\0";
 const PUB_IDX_PKG_PREFIX: &str = "pkg\0";
 const PUB_IDX_TIP_KEY: &[u8] = b"meta\0indexed_tip";
@@ -74,6 +87,34 @@ const REORG_JOURNAL_KEY: &[u8] = b"active";
 const REORG_FINALIZED_WORK_PREFIX: &[u8] = b"finalized_work\0";
 const MAX_FINALIZED_WORK_RETRIES: u32 = 5;
 const PBFT_JOURNAL_BINDING_KEY: &[u8] = b"meta/pbft-journal-binding-v1";
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+struct StatusRootRecord {
+    height: u64,
+    #[serde(with = "common::status_tree::hex32")]
+    root: [u8; 32],
+}
+
+fn status_leaf_key(canonical: &str) -> Vec<u8> {
+    [STATUS_LEAF_PREFIX, canonical.as_bytes()].concat()
+}
+
+fn status_expiry_key(expires_at: i64, canonical: &str) -> Vec<u8> {
+    let deadline = u64::try_from(expires_at.max(0)).unwrap_or(0);
+    [
+        STATUS_EXPIRY_PREFIX,
+        &deadline.to_be_bytes()[..],
+        canonical.as_bytes(),
+    ]
+    .concat()
+}
+
+fn witness_index_key(package_canonical: &str) -> String {
+    match common::status_tree::split_canonical(package_canonical.trim()) {
+        Some((package, version)) => format!("{META_WITNESS_PREFIX}{package}:{version}"),
+        None => format!("{META_WITNESS_PREFIX}{}", package_canonical.trim()),
+    }
+}
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 struct PublisherRotationIndex {
@@ -113,6 +154,8 @@ fn is_reorg_requeueable_finalized_work(transaction: &Transaction) -> bool {
             | Transaction::PublishAuthorizedV1 { .. }
             | Transaction::Revoke { .. }
             | Transaction::RevokeV2 { .. }
+            | Transaction::QuarantineV1 { .. }
+            | Transaction::QuarantineResolutionV1 { .. }
             | Transaction::RotatePublisherKey { .. }
             | Transaction::NamespaceLifecycle(_)
             | Transaction::NamespaceLifecycleV2(_)
@@ -826,6 +869,8 @@ impl ChainStore {
             ColumnFamilyDescriptor::new(CF_TRANSPARENCY_HEADS, Options::default()),
             ColumnFamilyDescriptor::new(CF_REORG_JOURNAL, Options::default()),
             ColumnFamilyDescriptor::new(CF_PUBLISHER_INDEX, Options::default()),
+            ColumnFamilyDescriptor::new(CF_PACKAGE_STATUS, Options::default()),
+            ColumnFamilyDescriptor::new(CF_META, Options::default()),
         ];
 
         let db = DB::open_cf_descriptors(&opts, &db_path, cfs).context("Failed to open RocksDB")?;
@@ -902,8 +947,10 @@ impl ChainStore {
             CF_TRANSPARENCY_HEADS,
             CF_REORG_JOURNAL,
         ];
-        if existing_cfs.contains(CF_PUBLISHER_INDEX) {
-            cfs.push(CF_PUBLISHER_INDEX);
+        for optional in [CF_PUBLISHER_INDEX, CF_PACKAGE_STATUS, CF_META] {
+            if existing_cfs.contains(optional) {
+                cfs.push(optional);
+            }
         }
         let db = DB::open_cf_for_read_only(&opts, &db_path, cfs, false)
             .context("Failed to open RocksDB in read-only mode")?;
@@ -1314,6 +1361,11 @@ impl ChainStore {
             .db
             .cf_handle(CF_PUBLISHER_INDEX)
             .context("cf publisher_index")?;
+        let cf_status = self
+            .db
+            .cf_handle(CF_PACKAGE_STATUS)
+            .context("cf package_status")?;
+        let cf_meta = self.db.cf_handle(CF_META).context("cf meta")?;
         // Clear the existing index.
         let keys: Vec<Box<[u8]>> = self
             .db
@@ -1348,6 +1400,7 @@ impl ChainStore {
             &cf_namespace_delegations,
             &cf_publisher_rotation,
             &cf_pub_index,
+            &cf_status,
         ] {
             let keys: Vec<Box<[u8]>> = self
                 .db
@@ -1357,6 +1410,20 @@ impl ChainStore {
             for key in keys {
                 batch.delete_cf(cf, key);
             }
+        }
+        // Only the chain-derived witness indexes; other `meta` keys are
+        // node-local state that a rebuild must keep.
+        let witness_keys: Vec<Box<[u8]>> = self
+            .db
+            .iterator_cf(&cf_meta, rocksdb::IteratorMode::Start)
+            .filter_map(|item| item.ok().map(|(key, _)| key))
+            .filter(|key| {
+                key.starts_with(META_WITNESS_PREFIX.as_bytes())
+                    || key.starts_with(META_WITNESS_ID_PREFIX.as_bytes())
+            })
+            .collect();
+        for key in witness_keys {
+            batch.delete_cf(&cf_meta, key);
         }
         self.db.write(batch)?;
 
@@ -1469,8 +1536,9 @@ impl ChainStore {
             }
         }
         let namespace_config = self.namespace_consensus_config()?;
-        let namespace_effects =
+        let mut namespace_effects =
             crate::namespace_consensus::validate_block(self, block, &namespace_config)?;
+        let status_effects = std::mem::take(&mut namespace_effects.status);
         let height_key = block.header.height.to_be_bytes();
 
         let cf_hash = self
@@ -1833,6 +1901,15 @@ impl ChainStore {
             }
         }
 
+        if status_effects.applied {
+            self.stage_status_effects(
+                &mut batch,
+                &status_effects,
+                &mut pkg_overlay,
+                block.header.height,
+            )?;
+        }
+
         for (namespace, state) in namespace_effects.controllers {
             batch.put_cf(
                 &cf_namespace_controllers,
@@ -1882,6 +1959,234 @@ impl ChainStore {
             block.header.height
         );
         Ok(())
+    }
+
+    /// Stage one block's package-status effects (ADR-019 part 2) into the
+    /// block's write batch: leaves, quarantine deadlines, the record statuses
+    /// they imply, indexed witnesses, the post-activation root and the index
+    /// tip marker.
+    fn stage_status_effects(
+        &self,
+        batch: &mut rocksdb::WriteBatch,
+        effects: &crate::package_status::StatusBlockEffects,
+        pkg_overlay: &mut HashMap<String, ChainRecord>,
+        height: u64,
+    ) -> Result<()> {
+        let cf_status = self
+            .db
+            .cf_handle(CF_PACKAGE_STATUS)
+            .context("cf package_status")?;
+        let cf_pkg = self.db.cf_handle(CF_PACKAGES).context("cf packages")?;
+        for (canonical, leaf) in &effects.leaves {
+            batch.put_cf(
+                &cf_status,
+                status_leaf_key(canonical),
+                serde_json::to_vec(leaf)?,
+            );
+        }
+        for ((expires_at, canonical), present) in &effects.expiry_index {
+            let key = status_expiry_key(*expires_at, canonical);
+            if *present {
+                batch.put_cf(&cf_status, key, b"");
+            } else {
+                batch.delete_cf(&cf_status, key);
+            }
+        }
+        // Applied after every transaction write, so the batch's last put for a
+        // record carries its final status.
+        for (canonical, status) in &effects.record_status {
+            let existing = match pkg_overlay.get(canonical) {
+                Some(record) => Some(record.clone()),
+                None => self
+                    .db
+                    .get_cf(&cf_pkg, canonical.as_bytes())?
+                    .and_then(|bytes| serde_json::from_slice::<ChainRecord>(&bytes).ok()),
+            };
+            if let Some(mut record) = existing {
+                record.status = status.clone();
+                batch.put_cf(&cf_pkg, canonical.as_bytes(), serde_json::to_vec(&record)?);
+                pkg_overlay.insert(canonical.clone(), record);
+            }
+        }
+        if !effects.witnesses.is_empty() {
+            let cf_meta = self.db.cf_handle(CF_META).context("cf meta")?;
+            let mut lists: BTreeMap<String, Vec<crate::package_status::WitnessIndexEntryV1>> =
+                BTreeMap::new();
+            for entry in &effects.witnesses {
+                let key = witness_index_key(&entry.package_canonical);
+                if !lists.contains_key(&key) {
+                    let stored = self
+                        .db
+                        .get_cf(&cf_meta, key.as_bytes())?
+                        .map(|bytes| serde_json::from_slice(&bytes))
+                        .transpose()
+                        .context("decode witness index")?
+                        .unwrap_or_default();
+                    lists.insert(key.clone(), stored);
+                }
+                if let Some(list) = lists.get_mut(&key) {
+                    list.retain(|existing: &crate::package_status::WitnessIndexEntryV1| {
+                        existing.witness_digest != entry.witness_digest
+                    });
+                    list.push(entry.clone());
+                    let excess = list
+                        .len()
+                        .saturating_sub(crate::package_status::MAX_WITNESSES_PER_VERSION);
+                    list.drain(..excess);
+                }
+                let id = crate::package_status::WitnessIdEntryV1 {
+                    package_canonical: entry.package_canonical.clone(),
+                    height: entry.height,
+                };
+                batch.put_cf(
+                    &cf_meta,
+                    format!("{META_WITNESS_ID_PREFIX}{}", entry.witness_digest).as_bytes(),
+                    serde_json::to_vec(&id)?,
+                );
+            }
+            for (key, list) in lists {
+                batch.put_cf(&cf_meta, key.as_bytes(), serde_json::to_vec(&list)?);
+            }
+        }
+        if let Some(root) = effects.status_root {
+            batch.put_cf(
+                &cf_status,
+                STATUS_ROOT_KEY,
+                serde_json::to_vec(&StatusRootRecord { height, root })?,
+            );
+        }
+        batch.put_cf(&cf_status, STATUS_TIP_KEY, height.to_be_bytes());
+        Ok(())
+    }
+
+    /// Committed status leaf of one version (`None` when never published or
+    /// when the store predates the index).
+    pub fn status_leaf(&self, canonical: &str) -> Result<Option<common::StatusLeafV1>> {
+        let Some(cf) = self.db.cf_handle(CF_PACKAGE_STATUS) else {
+            return Ok(None);
+        };
+        self.db
+            .get_cf(&cf, status_leaf_key(canonical))?
+            .map(|bytes| serde_json::from_slice(&bytes).context("decode status leaf"))
+            .transpose()
+    }
+
+    /// Every committed status leaf, in key order.
+    pub fn all_status_leaves(&self) -> Result<Vec<common::StatusLeafV1>> {
+        let Some(cf) = self.db.cf_handle(CF_PACKAGE_STATUS) else {
+            return Ok(Vec::new());
+        };
+        let mut leaves = Vec::new();
+        for item in self.db.prefix_iterator_cf(&cf, STATUS_LEAF_PREFIX) {
+            let (key, value) = item?;
+            if !key.starts_with(STATUS_LEAF_PREFIX) {
+                break;
+            }
+            leaves.push(serde_json::from_slice(&value).context("decode status leaf")?);
+        }
+        Ok(leaves)
+    }
+
+    /// Status tree over every committed leaf (proofs for the read contract).
+    pub fn status_tree(&self) -> Result<common::StatusTree> {
+        let mut tree = common::StatusTree::new();
+        for leaf in self.all_status_leaves()? {
+            tree.upsert(leaf);
+        }
+        Ok(tree)
+    }
+
+    /// Quarantine deadlines at or before `now_unix`, earliest first.
+    pub fn quarantine_expiries_up_to(&self, now_unix: i64) -> Result<Vec<(i64, String)>> {
+        let Some(cf) = self.db.cf_handle(CF_PACKAGE_STATUS) else {
+            return Ok(Vec::new());
+        };
+        let mut due = Vec::new();
+        for item in self.db.prefix_iterator_cf(&cf, STATUS_EXPIRY_PREFIX) {
+            let (key, _) = item?;
+            if !key.starts_with(STATUS_EXPIRY_PREFIX) {
+                break;
+            }
+            let body = &key[STATUS_EXPIRY_PREFIX.len()..];
+            let Some((deadline, canonical)) = body.split_first_chunk::<8>() else {
+                anyhow::bail!("malformed quarantine expiry key");
+            };
+            let deadline = i64::try_from(u64::from_be_bytes(*deadline)).unwrap_or(i64::MAX);
+            if deadline > now_unix {
+                break;
+            }
+            let canonical =
+                std::str::from_utf8(canonical).context("quarantine expiry key is not UTF-8")?;
+            due.push((deadline, canonical.to_string()));
+        }
+        Ok(due)
+    }
+
+    /// `(height, root)` of the last post-activation block applied.
+    pub fn status_root_record(&self) -> Result<Option<(u64, [u8; 32])>> {
+        let Some(cf) = self.db.cf_handle(CF_PACKAGE_STATUS) else {
+            return Ok(None);
+        };
+        Ok(self
+            .db
+            .get_cf(&cf, STATUS_ROOT_KEY)?
+            .map(|bytes| serde_json::from_slice::<StatusRootRecord>(&bytes))
+            .transpose()
+            .context("decode status root record")?
+            .map(|record| (record.height, record.root)))
+    }
+
+    /// Height of the last block applied to the package-status index.
+    pub fn status_indexed_tip(&self) -> Result<Option<u64>> {
+        let Some(cf) = self.db.cf_handle(CF_PACKAGE_STATUS) else {
+            return Ok(None);
+        };
+        Ok(self
+            .db
+            .get_cf(&cf, STATUS_TIP_KEY)?
+            .and_then(|bytes| <[u8; 8]>::try_from(bytes.as_slice()).ok())
+            .map(u64::from_be_bytes))
+    }
+
+    /// True when the package-status index does not reflect the canonical tip
+    /// (a store created before ADR-019 part 2); the caller must rebuild.
+    pub fn package_status_index_is_stale(&self) -> Result<bool> {
+        Ok(self.status_indexed_tip()? != Some(self.tip_height()?))
+    }
+
+    /// Indexed trigger witnesses of one version, oldest first.
+    pub fn witnesses_for(
+        &self,
+        package_canonical: &str,
+    ) -> Result<Vec<crate::package_status::WitnessIndexEntryV1>> {
+        let Some(cf) = self.db.cf_handle(CF_META) else {
+            return Ok(Vec::new());
+        };
+        Ok(self
+            .db
+            .get_cf(&cf, witness_index_key(package_canonical).as_bytes())?
+            .map(|bytes| serde_json::from_slice(&bytes))
+            .transpose()
+            .context("decode witness index")?
+            .unwrap_or_default())
+    }
+
+    /// Version an indexed witness digest belongs to.
+    pub fn witness_by_id(
+        &self,
+        witness_digest: &str,
+    ) -> Result<Option<crate::package_status::WitnessIdEntryV1>> {
+        let Some(cf) = self.db.cf_handle(CF_META) else {
+            return Ok(None);
+        };
+        let key = format!(
+            "{META_WITNESS_ID_PREFIX}{}",
+            witness_digest.trim().to_ascii_lowercase()
+        );
+        self.db
+            .get_cf(&cf, key.as_bytes())?
+            .map(|bytes| serde_json::from_slice(&bytes).context("decode witness id"))
+            .transpose()
     }
 
     pub fn get_block_by_hash(&self, hash: &str) -> Result<Option<Block>> {
