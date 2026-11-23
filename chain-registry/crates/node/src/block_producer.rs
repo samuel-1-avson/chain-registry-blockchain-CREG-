@@ -349,6 +349,16 @@ fn retire_ineligible_unprepared_work(
                     _ => None,
                 }
             }
+            // ADR-019 3c: another member's identical hold already landed (or
+            // the version was revoked); this one can never apply.
+            Transaction::QuarantineV1 { record, .. } => {
+                match s.chain.status_leaf(&record.id.canonical())? {
+                    Some(leaf) if leaf.status != common::StatusLeafStateV1::Verified => {
+                        Some("quarantine target is already held or revoked on this chain")
+                    }
+                    _ => None,
+                }
+            }
             _ => None,
         };
         if let Some(reason) = reason {
@@ -412,11 +422,18 @@ async fn prepare_unprepared_batch(
         pbft_signatures: Vec::new(),
     };
     let mut selected = HashSet::new();
-    for tx in pending_txs.iter() {
-        if !s.chain.is_finalized_work_deliverable(tx)? {
-            continue;
+    let groups = selection_groups(pending_txs.as_slice(), |canonical| {
+        s.chain.status_leaf(canonical).ok().flatten().is_some()
+    });
+    'groups: for group in groups {
+        for &index in &group {
+            if !s.chain.is_finalized_work_deliverable(&pending_txs[index])? {
+                continue 'groups;
+            }
         }
-        proposal.transactions.push(tx.clone());
+        for &index in &group {
+            proposal.transactions.push(pending_txs[index].clone());
+        }
         // The header's status_root is computed once the batch is final, in
         // `produce_block`; selection validates everything else.
         let validation = crate::namespace_consensus::validate_block_transitions(
@@ -427,25 +444,74 @@ async fn prepare_unprepared_batch(
         .map(|_| ())
         .and_then(|_| {
             // Namespace validation needs the selected prefix. Package
-            // approval validation only needs this record and authority.
-            let record_block = Block {
-                header: proposal.header.clone(),
-                transactions: vec![tx.clone()],
-                pbft_signatures: Vec::new(),
-            };
-            crate::sync::verify_block_signatures(&record_block, &ctx.package_authority)
+            // approval validation only needs each record and authority.
+            group.iter().try_for_each(|&index| {
+                let record_block = Block {
+                    header: proposal.header.clone(),
+                    transactions: vec![pending_txs[index].clone()],
+                    pbft_signatures: Vec::new(),
+                };
+                crate::sync::verify_block_signatures(&record_block, &ctx.package_authority)
+            })
         });
         if let Err(error) = validation {
-            proposal.transactions.pop();
-            tracing::debug!(work_id = %transaction_hash(tx), error = %format!("{error:#}"),
+            for _ in &group {
+                proposal.transactions.pop();
+            }
+            tracing::debug!(work_id = %transaction_hash(&pending_txs[group[0]]), error = %format!("{error:#}"),
                 "Deferred unprepared work; retaining its original payload and authorization");
             continue;
         }
-        selected.insert(transaction_hash(tx));
+        for &index in &group {
+            selected.insert(transaction_hash(&pending_txs[index]));
+        }
     }
     pending_txs.retain(|tx| !selected.contains(&transaction_hash(tx)));
     finalized_tx::sync_pending_buffer_depth(pending_txs.len());
     Ok(proposal.transactions)
+}
+
+/// Units for transaction selection, as indexes into `pending` (ADR-019 3c).
+/// A `QuarantineV1` whose version is not committed yet is a Class C hold of
+/// a new package: it travels right after its publication, and the pair is
+/// selected together or not at all, so the version is never verified at a
+/// committed height. A hold without a pending publication waits. Everything
+/// else is its own unit, in queue order.
+pub(crate) fn selection_groups(
+    pending: &[Transaction],
+    committed: impl Fn(&str) -> bool,
+) -> Vec<Vec<usize>> {
+    let mut holds: std::collections::HashMap<String, usize> = std::collections::HashMap::new();
+    for (index, tx) in pending.iter().enumerate() {
+        if let Transaction::QuarantineV1 { record, .. } = tx {
+            let canonical = record.id.canonical();
+            if !committed(&canonical) {
+                holds.entry(canonical).or_insert(index);
+            }
+        }
+    }
+    let mut paired = HashSet::new();
+    let mut groups = Vec::with_capacity(pending.len());
+    for (index, tx) in pending.iter().enumerate() {
+        match tx {
+            Transaction::QuarantineV1 { record, .. }
+                if holds.contains_key(&record.id.canonical()) =>
+            {
+                // Grouped with its publication below, or waiting for one.
+            }
+            _ => {
+                let hold = tx
+                    .published_record()
+                    .and_then(|record| holds.get(&record.id.canonical()).copied())
+                    .filter(|hold| paired.insert(*hold));
+                match hold {
+                    Some(hold) => groups.push(vec![index, hold]),
+                    None => groups.push(vec![index]),
+                }
+            }
+        }
+    }
+    groups
 }
 
 async fn drive_pbft_view_changes(state: Arc<RwLock<NodeState>>, p2p_handle: crate::p2p::P2PHandle) {
@@ -1866,5 +1932,48 @@ mod tests {
         assert!(block.header.timestamp > genesis.header.timestamp);
         assert_eq!(block.header.timestamp.timestamp_subsec_nanos(), 0);
         assert!(pending_txs.is_empty());
+    }
+}
+
+#[cfg(test)]
+mod selection_group_tests {
+    use super::selection_groups;
+    use common::{ChainRecord, CommitteeQuorumCertificateV1, PackageId, Transaction};
+
+    fn record(name: &str) -> ChainRecord {
+        ChainRecord {
+            id: PackageId::new("npm", name, "1.0.0"),
+            ..ChainRecord::default()
+        }
+    }
+
+    fn hold(name: &str) -> Transaction {
+        Transaction::QuarantineV1 {
+            record: record(name),
+            reason_code: common::CregFindingCategoryV1::Other,
+            quorum_certificate: CommitteeQuorumCertificateV1::new(
+                common::QUARANTINE_QC_DOMAIN,
+                &record(name).id.canonical(),
+                &"aa".repeat(32),
+                &"bb".repeat(32),
+                &common::AnalysisCommittee::default(),
+                1,
+            ),
+        }
+    }
+
+    #[test]
+    fn holds_travel_with_their_publication_or_wait() {
+        let pending = vec![
+            hold("held"),                          // 0: persisted before its publish
+            Transaction::Publish(record("plain")), // 1
+            Transaction::Publish(record("held")),  // 2
+            hold("orphan"),                        // 3: publish not pending yet
+            hold("committed"),                     // 4: version already on chain
+        ];
+        let groups = selection_groups(&pending, |canonical| canonical == "npm:committed@1.0.0");
+        // The publish leads its hold; an orphan hold waits; a hold on a
+        // committed version is ordinary work.
+        assert_eq!(groups, vec![vec![1], vec![2, 0], vec![4]]);
     }
 }

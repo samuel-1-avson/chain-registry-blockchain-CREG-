@@ -1,36 +1,45 @@
-//! ADR-019 Increment 2, part 2b: committee quorum certificates collected over
-//! vote gossip (`ECA-02`, decision #3).
+//! ADR-019 Increment 2: committee quorum certificates collected over vote
+//! gossip (`ECA-02`, decision #3).
 //!
 //! Every committee member that votes on a package also signs the certificate
-//! message for its own decision (approval or rejection) with its hybrid key
-//! and gossips that signature with the vote. The finalizing node assembles
-//! the signatures that agree with the outcome into a
+//! message for its own decision (approval or rejection, part 2b) with its
+//! hybrid key and gossips that signature with the vote. When the v4 outcome
+//! is a Class C hold, members sign a quarantine certificate too (part 3c).
+//! The finalizing node assembles the signatures for one domain into a
 //! [`CommitteeQuorumCertificateV1`] and checks it exactly as block validation
 //! will before attaching it.
 //!
 //! All members derive the same message from data they already share: the
-//! package, content hash and evidence digest of the vote, the admitted
-//! committee (`committee_digest` ignores later expansion) and the committee's
-//! snapshot height as `authority_height`.
+//! domain, the package, content hash and evidence digest of the vote, the
+//! admitted committee (`committee_digest` ignores later expansion) and the
+//! committee's snapshot height as `authority_height`.
 
 use anyhow::{Context, Result};
 use common::{
     AnalysisCommittee, CommitteeQuorumCertificateV1, QcSignatureV1, ValidatorSet,
-    APPROVAL_QC_DOMAIN, REVOKE_QC_DOMAIN,
+    APPROVAL_QC_DOMAIN, QUARANTINE_QC_DOMAIN, QUARANTINE_RESOLUTION_QC_DOMAIN, REVOKE_QC_DOMAIN,
 };
 use std::collections::HashSet;
 use std::path::Path;
 
+/// Certificate domains a vote round collects signatures for.
+pub const ROUND_QC_DOMAINS: [&str; 4] = [
+    APPROVAL_QC_DOMAIN,
+    REVOKE_QC_DOMAIN,
+    QUARANTINE_QC_DOMAIN,
+    QUARANTINE_RESOLUTION_QC_DOMAIN,
+];
+
 /// A committee member's certificate signature received with its vote.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct QcVoteSignature {
-    pub approved: bool,
+    pub domain: String,
     pub content_hash: String,
     pub evidence_digest: String,
     pub signature: QcSignatureV1,
 }
 
-/// Certificate domain for a vote's decision.
+/// Certificate domain for a vote's own decision.
 pub fn vote_qc_domain(approved: bool) -> &'static str {
     if approved {
         APPROVAL_QC_DOMAIN
@@ -39,16 +48,16 @@ pub fn vote_qc_domain(approved: bool) -> &'static str {
     }
 }
 
-/// The unsigned certificate every committee member signs for a decision.
-pub fn unsigned_vote_qc(
+/// The unsigned certificate every committee member signs in `domain`.
+pub fn unsigned_qc(
     committee: &AnalysisCommittee,
+    domain: &str,
     package_canonical: &str,
     content_hash: &str,
     evidence_digest: &str,
-    approved: bool,
 ) -> CommitteeQuorumCertificateV1 {
     CommitteeQuorumCertificateV1::new(
-        vote_qc_domain(approved),
+        domain,
         package_canonical,
         content_hash,
         evidence_digest,
@@ -57,49 +66,49 @@ pub fn unsigned_vote_qc(
     )
 }
 
-/// Sign the certificate for this member's own decision.
-pub fn sign_vote_qc(
+/// Sign the certificate in `domain` as one committee member.
+pub fn sign_qc(
     committee: &AnalysisCommittee,
+    domain: &str,
     package_canonical: &str,
     content_hash: &str,
     evidence_digest: &str,
-    approved: bool,
     validator_id: &str,
     key: &common::crypto::SigningKey,
 ) -> QcSignatureV1 {
-    unsigned_vote_qc(
+    unsigned_qc(
         committee,
+        domain,
         package_canonical,
         content_hash,
         evidence_digest,
-        approved,
     )
     .sign_member(validator_id, key)
 }
 
-/// Assemble the received signatures that agree with `approved`,
+/// Assemble the received `domain` signatures that agree with
 /// `content_hash` and `evidence_digest`. Only committee signers are added,
 /// which also bounds the certificate (`MAX_QC_SIGNATURES`).
-pub fn assemble_vote_qc<'a>(
+pub fn assemble_qc<'a>(
     committee: &AnalysisCommittee,
+    domain: &str,
     package_canonical: &str,
     content_hash: &str,
     evidence_digest: &str,
-    approved: bool,
     received: impl IntoIterator<Item = &'a QcVoteSignature>,
 ) -> CommitteeQuorumCertificateV1 {
     let signers: HashSet<&str> = common::committee::committee_signers(committee)
         .into_iter()
         .collect();
-    let mut qc = unsigned_vote_qc(
+    let mut qc = unsigned_qc(
         committee,
+        domain,
         package_canonical,
         content_hash,
         evidence_digest,
-        approved,
     );
     for entry in received {
-        if entry.approved == approved
+        if entry.domain == domain
             && entry
                 .content_hash
                 .trim()
@@ -149,11 +158,12 @@ pub fn verify_for_inclusion(
     )
 }
 
-/// Approval certificate to attach to `record` at `height`, or `None` before
-/// hybrid activation. The committee is resolved from the record exactly as
-/// block validation resolves it (`package_status::assigned_committee`); an
-/// error means the collected signatures do not yet form a certificate.
-pub fn approval_qc_for_record<'a>(
+/// `domain` certificate over `record` at `height`, or `None` before hybrid
+/// activation. The committee is resolved from the record exactly as block
+/// validation resolves it (`package_status::assigned_committee`); an error
+/// means the collected signatures do not yet form a certificate.
+pub fn qc_for_record<'a>(
+    domain: &str,
     record: &common::ChainRecord,
     received: impl IntoIterator<Item = &'a QcVoteSignature>,
     data_dir: &Path,
@@ -166,17 +176,17 @@ pub fn approval_qc_for_record<'a>(
     }
     let committee = crate::package_status::assigned_committee(record)
         .context("record carries no valid committee assignment")?;
-    let qc = assemble_vote_qc(
+    let qc = assemble_qc(
         &committee,
+        domain,
         &record.id.canonical(),
         &record.content_hash,
         &record.evidence_digest,
-        true,
         received,
     );
     verify_for_inclusion(
         &qc,
-        APPROVAL_QC_DOMAIN,
+        domain,
         &committee,
         data_dir,
         bootstrap,
@@ -184,6 +194,26 @@ pub fn approval_qc_for_record<'a>(
         height,
     )?;
     Ok(Some(qc))
+}
+
+/// Approval certificate to attach to `record` (part 2b).
+pub fn approval_qc_for_record<'a>(
+    record: &common::ChainRecord,
+    received: impl IntoIterator<Item = &'a QcVoteSignature>,
+    data_dir: &Path,
+    bootstrap: &ValidatorSet,
+    vote_v4_activation_height: Option<u64>,
+    height: u64,
+) -> Result<Option<CommitteeQuorumCertificateV1>> {
+    qc_for_record(
+        APPROVAL_QC_DOMAIN,
+        record,
+        received,
+        data_dir,
+        bootstrap,
+        vote_v4_activation_height,
+        height,
+    )
 }
 
 #[cfg(test)]
@@ -226,84 +256,71 @@ mod tests {
         };
         let evidence = common::sha256_hex(b"evidence");
         let content = common::sha256_hex(b"content");
-        let vote = |(validator, key): &(Validator, SigningKey), approved: bool, digest: &str| {
+        let vote = |(validator, key): &(Validator, SigningKey), domain: &str, digest: &str| {
             QcVoteSignature {
-                approved,
+                domain: domain.to_string(),
                 content_hash: content.clone(),
                 evidence_digest: digest.to_string(),
-                signature: sign_vote_qc(
+                signature: sign_qc(
                     &committee,
+                    domain,
                     "npm:left-pad@1.0.0",
                     &content,
                     digest,
-                    approved,
                     &validator.id,
                     key,
                 ),
             }
         };
+        let verify = |qc: &CommitteeQuorumCertificateV1, domain: &str| {
+            verify_for_inclusion(qc, domain, &committee, dir.path(), &bootstrap, Some(1), 10)
+        };
         // Two approvals agree; one approval saw other evidence; one rejected.
         let received = [
-            vote(&members[0], true, &evidence),
-            vote(&members[1], true, &evidence),
-            vote(&members[2], true, &common::sha256_hex(b"other")),
-            vote(&members[3], false, &evidence),
+            vote(&members[0], APPROVAL_QC_DOMAIN, &evidence),
+            vote(&members[1], APPROVAL_QC_DOMAIN, &evidence),
+            vote(
+                &members[2],
+                APPROVAL_QC_DOMAIN,
+                &common::sha256_hex(b"other"),
+            ),
+            vote(&members[3], REVOKE_QC_DOMAIN, &evidence),
         ];
-        let qc = assemble_vote_qc(
-            &committee,
-            "npm:left-pad@1.0.0",
-            &content,
-            &evidence,
-            true,
-            &received,
-        );
+        let assemble = |domain: &str, received: &[QcVoteSignature]| {
+            assemble_qc(
+                &committee,
+                domain,
+                "npm:left-pad@1.0.0",
+                &content,
+                &evidence,
+                received,
+            )
+        };
+        let qc = assemble(APPROVAL_QC_DOMAIN, &received);
         assert_eq!(qc.signatures.len(), 2);
         assert_eq!(qc.authority_height, 3);
-        assert!(verify_for_inclusion(
-            &qc,
-            APPROVAL_QC_DOMAIN,
-            &committee,
-            dir.path(),
-            &bootstrap,
-            Some(1),
-            10
-        )
-        .is_err());
+        assert!(verify(&qc, APPROVAL_QC_DOMAIN).is_err());
 
         // With a third agreeing approval it is a 3-of-4 certificate.
         let mut received = received.to_vec();
-        received[2] = vote(&members[2], true, &evidence);
-        let qc = assemble_vote_qc(
-            &committee,
-            "npm:left-pad@1.0.0",
-            &content,
-            &evidence,
-            true,
-            &received,
-        );
+        received[2] = vote(&members[2], APPROVAL_QC_DOMAIN, &evidence);
+        let qc = assemble(APPROVAL_QC_DOMAIN, &received);
+        assert_eq!(verify(&qc, APPROVAL_QC_DOMAIN).expect("certificate"), 3);
+        // The same signatures do not form a rejection certificate.
+        assert!(verify(&qc, REVOKE_QC_DOMAIN).is_err());
+
+        // A hold is certified by separate quarantine-domain signatures;
+        // approval signatures never count towards it.
+        let mut held = received.clone();
+        assert!(verify(&assemble(QUARANTINE_QC_DOMAIN, &held), QUARANTINE_QC_DOMAIN).is_err());
+        for member in members.iter().take(3) {
+            held.push(vote(member, QUARANTINE_QC_DOMAIN, &evidence));
+        }
+        let hold = assemble(QUARANTINE_QC_DOMAIN, &held);
+        assert_eq!(hold.signatures.len(), 3);
         assert_eq!(
-            verify_for_inclusion(
-                &qc,
-                APPROVAL_QC_DOMAIN,
-                &committee,
-                dir.path(),
-                &bootstrap,
-                Some(1),
-                10
-            )
-            .expect("certificate"),
+            verify(&hold, QUARANTINE_QC_DOMAIN).expect("hold certificate"),
             3
         );
-        // The same signatures do not form a rejection certificate.
-        assert!(verify_for_inclusion(
-            &qc,
-            REVOKE_QC_DOMAIN,
-            &committee,
-            dir.path(),
-            &bootstrap,
-            Some(1),
-            10
-        )
-        .is_err());
     }
 }

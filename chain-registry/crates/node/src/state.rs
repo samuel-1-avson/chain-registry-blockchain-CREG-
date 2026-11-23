@@ -132,9 +132,11 @@ pub struct PackageRound {
     pub first_vote_at: DateTime<Utc>,
     pub last_vote_at: DateTime<Utc>,
     signatures: Vec<common::ValidatorSignature>,
-    /// Committee certificate signatures gossiped with votes (ADR-019 2b),
-    /// one per validator id (the latest wins).
-    qc_signatures: BTreeMap<String, crate::committee_qc::QcVoteSignature>,
+    /// Committee certificate signatures gossiped with votes (ADR-019),
+    /// one per (domain, validator id); the latest wins.
+    qc_signatures: BTreeMap<(String, String), crate::committee_qc::QcVoteSignature>,
+    /// Signed `creg-vote-v4` envelopes (ADR-019 3c), one per validator id.
+    v4_votes: BTreeMap<String, common::VoteV4Envelope>,
 }
 
 impl PackageRound {
@@ -145,18 +147,36 @@ impl PackageRound {
             last_vote_at: Utc::now(),
             signatures: vec![vote],
             qc_signatures: BTreeMap::new(),
+            v4_votes: BTreeMap::new(),
         };
         round.refresh_timestamps();
         round
     }
 
+    /// Keep a certificate signature for one of the round domains; others
+    /// are dropped so a voter cannot grow the round with made-up domains.
     pub fn record_qc_signature(&mut self, entry: crate::committee_qc::QcVoteSignature) {
-        self.qc_signatures
-            .insert(entry.signature.validator_id.clone(), entry);
+        if !crate::committee_qc::ROUND_QC_DOMAINS.contains(&entry.domain.as_str()) {
+            return;
+        }
+        self.qc_signatures.insert(
+            (entry.domain.clone(), entry.signature.validator_id.clone()),
+            entry,
+        );
     }
 
     pub fn qc_signatures(&self) -> impl Iterator<Item = &crate::committee_qc::QcVoteSignature> {
         self.qc_signatures.values()
+    }
+
+    pub fn record_v4_vote(&mut self, envelope: common::VoteV4Envelope) {
+        self.v4_votes
+            .insert(envelope.validator_id.clone(), envelope);
+    }
+
+    /// Envelopes for `aggregate_vote_v4_quorum` (which verifies them).
+    pub fn v4_votes(&self) -> Vec<common::VoteV4Envelope> {
+        self.v4_votes.values().cloned().collect()
     }
 
     pub fn record_vote(&mut self, vote: common::ValidatorSignature) {
@@ -450,6 +470,14 @@ impl NodeState {
     ) {
         if let Some(round) = self.package_rounds.get_mut(subject) {
             round.record_qc_signature(entry);
+        }
+    }
+
+    /// Attach a gossiped `creg-vote-v4` envelope to its round (same bound as
+    /// [`Self::record_package_qc_signature`]).
+    pub fn record_package_v4_vote(&mut self, subject: &str, envelope: common::VoteV4Envelope) {
+        if let Some(round) = self.package_rounds.get_mut(subject) {
+            round.record_v4_vote(envelope);
         }
     }
 

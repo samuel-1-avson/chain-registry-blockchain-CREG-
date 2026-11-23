@@ -51,6 +51,7 @@ mod sync;
 mod validator_pipeline;
 mod validator_registry_gossip;
 mod validator_set_history;
+mod vote_v4_round;
 // Phase-1 scaffold for chain-derived validator set. Compiled and tested but
 // not yet wired into runtime â€” see docs/VALIDATOR_SET_SYNC_DESIGN.md.
 mod chain_spec_boot;

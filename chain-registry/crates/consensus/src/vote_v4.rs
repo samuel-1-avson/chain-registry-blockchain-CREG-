@@ -991,6 +991,7 @@ mod tests {
             namespace_authority_activation_height: None,
             namespace_authority_policies: vec![],
             hybrid_signature_activation_height: activation_height,
+            vote_v4_quorum: None,
         }
     }
 

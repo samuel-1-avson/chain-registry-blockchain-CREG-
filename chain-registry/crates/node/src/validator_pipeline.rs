@@ -2,11 +2,12 @@
 // Drives packages from pending pool through VRF → 3-stage validation →
 // PBFT consensus → writes finalised Transaction to the channel.
 
+use crate::vote_v4_round::RoundDecision;
 use crate::{finalized_tx::FinalizedTxSender, NodeState};
 use chrono::Utc;
 use common::{ChainRecord, PackageStatus, PublishRequest, Transaction, ValidatorVote};
 use consensus::{aggregate_evidence_votes, EvidenceVoteOutcome};
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 use tokio::sync::RwLock;
 use tokio::time::{interval, Duration};
@@ -325,6 +326,7 @@ async fn process_package(
         evidence_digest,
         deterministic_risk,
         ml_model_version,
+        semantic_vote,
     ) = if should_analyze {
         if let Some(privkey) = privkey_opt.as_ref() {
             tracing::info!(
@@ -358,6 +360,7 @@ async fn process_package(
                         evidence_digest,
                         deterministic_risk,
                         ml_model_version,
+                        res.semantic_vote,
                     )
                 }
                 Err(e) => {
@@ -480,41 +483,88 @@ async fn process_package(
         }
     };
 
-    // ADR-019 part 2b: from hybrid activation, also sign the committee
-    // certificate for our own decision with the hybrid key and gossip it.
+    // ADR-019: from hybrid activation, sign with the hybrid key (2b) the
+    // committee certificate for our own decision and (3c) a `creg-vote-v4`
+    // envelope, and gossip both with the vote. `v4_params` is `Some` exactly
+    // when the signed spec has activated v4 for the next height.
     let approved_vote = matches!(vote, ValidatorVote::Approve);
-    let committee_qc_signature = {
+    let reject_reason = match &vote {
+        ValidatorVote::Approve => None,
+        ValidatorVote::Reject { reason } => Some(reason.clone()),
+    };
+    let (v4_params, hybrid_key) = {
         let s = state.read().await;
         let next_height = s.chain.tip_height().unwrap_or(0).saturating_add(1);
-        let hybrid_active = s
+        let params = s
             .config
-            .vote_v4_activation_height
-            .is_some_and(|activation| next_height >= activation);
-        if hybrid_active && should_analyze {
+            .consensus_params
+            .clone()
+            .filter(|params| params.vote_v4_active_at(next_height));
+        let key = if params.is_some() && should_analyze {
             match s.config.validator_signing_keys() {
                 Ok(Some(crate::config::ValidatorSigningKeys {
                     hybrid: Some(key), ..
-                })) => Some(crate::committee_qc::sign_vote_qc(
-                    &committee,
-                    &canonical,
-                    &req.content_hash,
-                    &evidence_digest,
-                    approved_vote,
-                    &node_id,
-                    &key,
-                )),
+                })) => Some(key),
                 _ => {
                     tracing::warn!(
                         canonical = %canonical,
-                        "No hybrid validator key; voting without a committee certificate signature"
+                        "No hybrid validator key; voting without v4 envelope or certificate signatures"
                     );
                     None
                 }
             }
         } else {
             None
-        }
+        };
+        (params, key)
     };
+    let committee_qc_signature = hybrid_key.as_ref().map(|key| {
+        crate::committee_qc::sign_qc(
+            &committee,
+            crate::committee_qc::vote_qc_domain(approved_vote),
+            &canonical,
+            &req.content_hash,
+            &evidence_digest,
+            &node_id,
+            key,
+        )
+    });
+    let vote_v4 = hybrid_key.as_ref().and_then(|key| {
+        let mut envelope = common::VoteV4Envelope {
+            package_canonical: canonical.clone(),
+            content_hash: req.content_hash.clone(),
+            approved: approved_vote,
+            reject_reason: reject_reason.clone(),
+            validator_id: node_id.clone(),
+            voter_key_id: String::new(),
+            scanner_profile_digest: common::scanner_profile_digest(
+                &our_sig.ml_model_version,
+                &analysis_bundles,
+            ),
+            evidence_digest: evidence_digest.clone(),
+            publisher_authorization_digest: publisher_authorization_digest.clone(),
+            vote_metadata_digest: crate::gossip::vote_metadata_digest(
+                should_analyze,
+                &deterministic_risk,
+                reject_reason.as_deref(),
+            ),
+            ml_model_version: our_sig.ml_model_version.clone(),
+            analysis_bundles: analysis_bundles.clone(),
+            deterministic_risk: deterministic_risk.clone(),
+            is_mandatory: should_analyze,
+            witness: None,
+            semantic_vote: semantic_vote.clone(),
+            signature: String::new(),
+            pq_signature: None,
+        };
+        match envelope.sign_with(key) {
+            Ok(()) => Some(envelope),
+            Err(error) => {
+                tracing::warn!(canonical = %canonical, "Could not sign the v4 vote envelope: {error:#}");
+                None
+            }
+        }
+    });
 
     // Store our own vote locally
     {
@@ -524,69 +574,43 @@ async fn process_package(
             sw.record_package_qc_signature(
                 &canonical,
                 crate::committee_qc::QcVoteSignature {
-                    approved: approved_vote,
+                    domain: crate::committee_qc::vote_qc_domain(approved_vote).to_string(),
                     content_hash: req.content_hash.clone(),
                     evidence_digest: evidence_digest.clone(),
                     signature,
                 },
             );
         }
+        if let Some(envelope) = vote_v4.clone() {
+            sw.record_package_v4_vote(&canonical, envelope);
+        }
     }
 
-    // Gossip our vote to peers via P2P Gossipsub
-    // Only mandatory (or voluntary) analyzers produce and gossip a vote in hybrid model.
-    if should_analyze {
-        let (approved, reject_reason) = match &vote {
-            ValidatorVote::Approve => (true, None),
-            ValidatorVote::Reject { reason } => (false, Some(reason.clone())),
-        };
-
-        // Reuse the signature produced above — same canonical vote message format.
-        let gossip_sig = our_sig.signature.clone();
-
-        let gossip_vote = crate::gossip::VoteGossip {
-            consensus_subject: canonical.clone(),
-            content_hash: req.content_hash.clone(),
-            publisher_authorization_digest: publisher_authorization_digest.clone(),
-            validator_id: node_id.clone(),
-            validator_pubkey: our_sig.validator_pubkey.clone(),
-            ml_model_version: our_sig.ml_model_version.clone(),
-            analysis_bundles: analysis_bundles.clone(),
-            evidence_digest: evidence_digest.clone(),
-            deterministic_risk: deterministic_risk.clone(),
-            phase: "commit".into(),
-            approved,
-            reject_reason,
-            signature: gossip_sig,
-            is_mandatory: our_sig.is_mandatory,
-            committee_qc_signature: committee_qc_signature.clone(),
-        };
-
-        let gossip_bytes = match serde_json::to_vec(&gossip_vote) {
-            Ok(bytes) => bytes,
-            Err(e) => {
-                tracing::error!("Failed to serialize gossip vote for {}: {}", canonical, e);
-                cleanup(&state, &canonical).await;
-                return;
-            }
-        };
-
-        if p2p_handle
-            .sender
-            .send(crate::p2p::P2PCommand::Broadcast {
-                topic: "creg/v1/votes".into(),
-                data: gossip_bytes,
-            })
-            .await
-            .is_err()
-        {
-            tracing::warn!(
-                "P2P broadcast channel closed while gossiping vote for {}",
-                canonical
-            );
-        }
-    } else {
-        // Non-analyzers skip gossip; they rely on committee evidence.
+    // Gossip our vote to peers via P2P Gossipsub. Only mandatory (or
+    // voluntary) analyzers reach this point; the same signed vote is resent
+    // later with a quarantine certificate signature when the round holds.
+    let gossip_vote = crate::gossip::VoteGossip {
+        consensus_subject: canonical.clone(),
+        content_hash: req.content_hash.clone(),
+        publisher_authorization_digest: publisher_authorization_digest.clone(),
+        validator_id: node_id.clone(),
+        validator_pubkey: our_sig.validator_pubkey.clone(),
+        ml_model_version: our_sig.ml_model_version.clone(),
+        analysis_bundles: analysis_bundles.clone(),
+        evidence_digest: evidence_digest.clone(),
+        deterministic_risk: deterministic_risk.clone(),
+        phase: "commit".into(),
+        approved: approved_vote,
+        reject_reason: reject_reason.clone(),
+        signature: our_sig.signature.clone(),
+        is_mandatory: our_sig.is_mandatory,
+        committee_qc_signature: committee_qc_signature.clone(),
+        committee_qc_domain: None,
+        vote_v4: vote_v4.clone(),
+    };
+    if should_analyze && !broadcast_vote(&p2p_handle, &gossip_vote, &canonical).await {
+        cleanup(&state, &canonical).await;
+        return;
     }
 
     // ── WAIT FOR QUORUM OUTCOME ───────────────────────────────────────────────
@@ -597,7 +621,10 @@ async fn process_package(
             s.config.vote_timeout_secs.max(1),
         )
     };
-    let mut consensus_outcome = None;
+    let mut decision: Option<RoundDecision> = None;
+    // Whether this member has signed the round's quarantine certificate.
+    let mut hold_signed = false;
+    let mut hold_reason: Option<String> = None;
 
     // Get committee for hybrid quorum
     let mut committee = {
@@ -612,15 +639,120 @@ async fn process_package(
         .saturating_mul(1000)
         .div_ceil(VOTE_POLL_MS);
     for i in 0..max_iterations {
+        let mut sign_hold = false;
         {
             let sr = state.read().await;
             if let Some(round) = sr.package_round(&canonical) {
                 // Use hybrid quorum logic (mandatory core first, volunteers for liveness)
-                if let Some(outcome) = aggregate_evidence_votes(round.signatures(), &committee) {
-                    consensus_outcome = Some(outcome);
-                    break;
+                let v3 = aggregate_evidence_votes(round.signatures(), &committee);
+                match &v4_params {
+                    // Before activation the v3 evidence quorum decides alone.
+                    None => decision = v3.map(RoundDecision::Final),
+                    Some(params) => {
+                        let height = sr.chain.tip_height().unwrap_or(0).saturating_add(1);
+                        let config = crate::vote_v4_round::quorum_config(
+                            params,
+                            &committee,
+                            sr.pbft_engine.allow_small_cluster_quorum(),
+                        );
+                        let v4 = consensus::vote_v4::aggregate_vote_v4_quorum(
+                            &round.v4_votes(),
+                            &canonical,
+                            &req.content_hash,
+                            &sr.validator_set.validators,
+                            height,
+                            params,
+                            &config,
+                            &HashSet::new(),
+                            Utc::now().timestamp(),
+                        );
+                        match v4.map(|v4| crate::vote_v4_round::combine_outcomes(v3, &v4)) {
+                            Ok(Some(RoundDecision::Hold { final_sigs, reason })) => {
+                                if hold_reason.is_none() {
+                                    tracing::info!(canonical = %canonical, "Class C hold: {reason}");
+                                }
+                                hold_reason = Some(reason);
+                                if !hold_signed {
+                                    sign_hold = true;
+                                } else {
+                                    // Probe record with the committee the
+                                    // final record will carry, so the check
+                                    // resolves it as block validation will.
+                                    let probe = ChainRecord {
+                                        id: req.id.clone(),
+                                        content_hash: req.content_hash.clone(),
+                                        evidence_digest: evidence_digest.clone(),
+                                        analysis_committee: Some(committee.clone()),
+                                        ..ChainRecord::default()
+                                    };
+                                    if let Ok(Some(certificate)) =
+                                        crate::committee_qc::qc_for_record(
+                                            common::QUARANTINE_QC_DOMAIN,
+                                            &probe,
+                                            round.qc_signatures(),
+                                            sr.chain.data_dir(),
+                                            &sr.validator_set_bootstrap,
+                                            params.hybrid_signature_activation_height,
+                                            height,
+                                        )
+                                    {
+                                        decision = Some(RoundDecision::HoldCertified {
+                                            final_sigs,
+                                            certificate: Box::new(certificate),
+                                        });
+                                    }
+                                }
+                            }
+                            Ok(other) => decision = other,
+                            Err(error) => tracing::debug!(
+                                canonical = %canonical,
+                                "v4 aggregation not decidable yet: {error:#}"
+                            ),
+                        }
+                    }
                 }
             }
+        }
+        if decision.is_some() {
+            break;
+        }
+        if sign_hold {
+            // Second phase of a hold: sign the quarantine certificate and
+            // resend the vote carrying it.
+            match hybrid_key.as_ref() {
+                Some(key) => {
+                    let signature = crate::committee_qc::sign_qc(
+                        &committee,
+                        common::QUARANTINE_QC_DOMAIN,
+                        &canonical,
+                        &req.content_hash,
+                        &evidence_digest,
+                        &node_id,
+                        key,
+                    );
+                    {
+                        let mut sw = state.write().await;
+                        sw.record_package_qc_signature(
+                            &canonical,
+                            crate::committee_qc::QcVoteSignature {
+                                domain: common::QUARANTINE_QC_DOMAIN.to_string(),
+                                content_hash: req.content_hash.clone(),
+                                evidence_digest: evidence_digest.clone(),
+                                signature: signature.clone(),
+                            },
+                        );
+                    }
+                    let mut hold_vote = gossip_vote.clone();
+                    hold_vote.committee_qc_signature = Some(signature);
+                    hold_vote.committee_qc_domain = Some(common::QUARANTINE_QC_DOMAIN.to_string());
+                    broadcast_vote(&p2p_handle, &hold_vote, &canonical).await;
+                }
+                None => tracing::warn!(
+                    canonical = %canonical,
+                    "Class C hold without a hybrid key: this member cannot sign the quarantine certificate"
+                ),
+            }
+            hold_signed = true;
         }
 
         // Hybrid expansion: after primary timeout, expand eligible committee
@@ -646,36 +778,55 @@ async fn process_package(
         tokio::time::sleep(tokio::time::Duration::from_millis(VOTE_POLL_MS)).await;
     }
 
-    let Some(consensus_outcome) = consensus_outcome else {
+    let Some(decision) = decision else {
         let detail = {
             let s = state.read().await;
             s.package_round(&canonical)
                 .map(|round| summarize_vote_round(round.signatures(), assigned_validator_count))
                 .unwrap_or_else(|| "no votes recorded".to_string())
         };
-        tracing::error!(
-            "Consensus timeout for package {} after {}s (quorum needs {} of {} validators): {}",
-            canonical,
-            vote_timeout_secs,
-            (assigned_validator_count * 2 / 3) + 1,
-            assigned_validator_count,
-            detail
-        );
+        if let Some(reason) = hold_reason {
+            // Fail closed: a hold that never gathered its quarantine
+            // certificate is not published at all.
+            tracing::error!(
+                "Class C hold for {} did not gather a quarantine certificate within {}s ({}); not publishing: {}",
+                canonical,
+                vote_timeout_secs,
+                reason,
+                detail
+            );
+        } else {
+            tracing::error!(
+                "Consensus timeout for package {} after {}s (quorum needs {} of {} validators): {}",
+                canonical,
+                vote_timeout_secs,
+                (assigned_validator_count * 2 / 3) + 1,
+                assigned_validator_count,
+                detail
+            );
+        }
         cleanup(&state, &canonical).await;
         return;
     };
 
-    match (&vote, &consensus_outcome) {
-        (ValidatorVote::Approve, EvidenceVoteOutcome::Rejected { reason }) => {
+    match (&vote, &decision) {
+        (
+            ValidatorVote::Approve,
+            RoundDecision::Final(EvidenceVoteOutcome::Rejected { reason }),
+        ) => {
             tracing::warn!(
                 "{} local validator approved, but consensus rejected: {}",
                 canonical,
                 reason
             );
         }
-        (ValidatorVote::Reject { reason }, EvidenceVoteOutcome::Verified(_)) => {
+        (
+            ValidatorVote::Reject { reason },
+            RoundDecision::Final(EvidenceVoteOutcome::Verified(_))
+            | RoundDecision::HoldCertified { .. },
+        ) => {
             tracing::warn!(
-                "{} local validator rejected ({}), but consensus verified",
+                "{} local validator rejected ({}), but consensus verified or held",
                 canonical,
                 reason
             );
@@ -683,9 +834,50 @@ async fn process_package(
         _ => {}
     }
 
-    // ── Write finalised transaction ───────────────────────────────────────────
-    let (tx, outcome_label) = match consensus_outcome {
-        EvidenceVoteOutcome::Verified(final_sigs) => {
+    // ── Write finalised transactions ──────────────────────────────────────────
+    let (txs, outcome_label): (Vec<Transaction>, &str) = match decision {
+        RoundDecision::Final(EvidenceVoteOutcome::Rejected { reason }) => {
+            let mut request = common::SignedRevocationRequest {
+                chain_id,
+                genesis_hash,
+                package_canonical: canonical.clone(),
+                reason,
+                revoker_pubkey: validator_pubkey,
+                signature: String::new(),
+                signature_version: 1,
+            };
+            request.signature = signing_key
+                .sign(request.signing_message().as_bytes())
+                .to_hex();
+            (
+                vec![common::Transaction::RevokeV2 {
+                    request,
+                    evidence_hash: evidence_digest,
+                    witness: None,
+                    quorum_certificate: None,
+                }],
+                "REJECTED",
+            )
+        }
+        // Never finalized: an uncertified hold keeps the loop waiting.
+        RoundDecision::Hold { .. } => {
+            cleanup(&state, &canonical).await;
+            return;
+        }
+        publish_decision => {
+            let (final_sigs, hold_certificate) = match publish_decision {
+                RoundDecision::Final(EvidenceVoteOutcome::Verified(final_sigs)) => {
+                    (final_sigs, None)
+                }
+                RoundDecision::HoldCertified {
+                    final_sigs,
+                    certificate,
+                } => (final_sigs, Some(*certificate)),
+                _ => {
+                    cleanup(&state, &canonical).await;
+                    return;
+                }
+            };
             let mandatory_contributed = final_sigs.iter().filter(|s| s.is_mandatory).count() as u32;
 
             // Snapshot pre-finality performance scores without mutating state
@@ -746,8 +938,11 @@ async fn process_package(
             // already passes the check block validation applies (same
             // committee resolution, signer rule and verifier). It is optional
             // for approvals, so a short certificate is left out rather than
-            // delaying the publication.
-            let committee_qc = {
+            // delaying the publication. A held version carries none: it was
+            // not approved.
+            let committee_qc = if hold_certificate.is_some() {
+                None
+            } else {
                 let s = state.read().await;
                 let height = s.chain.tip_height().unwrap_or(0).saturating_add(1);
                 crate::committee_qc::approval_qc_for_record(
@@ -800,47 +995,85 @@ async fn process_package(
             } else {
                 Transaction::Publish(record)
             };
-            (transaction, "VERIFIED")
-        }
-        EvidenceVoteOutcome::Rejected { reason } => {
-            let mut request = common::SignedRevocationRequest {
-                chain_id,
-                genesis_hash,
-                package_canonical: canonical.clone(),
-                reason,
-                revoker_pubkey: validator_pubkey,
-                signature: String::new(),
-                signature_version: 1,
-            };
-            request.signature = signing_key
-                .sign(request.signing_message().as_bytes())
-                .to_hex();
-            (
-                common::Transaction::RevokeV2 {
-                    request,
-                    evidence_hash: evidence_digest,
-                    witness: None,
-                    quorum_certificate: None,
-                },
-                "REJECTED",
-            )
+            match hold_certificate {
+                // ADR-019 3c: a Class C hold is the publication plus its
+                // `QuarantineV1`, persisted hold-first; the block producer
+                // includes the pair together or not at all, so the version is
+                // never verified at a committed height.
+                Some(certificate) => {
+                    let Some(held_record) = transaction.published_record().cloned() else {
+                        cleanup(&state, &canonical).await;
+                        return;
+                    };
+                    let hold = Transaction::QuarantineV1 {
+                        record: held_record,
+                        reason_code: common::CregFindingCategoryV1::Other,
+                        quorum_certificate: certificate,
+                    };
+                    (vec![hold, transaction], "QUARANTINED")
+                }
+                None => (vec![transaction], "VERIFIED"),
+            }
         }
     };
 
-    if let Err(error) = crate::finalized_tx::persist_and_notify(&state, &tx_out, tx.clone()).await {
-        tracing::error!(
-            "Finalized work persisted but could not notify block producer for {}: {}",
-            canonical,
-            error
-        );
-    } else {
+    // Persist in order and stop at the first failure: a hold persisted
+    // without its publication only waits, never publishes alone.
+    let mut persisted = Vec::with_capacity(txs.len());
+    for tx in txs {
+        if let Err(error) =
+            crate::finalized_tx::persist_and_notify(&state, &tx_out, tx.clone()).await
+        {
+            tracing::error!(
+                "Finalized work persisted but could not notify block producer for {}: {}",
+                canonical,
+                error
+            );
+            break;
+        }
+        persisted.push(tx);
+    }
+    if !persisted.is_empty() {
         tracing::info!("{} → {}", canonical, outcome_label);
         let mut s = state.write().await;
         let height = s.chain.tip_height().unwrap_or(0);
-        s.forced_inclusion_tracker.submit(tx, height);
+        for tx in persisted {
+            s.forced_inclusion_tracker.submit(tx, height);
+        }
     }
 
     cleanup(&state, &canonical).await;
+}
+
+/// Gossip a vote; `false` only when it cannot be serialized (a closed P2P
+/// channel is logged and tolerated, as before).
+async fn broadcast_vote(
+    p2p_handle: &crate::p2p::P2PHandle,
+    vote: &crate::gossip::VoteGossip,
+    canonical: &str,
+) -> bool {
+    let bytes = match serde_json::to_vec(vote) {
+        Ok(bytes) => bytes,
+        Err(e) => {
+            tracing::error!("Failed to serialize gossip vote for {}: {}", canonical, e);
+            return false;
+        }
+    };
+    if p2p_handle
+        .sender
+        .send(crate::p2p::P2PCommand::Broadcast {
+            topic: "creg/v1/votes".into(),
+            data: bytes,
+        })
+        .await
+        .is_err()
+    {
+        tracing::warn!(
+            "P2P broadcast channel closed while gossiping vote for {}",
+            canonical
+        );
+    }
+    true
 }
 
 fn summarize_vote_round(

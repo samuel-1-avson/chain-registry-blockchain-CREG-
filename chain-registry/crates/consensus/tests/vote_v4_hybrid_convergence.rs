@@ -34,6 +34,7 @@ fn test_params(activation_height: Option<u64>) -> ConsensusParams {
         namespace_authority_activation_height: None,
         namespace_authority_policies: vec![],
         hybrid_signature_activation_height: activation_height,
+        vote_v4_quorum: None,
     }
 }
 

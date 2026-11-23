@@ -42,6 +42,7 @@ pub mod validator_pipeline;
 pub mod validator_registry_gossip;
 pub mod validator_set_history;
 pub mod validator_set_sync;
+pub mod vote_v4_round;
 
 // ── Private modules required by the public ones above ────────────────────────
 mod authority_archive;

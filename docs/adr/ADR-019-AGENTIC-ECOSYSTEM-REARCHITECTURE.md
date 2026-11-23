@@ -936,6 +936,28 @@ Decision applied: §11 #7 (no LLM prose on public surfaces), confirmed by the ma
 
 **Verification (local, 2026-11-23).** `cargo fmt --check`, both clippy gates (`-D warnings`) and `cargo deny` pass. Tests: `zone-ipc` 3 (signing-secret guard across all zones); `registry-view` 7 (no LLM text in the summary); `creg-agent-runner` 3 (consensus-only, malformed record, no IPFS URL, shielded); `validator` `ipfs_fetch` 2 (moved); node lib under `phase-c-real-fleet` 325 (1 ignored; the 2 moved fetch tests leave, 2 new: Zone 4 reports must match the record, store keys); node bins `creg-node-supervisor` 2 (key names reach only consensus) and `creg-consensusd` 2; node `integration` 11, `high_throughput_stress_test` 1 and `multi_node_testnet_simulation` 1.
 
+### Increment 2, part 3c — v4 envelope votes and Class C holds (implemented 2026-11-23)
+
+Maintainer decisions for this part: the v4 quorum rules live in the signed spec and default to no model-family requirement; a hold for a new package is on chain, with the publication and its `QuarantineV1` in the same block; a hold ends only by the 72-hour fail-closed expiry (early release or rejection by `QuarantineResolutionV1` is a follow-up). Pre-activation behaviour is unchanged.
+
+| Area | What shipped | Where |
+| --- | --- | --- |
+| Spec quorum rules | `ConsensusParams.vote_v4_quorum: Option<VoteV4QuorumSpec { min_model_families (≤ 8), require_semantic_vote_for_approval }>`, omitted when unset (existing specs and genesis hashes keep their bytes; unset = v3-equivalent). The node keeps the signed `ConsensusParams` (`NodeConfig.consensus_params`) and refuses an out-of-range value at startup. | `common/src/chain_spec.rs`, `node/src/config.rs` |
+| Semantic votes | `ValidationResult.semantic_vote`: a `SemanticVoteV4` (disposition, normalized model family, digests of verified excerpts only, no prose) from the Layer 4 agent report, and only when the agent ran for real (not off, not shadow mode). | `validator/src/lib.rs` |
+| v4 votes | From activation each committee member signs a `VoteV4Envelope` with its hybrid key and sends it in `VoteGossip.vote_v4`; rounds keep one envelope per voter. | `node/src/{validator_pipeline,gossip,p2p,state}.rs` |
+| Round decision | After activation the round aggregates the envelopes with `consensus::vote_v4::aggregate_vote_v4_quorum` under the spec rules (`vote_v4_round::quorum_config`) and combines the result with the v3 evidence quorum (`combine_outcomes`): any rejection (v3 deterministic floor or v4) rejects; v3 verified + v4 approved publishes; v3 verified + v4 quarantined is a hold; anything else keeps waiting. The v3 quorum is still required because the record's validator signatures are what block validation checks. | `node/src/vote_v4_round.rs`, `node/src/validator_pipeline.rs` |
+| Hold certificate | A hold needs a second signature round: each member signs a `QUARANTINE_QC_DOMAIN` certificate and resends its vote with it (`VoteGossip.committee_qc_domain`). Certificate signatures are now kept per (domain, voter), limited to the four round domains. The finalizer attaches the certificate only once it passes the block-validation check (record committee, signer rule, verifier); a hold that never gathers it is not published at all. | `node/src/committee_qc.rs`, `node/src/validator_pipeline.rs` |
+| Same-block holds | The pipeline persists the `QuarantineV1` first and the publication second, so a crash in between leaves a hold that waits rather than a publication alone. The producer's selection groups a hold of a not-yet-committed version with its publication (`block_producer::selection_groups`), validates the pair together, and includes both or neither; a hold without its publication waits. A hold whose version is already held or revoked is retired as ineligible. | `node/src/block_producer.rs` |
+
+**Limits:**
+- A Byzantine proposer can include the publication without its hold (censorship of the hold); honest proposers never do. Validation cannot tell, because the publication is valid on its own.
+- `QuarantineV1.reason_code` is `other`: the v4 outcome carries no finding category, and the certificate does not bind the code (display only).
+- Envelopes carry no trigger witness yet (Class B): the agent's witness drafts still need prover signing in the node. Until then the aggregator's witness precedence is unused.
+- A round keeps the latest envelope per voter, so the aggregator's equivocation check sees at most one envelope per voter.
+- Scheduling activation still requires hybrid PBFT block signing (ADR-017).
+
+**Verification (local, 2026-11-23).** `cargo fmt --check`, both clippy gates (`-D warnings`) and `cargo deny` pass. Tests: `common` 100 (spec field omitted until set, bounded, unknown fields refused) plus golden vectors 10/10 (frozen, unchanged); `consensus` 77 plus `signed_message_formats` 6/6 (frozen, unchanged) and `vote_v4_hybrid_convergence` 5/5; `validator` semantic-vote mapping 1; node lib under `phase-c-real-fleet` 328 (1 ignored; new: outcome combination, spec quorum rules, hold grouping; the committee certificate test now covers the quarantine domain); node `integration` 11, `high_throughput_stress_test` 1 and `multi_node_testnet_simulation` 1.
+
 ### Increment 6 — L1 Services Modernization & Supply-Chain Burn-Down (implemented 2026-11-23)
 
 Decisions applied: #5 (relayer store = PostgreSQL) and #6 (single faucet instance, stateless HMAC PoW, shared `sqlx` pool). No consensus wire type, signed message, block or header format changed; the frozen test files are untouched.

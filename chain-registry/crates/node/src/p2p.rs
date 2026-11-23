@@ -438,22 +438,34 @@ async fn record_validated_vote_gossip(
         vote.consensus_subject.clone(),
         vote_gossip_to_signature(vote),
     );
-    // The certificate signature is self-authenticating and is checked when
-    // the certificate is assembled; here it only has to belong to the voter.
+    // The certificate signature and the v4 envelope are self-authenticating
+    // and are verified when the certificate is assembled or the votes are
+    // aggregated; here they only have to belong to the voter.
     if let Some(signature) = vote
         .committee_qc_signature
         .as_ref()
         .filter(|signature| signature.validator_id == vote.validator_id)
     {
+        let domain = vote
+            .committee_qc_domain
+            .clone()
+            .unwrap_or_else(|| crate::committee_qc::vote_qc_domain(vote.approved).to_string());
         state.record_package_qc_signature(
             &vote.consensus_subject,
             crate::committee_qc::QcVoteSignature {
-                approved: vote.approved,
+                domain,
                 content_hash: vote.content_hash.clone(),
                 evidence_digest: vote.evidence_digest.clone(),
                 signature: signature.clone(),
             },
         );
+    }
+    if let Some(envelope) = vote
+        .vote_v4
+        .as_ref()
+        .filter(|envelope| envelope.validator_id == vote.validator_id)
+    {
+        state.record_package_v4_vote(&vote.consensus_subject, envelope.clone());
     }
 }
 
@@ -2206,6 +2218,8 @@ mod tests {
             signature: hex::encode(signing_key.sign(message.as_bytes()).to_bytes()),
             is_mandatory: true,
             committee_qc_signature: None,
+            committee_qc_domain: None,
+            vote_v4: None,
         }
     }
 

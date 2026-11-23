@@ -43,6 +43,42 @@ pub struct ValidationResult {
     /// Scanner version that actually ran (must be `degraded-*` when the scan
     /// timed out or failed so quorum filters exclude the vote).
     pub ml_model_version: String,
+    /// Quantized Class C vote for `creg-vote-v4` (ADR-018/ADR-019), present
+    /// only when the Layer 4 agent ran for real (not off, not shadow mode).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub semantic_vote: Option<common::SemanticVoteV4>,
+}
+
+/// Quantized semantic vote from a Layer 4 agent report: disposition, model
+/// family and verified finding digests only (no prose). `None` for shadow
+/// runs, agent-off runs and reports without a model family.
+pub fn semantic_vote_from_agent(
+    report: &ai_agent::AgentInvestigationReport,
+) -> Option<common::SemanticVoteV4> {
+    if report.shadow_mode || report.mode == ai_agent::AgentMode::Off {
+        return None;
+    }
+    let disposition = match report.disposition {
+        ai_agent::SemanticDisposition::Approve => common::SemanticDispositionV4::Approve,
+        ai_agent::SemanticDisposition::QuarantineReview => {
+            common::SemanticDispositionV4::QuarantineReview
+        }
+        ai_agent::SemanticDisposition::Reject => common::SemanticDispositionV4::Reject,
+    };
+    let finding_digests = report
+        .semantic_findings
+        .iter()
+        .filter(|finding| finding.excerpt_verified)
+        .map(|finding| finding.excerpt_sha256.trim().to_ascii_lowercase())
+        .filter(|digest| digest.len() == 64 && digest.bytes().all(|b| b.is_ascii_hexdigit()))
+        .take(common::MAX_SEMANTIC_FINDING_DIGESTS)
+        .collect();
+    let vote = common::SemanticVoteV4 {
+        disposition,
+        model_family: report.model_family_used.trim().to_ascii_lowercase(),
+        finding_digests,
+    };
+    vote.validate().ok().map(|_| vote)
 }
 
 /// Run all validator pipeline stages and produce a signed vote.
@@ -279,6 +315,11 @@ pub async fn validate_package_with_reputation(
         ValidatorVote::Approve
     };
 
+    let semantic_vote = report
+        .llm_review
+        .as_ref()
+        .and_then(|review| review.agent_report.as_ref())
+        .and_then(semantic_vote_from_agent);
     Ok(ValidationResult {
         vote,
         pgp_fingerprint,
@@ -286,6 +327,7 @@ pub async fn validate_package_with_reputation(
         analysis_bundles: report.analysis_bundles,
         deterministic_risk,
         ml_model_version: report.ml_model_version,
+        semantic_vote,
     })
 }
 
@@ -418,4 +460,65 @@ async fn aaa_audit(report: &ValidationReport, req: &PublishRequest) -> Result<Au
 
     let proof: AuditProof = resp.json().await?;
     Ok(proof)
+}
+
+#[cfg(test)]
+mod semantic_vote_tests {
+    use super::*;
+    use ai_agent::{AgentInvestigationReport, AgentMode, SemanticDisposition, SemanticFindingV1};
+
+    fn report(mode: AgentMode, shadow: bool, family: &str) -> AgentInvestigationReport {
+        AgentInvestigationReport {
+            mode,
+            shadow_mode: shadow,
+            disposition: SemanticDisposition::QuarantineReview,
+            maliciousness_score: 55,
+            summary: "free-form prose that must not reach the vote".into(),
+            semantic_findings: vec![
+                SemanticFindingV1 {
+                    category: "credential_exfiltration".into(),
+                    severity: "high".into(),
+                    file_path: "index.js".into(),
+                    byte_range: [0, 10],
+                    excerpt_sha256: "AB".repeat(32),
+                    explanation: "prose".into(),
+                    excerpt_verified: true,
+                },
+                SemanticFindingV1 {
+                    category: "other".into(),
+                    severity: "low".into(),
+                    file_path: "x.js".into(),
+                    byte_range: [0, 1],
+                    excerpt_sha256: "cd".repeat(32),
+                    explanation: "unverified excerpt".into(),
+                    excerpt_verified: false,
+                },
+            ],
+            witnesses: vec![],
+            injection_attempts_detected: vec![],
+            steps_taken: 3,
+            total_tokens_used: 100,
+            replay_attempts_used: 0,
+            provider_used: "local".into(),
+            model_family_used: family.into(),
+            traces: vec![],
+        }
+    }
+
+    #[test]
+    fn only_real_agent_runs_produce_quantized_semantic_votes() {
+        let vote = semantic_vote_from_agent(&report(AgentMode::TriageOnly, false, " Qwen "))
+            .expect("semantic vote");
+        assert_eq!(
+            vote.disposition,
+            common::SemanticDispositionV4::QuarantineReview
+        );
+        assert_eq!(vote.model_family, "qwen");
+        // Only verified excerpts, normalized.
+        assert_eq!(vote.finding_digests, vec!["ab".repeat(32)]);
+
+        assert!(semantic_vote_from_agent(&report(AgentMode::TriageOnly, true, "qwen")).is_none());
+        assert!(semantic_vote_from_agent(&report(AgentMode::Off, false, "qwen")).is_none());
+        assert!(semantic_vote_from_agent(&report(AgentMode::TriageOnly, false, "")).is_none());
+    }
 }

@@ -279,6 +279,9 @@ pub struct NodeConfig {
     pub node_id: String,
     /// This node's Ed25519 private key (hex), zeroizing & redacted in `Debug` (`VNA-25`).
     pub validator_privkey: Option<chain_registry_secrets::SecretString>,
+    /// Consensus parameters from the signature-verified chain spec (`None`
+    /// in legacy env-only mode). Source of the v4 quorum rules (ADR-019).
+    pub consensus_params: Option<common::ConsensusParams>,
     /// 32-byte ML-DSA-44 seed (hex) completing the hybrid validator key
     /// (`ADR-017`, `CREG_VALIDATOR_PQ_KEY`). Required for a validator once
     /// `hybrid_signature_activation_height` is scheduled.
@@ -345,6 +348,7 @@ impl Default for NodeConfig {
             pinning_rewards_addr: None,
             node_id: String::new(),
             validator_privkey: None,
+            consensus_params: None,
             validator_pq_seed: None,
             bridge_privkey: None,
             is_validator: false,
@@ -429,6 +433,7 @@ impl NodeConfig {
             data_dir: PathBuf::from(env("CREG_DATA_DIR", "./data")),
             node_id: env("CREG_NODE_ID", &Uuid::new_v4().to_string()),
             validator_privkey: None,
+            consensus_params: None,
             validator_pq_seed: None,
             bridge_privkey: None,
             is_validator: common::parse_env_bool("CREG_IS_VALIDATOR"),
@@ -1010,6 +1015,10 @@ impl NodeConfig {
         self.namespace_authority_activation_height =
             spec.consensus_params.namespace_authority_activation_height;
         self.vote_v4_activation_height = spec.consensus_params.hybrid_signature_activation_height;
+        if let Err(error) = spec.consensus_params.vote_v4_quorum().validate() {
+            errors.push(error);
+        }
+        self.consensus_params = Some(spec.consensus_params.clone());
         self.namespace_authority_policies =
             spec.consensus_params.namespace_authority_policies.clone();
         self.namespace_authority_policy_source_verified = signature_verified;
@@ -1192,6 +1201,7 @@ mod tests {
             pinning_rewards_addr: None,
             node_id: "node-test".into(),
             validator_privkey: None,
+            consensus_params: None,
             validator_pq_seed: None,
             bridge_privkey: None,
             is_validator: false,

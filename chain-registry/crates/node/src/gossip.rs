@@ -92,11 +92,20 @@ pub struct VoteGossip {
     pub is_mandatory: bool, // true if this voter was in the primary mandatory committee for the package
 
     /// ADR-019 (part 2b): this member's signature over the committee
-    /// certificate for its own decision (`committee_qc::sign_vote_qc`).
+    /// certificate for its own decision (`committee_qc::sign_qc`), or for
+    /// `committee_qc_domain` when set.
     /// Sent from hybrid activation on; omitted before it, so older peers
     /// see the same wire form.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub committee_qc_signature: Option<common::QcSignatureV1>,
+    /// Domain of `committee_qc_signature` when it is not this vote's own
+    /// decision (a Class C quarantine certificate, part 3c). Absent means
+    /// `committee_qc::vote_qc_domain(approved)`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub committee_qc_domain: Option<String>,
+    /// This member's signed `creg-vote-v4` envelope (from hybrid activation).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub vote_v4: Option<common::VoteV4Envelope>,
 }
 
 /// Message sent to peers when we write a new block.

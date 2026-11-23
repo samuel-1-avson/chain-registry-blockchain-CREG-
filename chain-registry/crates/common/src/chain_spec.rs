@@ -90,12 +90,52 @@ pub struct ConsensusParams {
         alias = "vote_v4_activation_height"
     )]
     pub hybrid_signature_activation_height: Option<u64>,
+    /// ADR-019: `creg-vote-v4` committee quorum rules. Omitted (the default)
+    /// means no model-family requirement, which behaves like the v3 evidence
+    /// quorum; raise it once two or more LLM model families run across the
+    /// fleet. Omitted when unset, so existing specs and genesis hashes keep
+    /// their bytes.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub vote_v4_quorum: Option<VoteV4QuorumSpec>,
 }
 
 impl ConsensusParams {
     pub fn vote_v4_active_at(&self, height: u64) -> bool {
         self.hybrid_signature_activation_height
             .is_some_and(|activation| height >= activation)
+    }
+
+    /// Effective v4 quorum rules (defaults when the spec omits them).
+    pub fn vote_v4_quorum(&self) -> VoteV4QuorumSpec {
+        self.vote_v4_quorum.unwrap_or_default()
+    }
+}
+
+/// Upper bound on `VoteV4QuorumSpec::min_model_families`.
+pub const MAX_VOTE_V4_MODEL_FAMILIES: u8 = 8;
+
+/// Class C committee rules for `creg-vote-v4` aggregation (ADR-018/ADR-019).
+#[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+pub struct VoteV4QuorumSpec {
+    /// Distinct LLM model families required among approving votes before an
+    /// approval is accepted; below it the outcome is a Class C hold. 0
+    /// disables the requirement.
+    #[serde(default)]
+    pub min_model_families: u8,
+    /// Count an approval only when it carries a semantic vote.
+    #[serde(default)]
+    pub require_semantic_vote_for_approval: bool,
+}
+
+impl VoteV4QuorumSpec {
+    pub fn validate(&self) -> Result<(), String> {
+        if self.min_model_families > MAX_VOTE_V4_MODEL_FAMILIES {
+            return Err(format!(
+                "vote_v4_quorum.min_model_families must be at most {MAX_VOTE_V4_MODEL_FAMILIES}"
+            ));
+        }
+        Ok(())
     }
 }
 
@@ -515,6 +555,7 @@ mod tests {
                 namespace_authority_activation_height: None,
                 namespace_authority_policies: vec![],
                 hybrid_signature_activation_height: None,
+                vote_v4_quorum: None,
             },
             feature_flags: FeatureFlags {
                 zk_validation: false,
@@ -592,6 +633,44 @@ mod tests {
         assert_eq!(h1, h2);
         assert!(h1.starts_with("0x"));
         assert_eq!(h1.len(), 66); // 0x + 64 hex chars
+    }
+
+    #[test]
+    fn vote_v4_quorum_is_omitted_until_set_and_bounded() {
+        let mut spec = test_spec();
+        let before = spec.compute_genesis_hash().unwrap();
+        let value = serde_json::to_value(&spec).unwrap();
+        assert!(value["consensus_params"].get("vote_v4_quorum").is_none());
+        // Unset means the v3-equivalent defaults.
+        assert_eq!(
+            spec.consensus_params.vote_v4_quorum(),
+            VoteV4QuorumSpec::default()
+        );
+
+        spec.consensus_params.vote_v4_quorum = Some(VoteV4QuorumSpec {
+            min_model_families: 2,
+            require_semantic_vote_for_approval: true,
+        });
+        assert_ne!(spec.compute_genesis_hash().unwrap(), before);
+        let decoded: ChainSpec =
+            serde_json::from_value(serde_json::to_value(&spec).unwrap()).unwrap();
+        assert_eq!(
+            decoded.consensus_params.vote_v4_quorum().min_model_families,
+            2
+        );
+        assert!(decoded.consensus_params.vote_v4_quorum().validate().is_ok());
+
+        let too_many = VoteV4QuorumSpec {
+            min_model_families: MAX_VOTE_V4_MODEL_FAMILIES + 1,
+            require_semantic_vote_for_approval: false,
+        };
+        assert!(too_many.validate().is_err());
+        assert!(
+            serde_json::from_value::<VoteV4QuorumSpec>(serde_json::json!({
+                "min_model_families": 1, "unexpected": true
+            }))
+            .is_err()
+        );
     }
 
     #[test]
