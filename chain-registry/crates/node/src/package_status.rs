@@ -795,21 +795,23 @@ pub fn apply_block(
     Ok(transition.effects)
 }
 
+/// Store fixture with hybrid validators and producer-style sealing, shared by
+/// the package-status and v4 read-route tests.
 #[cfg(test)]
-mod tests {
+pub(crate) mod test_fixture {
     use super::*;
     use crate::namespace_consensus::validate_block_body;
     use chrono::{DateTime, Duration, Utc};
     use common::crypto::SigningKey;
     use common::{BlockHeader, PackageId, SignedRevocationRequest, ValidatorSet};
 
-    struct Member {
-        validator: Validator,
-        hybrid: SigningKey,
-        ed: SigningKey,
+    pub(crate) struct Member {
+        pub(crate) validator: Validator,
+        pub(crate) hybrid: SigningKey,
+        pub(crate) ed: SigningKey,
     }
 
-    fn member(index: u8) -> Member {
+    pub(crate) fn member(index: u8) -> Member {
         let ed_seed = [index; 32];
         let ed = SigningKey::from_ed25519_seed(&ed_seed);
         let hybrid = SigningKey::hybrid_from_seeds(&ed_seed, &[index.wrapping_add(90); 32]);
@@ -830,7 +832,7 @@ mod tests {
         }
     }
 
-    fn record(name: &str, publisher_pubkey: &str) -> ChainRecord {
+    pub(crate) fn record(name: &str, publisher_pubkey: &str) -> ChainRecord {
         ChainRecord {
             id: PackageId::new("npm", name, "1.0.0"),
             content_hash: common::sha256_hex(name.as_bytes()),
@@ -841,15 +843,15 @@ mod tests {
         }
     }
 
-    struct Fixture {
+    pub(crate) struct Fixture {
         _dir: tempfile::TempDir,
-        store: ChainStore,
-        config: NamespaceConsensusConfig,
-        members: Vec<Member>,
-        start: DateTime<Utc>,
+        pub(crate) store: ChainStore,
+        pub(crate) config: NamespaceConsensusConfig,
+        pub(crate) members: Vec<Member>,
+        pub(crate) start: DateTime<Utc>,
     }
 
-    fn fixture(activation: Option<u64>) -> Fixture {
+    pub(crate) fn fixture(activation: Option<u64>) -> Fixture {
         let dir = tempfile::tempdir().expect("tempdir");
         let store = ChainStore::open(dir.path()).expect("open store");
         let members: Vec<Member> = (1..=4).map(member).collect();
@@ -879,7 +881,7 @@ mod tests {
     }
 
     impl Fixture {
-        fn block(&self, offset_secs: i64, transactions: Vec<Transaction>) -> Block {
+        pub(crate) fn block(&self, offset_secs: i64, transactions: Vec<Transaction>) -> Block {
             let tip = self.store.tip_height().expect("tip");
             let parent = self
                 .store
@@ -907,7 +909,7 @@ mod tests {
 
         /// Seal as the producer does (root from `validate_block_body`), then
         /// insert through the full validator.
-        fn commit(&self, mut block: Block) -> Result<Block> {
+        pub(crate) fn commit(&self, mut block: Block) -> Result<Block> {
             block.header.status_root = validate_block_body(&self.store, &block, &self.config)?
                 .status
                 .status_root;
@@ -915,7 +917,7 @@ mod tests {
             Ok(block)
         }
 
-        fn qc(
+        pub(crate) fn qc(
             &self,
             domain: &str,
             canonical: &str,
@@ -940,7 +942,7 @@ mod tests {
             qc
         }
 
-        fn leaf(&self, canonical: &str) -> StatusLeafV1 {
+        pub(crate) fn leaf(&self, canonical: &str) -> StatusLeafV1 {
             self.store
                 .status_leaf(canonical)
                 .expect("read leaf")
@@ -948,7 +950,7 @@ mod tests {
         }
     }
 
-    fn revocation(key: &SigningKey, canonical: &str) -> SignedRevocationRequest {
+    pub(crate) fn revocation(key: &SigningKey, canonical: &str) -> SignedRevocationRequest {
         let mut request = SignedRevocationRequest {
             chain_id: "creg-test".into(),
             genesis_hash: "0".repeat(64),
@@ -962,7 +964,7 @@ mod tests {
         request
     }
 
-    fn revoke_v2(
+    pub(crate) fn revoke_v2(
         request: SignedRevocationRequest,
         quorum_certificate: Option<CommitteeQuorumCertificateV1>,
     ) -> Transaction {
@@ -973,6 +975,15 @@ mod tests {
             quorum_certificate,
         }
     }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::test_fixture::*;
+    use super::*;
+    use crate::namespace_consensus::validate_block_body;
+    use chrono::Duration;
+    use common::crypto::SigningKey;
 
     #[test]
     fn pre_activation_index_tracks_status_without_a_root() {

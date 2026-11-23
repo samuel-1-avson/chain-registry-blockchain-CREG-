@@ -20,6 +20,7 @@ pub const PACKAGE_VIEW_SCHEMA: &str = "creg.package-view.v4";
 pub const PROOF_BUNDLE_SCHEMA: &str = "creg.proof-bundle.v2";
 pub const REVOCATION_STATUS_SCHEMA: &str = "creg.revocation-status.v2";
 pub const WITNESS_BUNDLE_SCHEMA: &str = "creg.witness-bundle.v1";
+pub const QUARANTINE_LIST_SCHEMA: &str = "creg.quarantine-list.v1";
 
 /// Bound for free-text reasons shown next to a status.
 pub const MAX_REASON_CHARS: usize = 256;
@@ -32,6 +33,7 @@ fn hex32(hash: &Hash32) -> String {
 
 /// Which quorum rules produced a record (ADR-019 decision #7).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 #[serde(rename_all = "snake_case")]
 pub enum QuorumLabelV1 {
     /// Accepted before `hybrid_signature_activation_height` under the v3
@@ -53,6 +55,7 @@ impl QuorumLabelV1 {
 
 /// Who authorised a revocation.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 #[serde(rename_all = "snake_case")]
 pub enum RevocationAuthorityV1 {
     Owner,
@@ -73,6 +76,7 @@ impl RevocationAuthorityV1 {
 
 /// Committee composition and outcome, chain-derived.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub struct CommitteeSummaryV1 {
     pub effective_size: u32,
     pub approvals: u32,
@@ -126,6 +130,7 @@ impl CommitteeSummaryV1 {
 /// Current status lattice (`ECO-INV-02`): `Revoked` ⊐ `Quarantined` ⊐
 /// {`Pending`, `Unknown`} ⊐ `Verified`.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 #[serde(tag = "state", rename_all = "snake_case")]
 pub enum PackageStatusViewV1 {
     Pending,
@@ -136,6 +141,7 @@ pub enum PackageStatusViewV1 {
     Quarantined {
         height: u64,
         expires_at_unix: i64,
+        #[cfg_attr(feature = "openapi", schema(value_type = String))]
         reason_code: CregFindingCategoryV1,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         committee: Option<CommitteeSummaryV1>,
@@ -143,6 +149,7 @@ pub enum PackageStatusViewV1 {
     Revoked {
         height: u64,
         authority: RevocationAuthorityV1,
+        #[cfg_attr(feature = "openapi", schema(value_type = String))]
         reason: DisplayText,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         witness_digest: Option<String>,
@@ -193,6 +200,7 @@ impl PackageStatusViewV1 {
 
 /// Evidence class of one vote (ADR-018 Class A/B/C).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub enum EvidenceClass {
     /// Deterministic static/sandbox findings.
     A,
@@ -223,10 +231,14 @@ pub fn evidence_class(
 
 /// One package version as shown by explorers and `creg info`.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub struct PackageViewV4 {
     pub schema: String,
+    #[cfg_attr(feature = "openapi", schema(value_type = String))]
     pub canonical: DisplayText,
+    #[cfg_attr(feature = "openapi", schema(value_type = String))]
     pub package: DisplayText,
+    #[cfg_attr(feature = "openapi", schema(value_type = String))]
     pub version: DisplayText,
     pub content_hash: String,
     pub status: PackageStatusViewV1,
@@ -260,28 +272,49 @@ impl PackageViewV4 {
     }
 }
 
+/// One step of a transaction Merkle path, leaf to root.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+#[serde(deny_unknown_fields)]
+pub struct MerkleStepV1 {
+    pub sibling_hash: String,
+    /// True when the sibling is the right-hand child.
+    pub is_right: bool,
+}
+
 /// Everything a client needs to verify a package's current status and
 /// publication offline (consumed by the Increment 3 resolver).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub struct ProofBundleV2 {
     pub schema: String,
+    #[cfg_attr(feature = "openapi", schema(value_type = String))]
     pub canonical: DisplayText,
     pub tip_height: u64,
     pub tip_block_hash: String,
     pub tip_timestamp_unix: i64,
     /// PBFT commit signatures over the tip block hash.
+    #[cfg_attr(feature = "openapi", schema(value_type = Vec<Object>))]
     pub tip_commit_signatures: Vec<BlockSignature>,
     /// `status_root` of the tip header; absent before hybrid activation.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub status_root: Option<String>,
+    /// Present with `status_proof` exactly when `status_root` is.
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(feature = "openapi", schema(value_type = Option<Object>))]
     pub status_leaf: Option<StatusLeafV1>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(feature = "openapi", schema(value_type = Option<Object>))]
     pub status_proof: Option<StatusProofV2>,
-    /// Height and Merkle path of the publication transaction.
+    /// Block, index, transaction hash and Merkle path of the publication.
     pub publication_height: u64,
+    pub publication_block_hash: String,
     pub publication_tx_index: u32,
-    pub publication_merkle_path: Vec<String>,
+    pub publication_tx_hash: String,
+    pub publication_merkle_path: Vec<MerkleStepV1>,
+    /// PBFT commit signatures over the publication block hash.
+    #[cfg_attr(feature = "openapi", schema(value_type = Vec<Object>))]
+    pub publication_commit_signatures: Vec<BlockSignature>,
     pub quorum: QuorumLabelV1,
 }
 
@@ -293,28 +326,34 @@ impl ProofBundleV2 {
 
 /// Revocation detail with its authority and certificate.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub struct RevocationStatusV2 {
     pub schema: String,
+    #[cfg_attr(feature = "openapi", schema(value_type = String))]
     pub canonical: DisplayText,
     pub content_hash: String,
     pub revoked: bool,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub authority: Option<RevocationAuthorityV1>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(feature = "openapi", schema(value_type = Option<String>))]
     pub reason: Option<DisplayText>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub height: Option<u64>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub witness_digest: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(feature = "openapi", schema(value_type = Option<Object>))]
     pub certificate: Option<CommitteeQuorumCertificateV1>,
 }
 
 /// A violation as rendered: closed code and static title, or an opaque
 /// digest of an unknown wire value.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub struct ViolationViewV1 {
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(feature = "openapi", schema(value_type = Option<String>))]
     pub code: Option<KernelViolationCode>,
     pub title: String,
     /// `UNKNOWN(<sha256-8>)` handle for values outside the dictionary.
@@ -343,27 +382,38 @@ impl ViolationViewV1 {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum WitnessVerificationV1 {
     /// Committed on chain inside a certified decision at `height`.
     OnChainCertified { height: u64 },
+    /// Committed on chain at `height` with an uncertified decision (for
+    /// example an owner self-revocation that attached a witness).
+    OnChainUncertified { height: u64 },
     /// Seen only in gossip; not certified.
     GossipOnly,
 }
 
 /// Inspector view of one `TriggerWitnessV1`.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub struct WitnessViewV1 {
     pub digest: String,
+    #[cfg_attr(feature = "openapi", schema(value_type = String))]
     pub package_canonical: DisplayText,
     pub content_hash: String,
+    #[cfg_attr(feature = "openapi", schema(value_type = String))]
     pub prover_id: DisplayText,
     pub prover_key_id: String,
     pub hybrid: bool,
+    /// `[key, value]` pairs.
+    #[cfg_attr(feature = "openapi", schema(value_type = Vec<Vec<String>>))]
     pub env_overrides: Vec<(DisplayText, DisplayText)>,
     pub clock_offset_secs: i64,
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(feature = "openapi", schema(value_type = Option<String>))]
     pub entry_function: Option<DisplayText>,
+    #[cfg_attr(feature = "openapi", schema(value_type = Vec<String>))]
     pub args: Vec<DisplayText>,
     pub violations: Vec<ViolationViewV1>,
     pub graph_canonical_digest: String,
@@ -406,14 +456,28 @@ impl WitnessViewV1 {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub struct WitnessBundleV1 {
     pub schema: String,
+    #[cfg_attr(feature = "openapi", schema(value_type = String))]
     pub canonical: DisplayText,
     pub witnesses: Vec<WitnessViewV1>,
 }
 
+/// Versions currently held in Class C quarantine, earliest deadline first.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+pub struct QuarantineListV1 {
+    pub schema: String,
+    pub tip_height: u64,
+    pub packages: Vec<PackageViewV4>,
+    /// More quarantined versions exist than `packages` lists.
+    pub truncated: bool,
+}
+
 /// Typed SSE v2 event kinds.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 #[serde(rename_all = "snake_case")]
 pub enum SseEventKindV2 {
     PackageVerified,
@@ -454,13 +518,16 @@ impl SseEventKindV2 {
 
 /// One SSE v2 event. `id` is `<height>.<tx_index>` for `Last-Event-ID` resume.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub struct SseEnvelopeV2 {
     pub id: String,
     pub kind: SseEventKindV2,
     pub height: u64,
     pub tx_index: u32,
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(feature = "openapi", schema(value_type = Option<String>))]
     pub canonical: Option<DisplayText>,
+    #[cfg_attr(feature = "openapi", schema(value_type = Object))]
     pub data: serde_json::Value,
 }
 

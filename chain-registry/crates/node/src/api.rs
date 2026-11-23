@@ -244,6 +244,8 @@ fn public_routes(sse_bus: EventBus, ws_bus: EventBus) -> Router<SharedState> {
         )
         .route("/v1/public/richlist", get(richlist))
         .route("/v1/public/search", get(search_handler))
+        // ADR-019 v4 read contract (registry-view) and SSE v2.
+        .merge(crate::public_v4::routes())
         .route(
             "/v1/public/events",
             get({

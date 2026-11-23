@@ -125,6 +125,11 @@ pub struct RateLimiter {
 }
 
 impl RateLimiter {
+    /// Proxies whose `X-Forwarded-For` is honoured (for [`extract_client_ip`]).
+    pub fn trusted_proxies(&self) -> &[IpAddr] {
+        &self.config.trusted_proxies
+    }
+
     pub fn new(config: RateLimitConfig) -> Self {
         Self {
             general: Arc::new(Mutex::new(HashMap::new())),

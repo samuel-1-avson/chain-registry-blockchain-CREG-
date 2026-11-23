@@ -899,6 +899,26 @@ The producer half of part 2, plus two corrections to 2a found while wiring it. P
 - PBFT block signing must use the hybrid key from activation. The node now holds that key, but its PBFT signing path (`sign_pbft_phase_at_height`) is not wired; that is ADR-017 work.
 - An approval certificate is checked against the validator set at finalization. If a signer leaves the set before the block that includes it, the publication no longer validates and transaction selection defers it instead of including it. Re-finalizing without the certificate is not automated yet.
 
+### Increment 2, part 3a — v4 read routes, SSE v2 and OpenAPI (implemented 2026-11-23)
+
+Read-only routes over committed chain state. No consensus rule, wire format or signed message changed.
+
+| Route | Body | Notes |
+| --- | --- | --- |
+| `GET /v1/public/v4/packages/:name/:version/status` | `PackageViewV4` | Status from the package-status index, projected to the current time (a quarantine past its deadline shows as `revoked` with authority `quarantine_expiry`, `ECO-INV-02`). A revocation's authority is read from the block that made it: `committee_quorum` (with the certificate digest), `owner`, `controller`, `legacy_single_validator` or `quarantine_expiry`. `quorum` is `v4_quorum` only for a publication carrying a committee certificate (decision #7). A pending-pool version shows `pending`. |
+| `GET /v1/public/v4/packages/:name/:version/proof-bundle` | `ProofBundleV2` | Tip hash, timestamp and PBFT commit signatures; from activation the tip's `status_root` with this version's `StatusLeafV1` and `StatusProofV2` (served only when the proof verifies against that tip, so a block landing mid-read yields a retry, never a mixed bundle); the publication block hash, index, transaction hash, Merkle path and commit signatures. |
+| `GET /v1/public/v4/packages/:name/:version/witnesses` | `WitnessBundleV1` | Committed witnesses, `on_chain_certified` or `on_chain_uncertified`. |
+| `GET /v1/public/v4/quarantine?limit=` | `QuarantineListV1` | Live holds, earliest deadline first (default 100, max 500, `truncated` flag). |
+| `GET /v1/public/v4/events` | SSE v2 | One `SseEnvelopeV2` per transaction plus `block_committed`, id `<height>.<tx_index>`. `Last-Event-ID` resumes up to 1,024 blocks back. Capped at 2,048 subscribers and 8 per client IP (IP from the trusted-proxy rule); 429 beyond. |
+
+`:name` is the package part of the canonical id, percent-encoded as one segment (`npm%3A%40scope%2Fpkg`). These paths follow the Stage 3 plan; §3.3's `status-proof` and `evidence` correspond to `proof-bundle` and `status` + `witnesses`.
+
+**Read contract changes (`registry-view`):** new optional `openapi` feature deriving `utoipa` schemas, so `/v1/openapi.json` takes the v4 schemas from this crate; `ProofBundleV2` carries typed `MerkleStepV1` steps (the part 1 `Vec<String>` lost each sibling's side) plus the publication block hash, transaction hash and commit signatures; `WitnessVerificationV1::OnChainUncertified`; new `QuarantineListV1`. Nothing consumed these types yet.
+
+**SSE v2 deviations:** a witness carried by a revocation travels in that `package_revoked_v2` event (`witness_digest`), so every id names exactly one event and a resume cannot split a pair; `witness_committed` stays reserved. `quarantine_expired` is not emitted: expiry has no transaction of its own, and clients derive it from `package_quarantined.expires_at_unix` under the lattice rule. `bounty_awarded` comes from L1 and belongs to the indexer (Increment 5). Events of a reorged-out block are not retracted.
+
+**Verification (local, 2026-11-23).** `cargo fmt --check`, both clippy gates (`-D warnings`) and `cargo deny` pass. Tests: `registry-view` 6; `chain-registry-secrets` 6; `consensus` 77 plus `signed_message_formats` 6/6 (frozen, unchanged) and `vote_v4_hybrid_convergence` 5/5; node lib under `phase-c-real-fleet` 325 (1 ignored; 7 new: path validation, status lattice and authorities, quarantine list, proof bundle against the tip root, pre-activation bundle, event ids, resume points and subscriber caps, OpenAPI paths and schemas); node `integration` 11, `high_throughput_stress_test` 1 and `multi_node_testnet_simulation` 1.
+
 ### Increment 6 — L1 Services Modernization & Supply-Chain Burn-Down (implemented 2026-11-23)
 
 Decisions applied: #5 (relayer store = PostgreSQL) and #6 (single faucet instance, stateless HMAC PoW, shared `sqlx` pool). No consensus wire type, signed message, block or header format changed; the frozen test files are untouched.

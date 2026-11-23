@@ -1932,6 +1932,7 @@ dependencies = [
  "ml-validator",
  "prost",
  "rand 0.8.8",
+ "registry-view",
  "reqwest",
  "resolver",
  "rocksdb",
@@ -7523,6 +7524,7 @@ dependencies = [
  "common",
  "serde",
  "serde_json",
+ "utoipa",
 ]
 
 [[package]]

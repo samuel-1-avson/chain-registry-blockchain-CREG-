@@ -41,6 +41,7 @@ mod pbft_safety;
 mod pending_pool;
 mod pidlock;
 mod proof;
+mod public_v4;
 mod publisher_index;
 mod rate_limit;
 mod revocation_gossip;

@@ -42,6 +42,7 @@ validator = { path = "../validator" }
 ml-validator = { path = "../ml-validator" }
 consensus = { path = "../consensus" }
 resolver  = { path = "../resolver" }
+registry-view = { path = "../registry-view", features = ["openapi"] }
 db-sync   = { path = "../db-sync" }
 threshold-encryption = { path = "../threshold-encryption" }
 zone-ipc  = { path = "../zone-ipc" }

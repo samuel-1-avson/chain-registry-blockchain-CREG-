@@ -1337,6 +1337,85 @@ pub mod paths {
         security(("OperatorKey" = [])),
     )]
     pub async fn submit_audit() {}
+
+    // ── ADR-019 v4 read contract (schemas from `registry-view`) ────────────
+
+    /// Current status of one version on the fail-closed lattice
+    /// (`Revoked` ⊐ `Quarantined` ⊐ {`Pending`, `Unknown`} ⊐ `Verified`).
+    /// Display data only: decide installs from the proof bundle.
+    #[utoipa::path(
+        get,
+        path = "/v1/public/v4/packages/{name}/{version}/status",
+        tag = "v4",
+        params(
+            ("name" = String, Path, description = "Package part of the canonical id, percent-encoded (e.g. npm%3A%40scope%2Fpkg)"),
+            ("version" = String, Path, description = "Version"),
+        ),
+        responses(
+            (status = 200, body = registry_view::PackageViewV4),
+            (status = 400, body = ApiError),
+            (status = 404, body = ApiError),
+        ),
+    )]
+    pub async fn v4_package_status() {}
+
+    /// Offline-verifiable proof bundle: tip commit signatures, the tip's
+    /// `status_root` with this version's leaf and sparse-Merkle proof (from
+    /// hybrid activation), and the publication's block, index and Merkle path.
+    #[utoipa::path(
+        get,
+        path = "/v1/public/v4/packages/{name}/{version}/proof-bundle",
+        tag = "v4",
+        params(
+            ("name" = String, Path, description = "Package part of the canonical id, percent-encoded"),
+            ("version" = String, Path, description = "Version"),
+        ),
+        responses(
+            (status = 200, body = registry_view::ProofBundleV2),
+            (status = 404, body = ApiError),
+            (status = 503, body = ApiError, description = "Chain advanced during assembly; retry"),
+        ),
+    )]
+    pub async fn v4_package_proof_bundle() {}
+
+    /// Trigger witnesses committed for one version.
+    #[utoipa::path(
+        get,
+        path = "/v1/public/v4/packages/{name}/{version}/witnesses",
+        tag = "v4",
+        params(
+            ("name" = String, Path, description = "Package part of the canonical id, percent-encoded"),
+            ("version" = String, Path, description = "Version"),
+        ),
+        responses((status = 200, body = registry_view::WitnessBundleV1)),
+    )]
+    pub async fn v4_package_witnesses() {}
+
+    /// Versions currently held in Class C quarantine, earliest deadline first.
+    #[utoipa::path(
+        get,
+        path = "/v1/public/v4/quarantine",
+        tag = "v4",
+        params(("limit" = Option<usize>, Query, description = "Max entries (default 100, max 500)")),
+        responses((status = 200, body = registry_view::QuarantineListV1)),
+    )]
+    pub async fn v4_quarantine() {}
+
+    /// SSE v2 stream of committed events. Each `data:` line is one
+    /// `SseEnvelopeV2` with `id: <height>.<tx_index>`; send `Last-Event-ID`
+    /// to resume (up to 1,024 blocks back). Capped at 2,048 subscribers and
+    /// 8 per client IP (429 beyond).
+    #[utoipa::path(
+        get,
+        path = "/v1/public/v4/events",
+        tag = "v4",
+        params(("Last-Event-ID" = Option<String>, Header, description = "Resume after this event id")),
+        responses(
+            (status = 200, body = registry_view::SseEnvelopeV2, content_type = "text/event-stream"),
+            (status = 429, body = ApiError),
+        ),
+    )]
+    pub async fn v4_events() {}
 }
 
 // ─── Security schemes ─────────────────────────────────────────────────────────
@@ -1386,6 +1465,7 @@ impl Modify for SecurityAddon {
         (name = "bridge",       description = "L1 bridge anchor status and commit feed"),
         (name = "addresses",    description = "Per-address profiles, activity, publishers, rich list"),
         (name = "governance",   description = "On-chain governance proposals and votes"),
+        (name = "v4",           description = "ADR-019 v4 read contract: status lattice, proof bundles, witnesses, quarantine, SSE v2"),
     ),
     paths(
         paths::health,
@@ -1434,6 +1514,11 @@ impl Modify for SecurityAddon {
         paths::rotate_publisher_key,
         paths::search_handler,
         paths::submit_audit,
+        paths::v4_package_status,
+        paths::v4_package_proof_bundle,
+        paths::v4_package_witnesses,
+        paths::v4_quarantine,
+        paths::v4_events,
     ),
     components(schemas(
         ApiError,
@@ -1483,7 +1568,58 @@ impl Modify for SecurityAddon {
         AddressTxRef,
         AddressTxList,
         ValidatorProfile,
+        registry_view::PackageViewV4,
+        registry_view::PackageStatusViewV1,
+        registry_view::QuorumLabelV1,
+        registry_view::RevocationAuthorityV1,
+        registry_view::CommitteeSummaryV1,
+        registry_view::ProofBundleV2,
+        registry_view::MerkleStepV1,
+        registry_view::WitnessBundleV1,
+        registry_view::WitnessViewV1,
+        registry_view::WitnessVerificationV1,
+        registry_view::ViolationViewV1,
+        registry_view::QuarantineListV1,
+        registry_view::SseEnvelopeV2,
+        registry_view::SseEventKindV2,
     )),
     modifiers(&SecurityAddon),
 )]
 pub struct ApiDoc;
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn v4_routes_and_registry_view_schemas_are_published() {
+        let spec = serde_json::to_value(ApiDoc::openapi()).expect("serialize spec");
+        for path in [
+            "/v1/public/v4/packages/{name}/{version}/status",
+            "/v1/public/v4/packages/{name}/{version}/proof-bundle",
+            "/v1/public/v4/packages/{name}/{version}/witnesses",
+            "/v1/public/v4/quarantine",
+            "/v1/public/v4/events",
+        ] {
+            assert!(spec["paths"][path]["get"].is_object(), "missing {path}");
+        }
+        let schemas = &spec["components"]["schemas"];
+        for schema in [
+            "PackageViewV4",
+            "PackageStatusViewV1",
+            "ProofBundleV2",
+            "MerkleStepV1",
+            "WitnessBundleV1",
+            "QuarantineListV1",
+            "SseEnvelopeV2",
+        ] {
+            assert!(schemas[schema].is_object(), "missing schema {schema}");
+        }
+        // The SSE kind enum is closed: exactly the registry-view variants.
+        let kinds = schemas["SseEventKindV2"]["enum"]
+            .as_array()
+            .expect("enum values")
+            .len();
+        assert_eq!(kinds, 8);
+    }
+}
