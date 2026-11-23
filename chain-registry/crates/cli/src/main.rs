@@ -35,6 +35,7 @@ mod relayer_cli;
 mod retry;
 mod sbom;
 mod search;
+mod secret_input;
 mod stake;
 pub mod stress_test;
 mod supply_chain;
@@ -498,8 +499,18 @@ enum Commands {
 
     /// Authenticate your Ethereum wallet (MetaMask) and derive CREG consensus identity.
     Login {
-        /// Ethereum private key (hex) for headless/CI login without a browser.
-        #[arg(long)]
+        /// File holding the Ethereum private key (hex) for headless/CI login
+        /// without a browser. Must not be group/world-readable on Unix.
+        #[arg(long, value_name = "PATH")]
+        private_key_file: Option<std::path::PathBuf>,
+
+        /// Reference to the Ethereum private key: `env:VAR` or `file:PATH`.
+        #[arg(long, value_name = "env:VAR|file:PATH")]
+        private_key_ref: Option<String>,
+
+        /// Deprecated: exposes the key on argv. Refused unless
+        /// CREG_ALLOW_ARGV_SECRETS=1.
+        #[arg(long, hide = true)]
         private_key: Option<String>,
 
         /// Base64 or JSON authorization token from the Web bridge.
@@ -535,7 +546,7 @@ enum ProfileCommands {
 
 #[derive(Subcommand)]
 enum RelayerCommands {
-    /// Run soak test anchoring PBFT state roots to Ethereum Sepolia contracts
+    /// Simulate L1 state-root anchoring calldata (nothing is broadcast; see ADR-019 ECA-26)
     Soak {
         /// Number of finalized checkpoints to anchor
         #[arg(short, long, default_value = "100")]
@@ -557,9 +568,6 @@ enum RelayerCommands {
             default_value = "0xF232cC6F5C6EfC74C7517B209D15baBd57b817eE"
         )]
         contract: String,
-        /// Broadcast live to Ethereum Sepolia (default is safe dry-run simulation)
-        #[arg(long)]
-        broadcast: bool,
         /// Output raw JSON report
         #[arg(long)]
         json: bool,
@@ -871,22 +879,36 @@ enum TestnetCommands {
     },
     /// Stake test tokens as a publisher
     StakePublisher {
-        /// Amount to stake (minimum 0.001 tCREG)
-        amount: f64,
-        /// Private key for staking (hex, with 0x prefix)
-        #[arg(short, long)]
-        key: String,
+        /// Amount to stake in tCREG, as a decimal (minimum 1)
+        amount: String,
+        /// File holding the staking private key (hex, with 0x prefix)
+        #[arg(long, value_name = "PATH")]
+        key_file: Option<std::path::PathBuf>,
+        /// Reference to the staking private key: `env:VAR` or `file:PATH`
+        #[arg(long, value_name = "env:VAR|file:PATH")]
+        key_ref: Option<String>,
+        /// Deprecated: exposes the key on argv. Refused unless
+        /// CREG_ALLOW_ARGV_SECRETS=1.
+        #[arg(short, long, hide = true)]
+        key: Option<String>,
         /// RPC URL (default: http://localhost:8545)
         #[arg(long)]
         rpc_url: Option<String>,
     },
     /// Stake test tokens as a validator
     StakeValidator {
-        /// Amount to stake (minimum 0.1 tCREG)
-        amount: f64,
-        /// Private key for staking (hex, with 0x prefix)
-        #[arg(short, long)]
-        key: String,
+        /// Amount to stake in tCREG, as a decimal (minimum 100)
+        amount: String,
+        /// File holding the staking private key (hex, with 0x prefix)
+        #[arg(long, value_name = "PATH")]
+        key_file: Option<std::path::PathBuf>,
+        /// Reference to the staking private key: `env:VAR` or `file:PATH`
+        #[arg(long, value_name = "env:VAR|file:PATH")]
+        key_ref: Option<String>,
+        /// Deprecated: exposes the key on argv. Refused unless
+        /// CREG_ALLOW_ARGV_SECRETS=1.
+        #[arg(short, long, hide = true)]
+        key: Option<String>,
         /// RPC URL (default: http://localhost:8545)
         #[arg(long)]
         rpc_url: Option<String>,
@@ -1177,12 +1199,21 @@ async fn run(cli: Cli) -> Result<()> {
             publish::submit_signed(&signed_file, cli.node_url.as_deref()).await?;
         }
         Commands::Login {
+            private_key_file,
+            private_key_ref,
             private_key,
             token,
             port,
             no_browser,
         } => {
             let node_url = config_file::effective_node_url(cli.node_url.as_deref());
+            let private_key = secret_input::resolve_secret(secret_input::SecretSources {
+                file: private_key_file.as_deref(),
+                reference: private_key_ref.as_deref(),
+                argv: private_key.as_deref(),
+                argv_flag: "--private-key",
+                replacement: "--private-key-file <path> or --private-key-ref env:VAR|file:PATH",
+            })?;
 
             let identity = if let Some(ref tok) = token {
                 println!("  Verifying authorization token...");
@@ -1785,17 +1816,33 @@ async fn run(cli: Cli) -> Result<()> {
             }
             TestnetCommands::StakePublisher {
                 amount,
+                key_file,
+                key_ref,
                 key,
                 rpc_url,
             } => {
-                testnet::stake_publisher(amount, &key, rpc_url.as_deref()).await?;
+                let amount_wei = secret_input::parse_token_amount_wei(&amount)?;
+                let key = secret_input::staking_key(
+                    key_file.as_deref(),
+                    key_ref.as_deref(),
+                    key.as_deref(),
+                )?;
+                testnet::stake_publisher(amount_wei, &key, rpc_url.as_deref()).await?;
             }
             TestnetCommands::StakeValidator {
                 amount,
+                key_file,
+                key_ref,
                 key,
                 rpc_url,
             } => {
-                testnet::stake_validator(amount, &key, rpc_url.as_deref()).await?;
+                let amount_wei = secret_input::parse_token_amount_wei(&amount)?;
+                let key = secret_input::staking_key(
+                    key_file.as_deref(),
+                    key_ref.as_deref(),
+                    key.as_deref(),
+                )?;
+                testnet::stake_validator(amount_wei, &key, rpc_url.as_deref()).await?;
             }
             TestnetCommands::Docs => {
                 testnet::docs();
@@ -1818,11 +1865,9 @@ async fn run(cli: Cli) -> Result<()> {
                 start_height,
                 rpc_url,
                 contract,
-                broadcast,
                 json,
             } => {
-                relayer_cli::soak(count, start_height, &rpc_url, &contract, !broadcast, json)
-                    .await?;
+                relayer_cli::soak(count, start_height, &rpc_url, &contract, json).await?;
             }
         },
     }

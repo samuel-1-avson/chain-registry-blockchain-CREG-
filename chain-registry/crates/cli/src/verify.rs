@@ -74,8 +74,14 @@ pub async fn run(
                 id.canonical().red(),
                 verdict.status.label().red()
             );
-            if let VerdictStatus::Revoked { reason, .. } = &verdict.status {
-                println!("  {} Reason: {}", "·".dimmed(), reason.red());
+            if let VerdictStatus::Revoked { reason, .. }
+            | VerdictStatus::Quarantined { reason, .. } = &verdict.status
+            {
+                println!(
+                    "  {} Reason: {}",
+                    "·".dimmed(),
+                    common::DisplayText::for_terminal(reason).to_string().red()
+                );
             }
         }
         return Ok(());

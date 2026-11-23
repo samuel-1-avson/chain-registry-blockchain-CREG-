@@ -97,6 +97,22 @@ struct ListPackagesParams {
 
 // ─── Router ───────────────────────────────────────────────────────────────────
 
+/// ECA-39 (ADR-019 Increment 1): whether `/metrics` and the API docs are
+/// mounted without the operator ACL. Fails **closed**: if the state lock is
+/// contended while the router is built, the routes stay operator-only instead
+/// of being exposed publicly.
+fn public_metrics_docs_exposed(state: &SharedState) -> bool {
+    match state.try_read() {
+        Ok(s) => s.config.expose_public_metrics_docs,
+        Err(_) => {
+            tracing::warn!(
+                "node state locked while building the router; keeping /metrics and /api-docs operator-only"
+            );
+            false
+        }
+    }
+}
+
 pub fn router(
     state: SharedState,
     event_bus: EventBus,
@@ -108,10 +124,7 @@ pub fn router(
 ) -> Router {
     let sse_bus = Arc::clone(&event_bus);
     let ws_bus = Arc::clone(&event_bus);
-    let expose_public_metrics_docs = state
-        .try_read()
-        .map(|s| s.config.expose_public_metrics_docs)
-        .unwrap_or(true);
+    let expose_public_metrics_docs = public_metrics_docs_exposed(&state);
 
     let metrics_and_docs: Router<SharedState> = Router::new()
         .route("/metrics", get(prometheus_metrics))
@@ -2340,6 +2353,12 @@ struct PackageResp {
     publisher: Option<String>,
     published_at: Option<String>,
     revocation_reason: Option<String>,
+    /// Committee hold reason; present only for `status == "quarantined"`.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    quarantine_reason: Option<String>,
+    /// Unix seconds at which the hold fails closed into `Revoked`.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    quarantine_expires_at_unix: Option<i64>,
     analysis_bundles: Option<common::AnalysisBundleRefs>,
     evidence_digest: Option<String>,
     deterministic_risk: Option<common::DeterministicRiskSummary>,
@@ -2358,13 +2377,25 @@ async fn get_package(State(state): State<SharedState>, Path(canonical): Path<Str
     // Check verified chain first.
     if let Ok(Some(record)) = s.chain.get_package(&canonical) {
         let stages = package_pipeline_stages(&canonical, Some(&record.status), in_pending_pool, &s);
+        let (quarantine_reason, quarantine_expires_at_unix) = match &record.status {
+            PackageStatus::Quarantined {
+                reason,
+                expires_at_unix,
+            } => (Some(reason.clone()), Some(*expires_at_unix)),
+            _ => (None, None),
+        };
         let resp = PackageResp {
             canonical: record.id.canonical(),
+            // ECA-07: a committee hold is reported as `quarantined`, never as
+            // `pending` (which clients treat as break-glass installable).
             status: match &record.status {
                 PackageStatus::Verified => "verified",
                 PackageStatus::Revoked { .. } => "revoked",
-                _ => "pending",
+                PackageStatus::Quarantined { .. } => "quarantined",
+                PackageStatus::Pending => "pending",
             },
+            quarantine_reason,
+            quarantine_expires_at_unix,
             evidence_phase: stages.evidence_phase,
             block_phase: stages.block_phase,
             chain_status: stages.chain_status,
@@ -7578,7 +7609,59 @@ mod tests {
         assert_eq!(body_json["evidence_phase"], "quorum-reached");
         assert_eq!(body_json["block_phase"], "committed");
         assert_eq!(body_json["chain_status"], "verified");
+        assert!(body_json.get("quarantine_reason").is_none());
 
+        Ok(())
+    }
+
+    /// ECA-07: a quarantined record must be reported as `quarantined` (with
+    /// its reason and deadline), never as the break-glass-installable
+    /// `pending`.
+    #[tokio::test]
+    async fn get_package_reports_quarantine_not_pending() -> anyhow::Result<()> {
+        let (state, _tempdir, p2p_handle, tx_sender, _tx_receiver) = make_test_state(0).await?;
+        let (_signing_key, publisher_pubkey) = make_keypair();
+        let record = ChainRecord {
+            id: PackageId::new("npm", "held", "1.0.0"),
+            content_hash: common::sha256_hex(b"held-package"),
+            ipfs_cid: "bafyheldpackage".into(),
+            publisher_pubkey,
+            block_hash: "0xdef456".into(),
+            published_at: chrono::Utc::now(),
+            status: PackageStatus::Quarantined {
+                reason: "class C committee hold".into(),
+                expires_at_unix: 1_900_000_000,
+            },
+            ..ChainRecord::default()
+        };
+        let canonical = record.id.canonical();
+        state.read().await.chain.save_package(&record)?;
+
+        let app = router(
+            state,
+            new_event_bus(),
+            RateLimiter::new(RateLimitConfig::default()),
+            AttestationStore::new(),
+            crate::config::CorsConfig::default(),
+            tx_sender,
+            p2p_handle,
+        );
+
+        for path in [
+            format!("/v1/packages/{}", urlencoding::encode(&canonical)),
+            format!("/v1/public/packages/{}", urlencoding::encode(&canonical)),
+        ] {
+            let response = app
+                .clone()
+                .oneshot(Request::get(&path).body(Body::empty())?)
+                .await?;
+            assert_eq!(response.status(), StatusCode::OK, "{path}");
+            let body = to_bytes(response.into_body(), usize::MAX).await?;
+            let body_json: serde_json::Value = serde_json::from_slice(&body)?;
+            assert_eq!(body_json["status"], "quarantined", "{path}");
+            assert_eq!(body_json["quarantine_reason"], "class C committee hold");
+            assert_eq!(body_json["quarantine_expires_at_unix"], 1_900_000_000);
+        }
         Ok(())
     }
 
@@ -8211,6 +8294,40 @@ mod tests {
         assert!(constant_time_eq("secret-1", "secret-1"));
         assert!(!constant_time_eq("secret-1", "secret-2"));
         assert!(!constant_time_eq("short", "longer-secret"));
+        Ok(())
+    }
+
+    /// ECA-39: a contended state lock while the router is built must not
+    /// expose `/metrics` and the API docs publicly.
+    #[tokio::test]
+    async fn contended_state_lock_keeps_metrics_docs_private() -> anyhow::Result<()> {
+        let _env_lock = api_env_lock().lock().await;
+        let _api_key = EnvRestore::set(OPERATOR_API_KEY_ENV, "metrics-secret");
+        let (state, _tempdir, p2p_handle, tx_sender, _tx_receiver) = make_test_state(0).await?;
+        state.write().await.config.expose_public_metrics_docs = true;
+
+        let app = {
+            let _held = state.write().await;
+            router(
+                Arc::clone(&state),
+                new_event_bus(),
+                RateLimiter::new(RateLimitConfig::default()),
+                AttestationStore::new(),
+                crate::config::CorsConfig::default(),
+                tx_sender,
+                p2p_handle,
+            )
+        };
+
+        let unauth_metrics = app
+            .clone()
+            .oneshot(Request::get("/metrics").body(Body::empty())?)
+            .await?;
+        assert_eq!(unauth_metrics.status(), StatusCode::UNAUTHORIZED);
+        let unauth_docs = app
+            .oneshot(Request::get("/v1/openapi.json").body(Body::empty())?)
+            .await?;
+        assert_eq!(unauth_docs.status(), StatusCode::UNAUTHORIZED);
         Ok(())
     }
 }

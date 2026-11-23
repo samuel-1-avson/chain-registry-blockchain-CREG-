@@ -65,10 +65,12 @@ struct RelayerConfig {
     active_chain_id: u64,
     /// Directory for relayer-local persistence (sponsor nonce journal).
     data_dir: String,
-    /// Only honour `X-Forwarded-For` / `X-Real-IP` when true. Enable only when
-    /// the relayer sits behind a trusted reverse proxy that sets these
-    /// headers; otherwise clients can spoof their IP to bypass per-IP quotas.
-    trust_proxy: bool,
+    /// Number of trusted reverse proxies in front of the relayer (ECA-29).
+    /// `0` (default) uses the TCP peer address only. With `N > 0`, the client
+    /// is the `N`th `X-Forwarded-For` entry counted from the **right**, i.e.
+    /// the address the outermost trusted proxy saw. Set via
+    /// `RELAYER_TRUSTED_PROXY_HOPS`; legacy `RELAYER_TRUST_PROXY=true` means 1.
+    trusted_proxy_hops: usize,
     /// Allowed CORS origins (exact match). Empty → allow any origin (dev only).
     allowed_origins: Vec<String>,
 }
@@ -105,7 +107,11 @@ impl RelayerConfig {
                 relayer_address,
                 active_chain_id,
                 data_dir: env_string("RELAYER_DATA_DIR", "."),
-                trust_proxy: env_bool("RELAYER_TRUST_PROXY", false),
+                trusted_proxy_hops: std::env::var("RELAYER_TRUSTED_PROXY_HOPS")
+                    .ok()
+                    .and_then(|raw| raw.trim().parse::<usize>().ok())
+                    .unwrap_or(usize::from(env_bool("RELAYER_TRUST_PROXY", false)))
+                    .min(MAX_TRUSTED_PROXY_HOPS),
                 allowed_origins,
             },
             secrets,
@@ -477,7 +483,7 @@ async fn main() -> anyhow::Result<()> {
         }
     }
     info!("  Data dir:        {}", config.data_dir);
-    info!("  Trust proxy hdr: {}", config.trust_proxy);
+    info!("  Trusted proxy hops: {}", config.trusted_proxy_hops);
     info!("  Restored nonces: {}", restored_count);
 
     let cors = build_cors(&config.allowed_origins);
@@ -554,7 +560,7 @@ async fn quote_request(
     headers: HeaderMap,
     Json(request): Json<QuoteRequest>,
 ) -> impl IntoResponse {
-    let client_ip = extract_client_ip(&headers, peer_addr, state.config.trust_proxy);
+    let client_ip = extract_client_ip(&headers, peer_addr, state.config.trusted_proxy_hops);
 
     match build_quote(&state, &request, &client_ip).await {
         Ok(response) => (StatusCode::OK, Json(response)).into_response(),
@@ -608,7 +614,7 @@ async fn sponsor_request(
     headers: HeaderMap,
     Json(request): Json<SponsorRequest>,
 ) -> impl IntoResponse {
-    let client_ip = extract_client_ip(&headers, peer_addr, state.config.trust_proxy);
+    let client_ip = extract_client_ip(&headers, peer_addr, state.config.trusted_proxy_hops);
 
     let prepared = match validate_sponsor_request(&state, &request) {
         Ok(prepared) => prepared,
@@ -1996,27 +2002,70 @@ fn sponsor_nonce_key(chain_id: u64, owner: Address) -> String {
     format!("{}:{}", chain_id, owner)
 }
 
-/// Resolve the client IP used for per-IP quotas. Proxy headers
-/// (`X-Forwarded-For`, `X-Real-IP`) are only honoured when `trust_proxy` is
-/// set, because otherwise any client can spoof them to evade the IP quota.
-/// When not trusting proxies we always use the real TCP peer address.
-fn extract_client_ip(headers: &HeaderMap, peer_addr: SocketAddr, trust_proxy: bool) -> String {
-    if !trust_proxy {
-        return peer_addr.ip().to_string();
+/// Upper bound for `RELAYER_TRUSTED_PROXY_HOPS`.
+const MAX_TRUSTED_PROXY_HOPS: usize = 8;
+
+/// Resolve the per-IP quota bucket for a request (ECA-29).
+///
+/// With `trusted_proxy_hops == 0` the TCP peer address is used. Otherwise the
+/// client is the `trusted_proxy_hops`-th `X-Forwarded-For` entry counted from
+/// the **right**: every trusted proxy appends the address it received the
+/// request from, so the entries to the left of that position are
+/// client-supplied and spoofable. With exactly one hop, `X-Real-IP` (set by
+/// that proxy from `$remote_addr`) is accepted when `X-Forwarded-For` is
+/// absent. Anything that is not a valid IP address falls back to the peer
+/// address, so attacker-chosen strings never become quota keys. IPv6 clients
+/// are bucketed by `/64`.
+fn extract_client_ip(
+    headers: &HeaderMap,
+    peer_addr: SocketAddr,
+    trusted_proxy_hops: usize,
+) -> String {
+    let peer = peer_addr.ip();
+    if trusted_proxy_hops == 0 {
+        return quota_bucket(peer);
     }
-    headers
-        .get("x-forwarded-for")
-        .and_then(|value| value.to_str().ok())
-        .and_then(|value| value.split(',').next())
-        .map(|value| value.trim().to_string())
-        .or_else(|| {
-            headers
-                .get("x-real-ip")
-                .and_then(|value| value.to_str().ok())
-                .map(|value| value.trim().to_string())
-        })
-        .filter(|s| !s.is_empty())
-        .unwrap_or_else(|| peer_addr.ip().to_string())
+    let forwarded: Vec<&str> = headers
+        .get_all("x-forwarded-for")
+        .iter()
+        .filter_map(|value| value.to_str().ok())
+        .flat_map(|value| value.split(','))
+        .map(str::trim)
+        .filter(|entry| !entry.is_empty())
+        .collect();
+    let from_forwarded = forwarded
+        .len()
+        .checked_sub(trusted_proxy_hops)
+        .and_then(|index| forwarded.get(index))
+        .and_then(|entry| entry.parse::<std::net::IpAddr>().ok());
+    let from_real_ip = || {
+        if trusted_proxy_hops != 1 || !forwarded.is_empty() {
+            return None;
+        }
+        headers
+            .get("x-real-ip")?
+            .to_str()
+            .ok()?
+            .trim()
+            .parse::<std::net::IpAddr>()
+            .ok()
+    };
+    quota_bucket(from_forwarded.or_else(from_real_ip).unwrap_or(peer))
+}
+
+/// Quota key for an address: IPv4 as-is (IPv4-mapped IPv6 is unwrapped),
+/// IPv6 truncated to its `/64` so one host cannot rotate through a prefix.
+fn quota_bucket(ip: std::net::IpAddr) -> String {
+    match ip {
+        std::net::IpAddr::V4(v4) => v4.to_string(),
+        std::net::IpAddr::V6(v6) => match v6.to_ipv4_mapped() {
+            Some(v4) => v4.to_string(),
+            None => {
+                let s = v6.segments();
+                format!("{:x}:{:x}:{:x}:{:x}::/64", s[0], s[1], s[2], s[3])
+            }
+        },
+    }
 }
 
 fn parse_address(value: &str, field_name: &str) -> Result<Address, String> {
@@ -2146,7 +2195,7 @@ mod tests {
                 relayer_address: Address::ZERO,
                 active_chain_id: 11155111,
                 data_dir: String::new(),
-                trust_proxy: false,
+                trusted_proxy_hops: 0,
                 allowed_origins: Vec::new(),
             },
             policy: LoadedPolicy {
@@ -2208,6 +2257,56 @@ mod tests {
             );
             assert!(state.journal.is_empty());
         }
+    }
+
+    fn xff(values: &[&str]) -> HeaderMap {
+        let mut headers = HeaderMap::new();
+        for value in values {
+            headers.append("x-forwarded-for", value.parse().unwrap());
+        }
+        headers
+    }
+
+    /// ECA-29: the leftmost (client-supplied) XFF entry is never trusted.
+    #[test]
+    fn client_ip_is_taken_from_the_right_by_trusted_hops() {
+        let peer: SocketAddr = "10.0.0.9:443".parse().unwrap();
+        let spoofed = xff(&["6.6.6.6, 203.0.113.7"]);
+
+        assert_eq!(extract_client_ip(&spoofed, peer, 0), "10.0.0.9");
+        assert_eq!(extract_client_ip(&spoofed, peer, 1), "203.0.113.7");
+        assert_eq!(extract_client_ip(&spoofed, peer, 2), "6.6.6.6");
+        // Fewer entries than trusted hops: the chain is incomplete, use peer.
+        assert_eq!(extract_client_ip(&spoofed, peer, 3), "10.0.0.9");
+        // Multiple header lines are one list.
+        let split = xff(&["6.6.6.6", "203.0.113.7"]);
+        assert_eq!(extract_client_ip(&split, peer, 1), "203.0.113.7");
+    }
+
+    #[test]
+    fn garbage_forwarding_values_never_become_quota_keys() {
+        let peer: SocketAddr = "10.0.0.9:443".parse().unwrap();
+        for value in ["not-an-ip", "1.2.3.4.5", "' OR 1=1 --", "::zz"] {
+            assert_eq!(extract_client_ip(&xff(&[value]), peer, 1), "10.0.0.9");
+        }
+        let mut real_ip = HeaderMap::new();
+        real_ip.insert("x-real-ip", "198.51.100.4".parse().unwrap());
+        assert_eq!(extract_client_ip(&real_ip, peer, 1), "198.51.100.4");
+        assert_eq!(extract_client_ip(&real_ip, peer, 2), "10.0.0.9");
+        assert_eq!(extract_client_ip(&real_ip, peer, 0), "10.0.0.9");
+    }
+
+    #[test]
+    fn ipv6_clients_share_a_64_bucket() {
+        let peer: SocketAddr = "[2001:db8:1:2:aaaa::1]:443".parse().unwrap();
+        assert_eq!(
+            extract_client_ip(&HeaderMap::new(), peer, 0),
+            "2001:db8:1:2::/64"
+        );
+        let rotated = xff(&["2001:db8:1:2:ffff:ffff:ffff:fffe"]);
+        assert_eq!(extract_client_ip(&rotated, peer, 1), "2001:db8:1:2::/64");
+        let mapped: SocketAddr = "[::ffff:192.0.2.1]:443".parse().unwrap();
+        assert_eq!(extract_client_ip(&HeaderMap::new(), mapped, 0), "192.0.2.1");
     }
 
     #[test]

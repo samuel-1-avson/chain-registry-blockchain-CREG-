@@ -82,72 +82,64 @@ pub async fn run(
     Ok(())
 }
 
-fn print_info(record: &serde_json::Value, proof: Option<&serde_json::Value>) {
-    let canonical = record
-        .get("canonical")
-        .and_then(|v| v.as_str())
-        .unwrap_or("?");
-    let status = record
-        .get("status")
-        .and_then(|v| v.as_str())
-        .unwrap_or("unknown");
-    let publisher = record
-        .get("publisher")
-        .and_then(|v| v.as_str())
-        .unwrap_or("unknown");
-    let content_hash = record
-        .get("content_hash")
-        .and_then(|v| v.as_str())
-        .unwrap_or("?");
-    let ipfs_cid = record
-        .get("ipfs_cid")
-        .and_then(|v| v.as_str())
-        .unwrap_or("?");
-    let published = record
-        .get("published_at")
-        .and_then(|v| v.as_str())
-        .unwrap_or("?");
-    let block_hash = record
-        .get("block_hash")
-        .and_then(|v| v.as_str())
-        .unwrap_or("?");
-    let revocation = record.get("revocation_reason").and_then(|v| v.as_str());
+/// String field of a node response, sanitised and bounded for the terminal
+/// (ECA-17 / eco-adv-07). Truncation counts characters, never bytes, so a
+/// multi-byte value cannot make a slice panic.
+fn field(value: &serde_json::Value, key: &str, default: &str, max_chars: usize) -> String {
+    let raw = value.get(key).and_then(|v| v.as_str()).unwrap_or(default);
+    common::DisplayText::bounded(raw, max_chars).into_string()
+}
 
-    let status_str = match status {
+fn print_info(record: &serde_json::Value, proof: Option<&serde_json::Value>) {
+    let canonical = field(record, "canonical", "?", 200);
+    let status = field(record, "status", "unknown", 32);
+    let publisher = field(record, "publisher", "unknown", 200);
+    let content_hash = field(record, "content_hash", "?", 16);
+    let ipfs_cid = field(record, "ipfs_cid", "?", 128);
+    let published = field(record, "published_at", "?", 64);
+    let block_hash = field(record, "block_hash", "?", 16);
+    let revocation = record
+        .get("revocation_reason")
+        .and_then(|v| v.as_str())
+        .map(common::DisplayText::for_terminal);
+    let quarantine = record
+        .get("quarantine_reason")
+        .and_then(|v| v.as_str())
+        .map(common::DisplayText::for_terminal);
+
+    let status_str = match status.as_str() {
         "verified" => format!("{}", "VERIFIED".green().bold()),
         "revoked" => format!("{}", "REVOKED".red().bold()),
+        "quarantined" => format!("{}", "QUARANTINED".magenta().bold()),
         "pending" => format!("{}", "PENDING".yellow().bold()),
         _ => status.dimmed().to_string(),
     };
 
     println!("\n{}", canonical.white().bold());
-    println!("{}", "─".repeat(canonical.len().max(40)).dimmed());
+    println!("{}", "─".repeat(canonical.chars().count().max(40)).dimmed());
     println!("  Status:       {}", status_str);
     println!("  Publisher:    {}", publisher.cyan());
     println!("  Published:    {}", published.dimmed());
     if block_hash != "?" {
-        println!(
-            "  Block:        {}",
-            &block_hash[..block_hash.len().min(16)]
-        );
+        println!("  Block:        {}", block_hash);
     }
-    println!(
-        "  Content SHA:  {}",
-        &content_hash[..content_hash.len().min(16)]
-    );
+    println!("  Content SHA:  {}", content_hash);
     println!("  IPFS CID:     {}", ipfs_cid);
 
     if let Some(reason) = revocation {
-        println!("  {} Revocation:  {}", "⊘".red(), reason.red());
+        println!("  {} Revocation:  {}", "⊘".red(), reason.to_string().red());
+    }
+    if let Some(reason) = quarantine {
+        println!(
+            "  {} Quarantine:  {} (no override; fails closed to REVOKED at expiry)",
+            "⧗".magenta(),
+            reason.to_string().magenta()
+        );
     }
 
     if let Some(p) = proof {
         println!("\n  {}", "SPV Proof".bold());
-        let merkle_root = p
-            .get("merkle_root")
-            .and_then(|v| v.as_str())
-            .map(|s| &s[..s.len().min(16)])
-            .unwrap_or("?");
+        let merkle_root = field(p, "merkle_root", "?", 16);
         let proof_height = p
             .get("block_height")
             .and_then(|v| v.as_u64())

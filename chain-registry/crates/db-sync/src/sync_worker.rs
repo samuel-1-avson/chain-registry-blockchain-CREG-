@@ -245,7 +245,7 @@ impl SyncWorker {
                 total_packages   INT DEFAULT 0,
                 verified_count   INT DEFAULT 0,
                 revoked_count    INT DEFAULT 0,
-                stake_wei        BIGINT DEFAULT 0,
+                stake_wei        NUMERIC(78,0) DEFAULT 0,
                 first_seen_at    TIMESTAMPTZ,
                 first_seen_days  INT DEFAULT 0,
                 updated_at       TIMESTAMPTZ DEFAULT NOW()
@@ -253,6 +253,11 @@ impl SyncWorker {
         )
         .execute(pool)
         .await?;
+
+        // ECA-23: widen legacy BIGINT columns in place.
+        sqlx::query(crate::schema::STAKE_WEI_NUMERIC_SQL)
+            .execute(pool)
+            .await?;
 
         Ok(())
     }

@@ -7,6 +7,7 @@ import { SkeletonCard } from '../components/Skeleton.jsx'
 import { ErrorState, EmptyState } from '../components/ErrorState.jsx'
 import { StatusBadge } from '../components/StatusBadge.jsx'
 import { ShareButton } from '../components/ShareButton.jsx'
+import { packageStatusVariant } from '../api/normalize.js'
 
 /**
  * /proof — Light-client Merkle proof verifier.
@@ -131,7 +132,7 @@ export default function ProofVerifier() {
           <div style={{ display: 'grid', gap: 'var(--space-2)' }}>
             {normalizedProof.packageStatus && (
               <Row k="Current package status" v={
-                <StatusBadge variant={normalizedProof.packageStatus === 'revoked' ? 'error' : 'success'}>
+                <StatusBadge variant={packageStatusVariant(normalizedProof.packageStatus)}>
                   {normalizedProof.packageStatus}
                 </StatusBadge>
               } />

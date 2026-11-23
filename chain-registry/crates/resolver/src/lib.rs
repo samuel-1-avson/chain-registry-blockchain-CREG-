@@ -1,6 +1,12 @@
 // crates/resolver/src/lib.rs
 // Resolves a package name/ID to a TrustVerdict.
-// Cache-first: checks the local sled DB, then hits the chain node.
+//
+// ECA-13 (ADR-019 Increment 1): there is one resolution path. `resolve` /
+// `resolve_id` (used by `creg audit`, `status`, `verify` and `batch`) run the
+// same install-grade resolution as `creg install`: a cached positive verdict is
+// reused for at most `install_gate::INSTALL_CACHE_MAX_AGE`, phase-C builds
+// verify the publication proof, and an unreachable node is reported as
+// `Unknown` without being cached.
 
 pub mod attestation_verifier;
 pub mod cache;
@@ -28,22 +34,22 @@ pub async fn resolve(
     resolve_id(&id, node_url).await
 }
 
-/// Resolve a fully-formed PackageId.
+/// Resolve a fully-formed PackageId through the install-grade path.
+///
+/// An unreachable node, or (in phase-C builds) a node that cannot prove a
+/// verified record, yields `Unknown`; that observation is never cached, so a
+/// transient failure cannot mask a later revocation.
 pub async fn resolve_id(id: &PackageId, node_url: Option<&str>) -> Result<TrustVerdict> {
-    // ── 1. Check local TTL cache ──────────────────────────────────────────────
-    if let Some(cached) = cache::get(id)? {
-        tracing::debug!("cache hit for {}", id.canonical());
-        return Ok(cached);
-    }
-
-    // ── 2. Query live chain node ──────────────────────────────────────────────
-    let url = node_url.map(String::from).unwrap_or_else(default_node_url);
-
-    let verdict = match chain_client::fetch_verdict(id, &url).await {
-        Ok(v) => v,
+    match install_gate::resolve_id_for_install(id, node_url).await {
+        Ok(verdict) => Ok(verdict),
         Err(e) => {
-            tracing::warn!("chain node unreachable ({}): returning Unknown", e);
-            TrustVerdict {
+            let url = node_url.map(String::from).unwrap_or_else(default_node_url);
+            tracing::warn!(
+                "install-grade resolution failed for {} ({}): returning Unknown",
+                id.canonical(),
+                e
+            );
+            Ok(TrustVerdict {
                 package: id.clone(),
                 status: VerdictStatus::Unknown,
                 resolved_at: Utc::now(),
@@ -53,14 +59,9 @@ pub async fn resolve_id(id: &PackageId, node_url: Option<&str>) -> Result<TrustV
                 block_phase: None,
                 chain_status: None,
                 publisher: None,
-            }
+            })
         }
-    };
-
-    // ── 3. Write to cache ─────────────────────────────────────────────────────
-    cache::set(id, &verdict)?;
-
-    Ok(verdict)
+    }
 }
 
 pub(crate) fn parse_pkg(raw: &str) -> (String, Option<String>) {

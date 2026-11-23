@@ -72,8 +72,8 @@ pub async fn drip(address: &str, faucet_url: Option<&str>) -> Result<()> {
         "\n{} You can now stake tokens and use the testnet.",
         "💡".yellow()
     );
-    println!("  Stake as publisher: creg testnet stake-publisher 1 --key 0x...");
-    println!("  Stake as validator: creg testnet stake-validator 100 --key 0x...");
+    println!("  Stake as publisher: creg testnet stake-publisher 1 --key-file ~/.creg/eth.key");
+    println!("  Stake as validator: creg testnet stake-validator 100 --key-ref env:CREG_ETH_KEY");
 
     Ok(())
 }
@@ -165,8 +165,8 @@ pub async fn status(node_url: Option<&str>) -> Result<()> {
     Ok(())
 }
 
-/// Stake as publisher on testnet
-pub async fn stake_publisher(amount_eth: f64, key: &str, rpc_url: Option<&str>) -> Result<()> {
+/// Stake as publisher on testnet. `amount_wei` is exact integer wei (ECA-19).
+pub async fn stake_publisher(amount_wei: u128, key: &str, rpc_url: Option<&str>) -> Result<()> {
     let sepolia_rpc_url = std::env::var("SEPOLIA_RPC_URL").ok();
     let creg_eth_rpc = std::env::var("CREG_ETH_RPC").ok();
     let rpc = rpc_url
@@ -180,13 +180,17 @@ pub async fn stake_publisher(amount_eth: f64, key: &str, rpc_url: Option<&str>) 
         .or_else(|_| std::env::var("TESTNET_TOKEN_ADDR"))
         .unwrap_or_else(|_| "0x167Ab975dc95b79727Ed76BD8AAb70463F6499E2".to_string());
 
-    if amount_eth < 1.0 {
+    if amount_wei < 10u128.pow(crate::secret_input::TOKEN_DECIMALS) {
         bail!("Minimum publisher stake on testnet is 1 tCREG");
     }
 
-    let wei = (amount_eth * 1e18) as u128;
+    let wei = amount_wei;
 
-    println!("{} Staking {} tCREG as publisher", "💰".cyan(), amount_eth);
+    println!(
+        "{} Staking {} tCREG as publisher",
+        "💰".cyan(),
+        crate::secret_input::format_wei(wei)
+    );
     println!("  Contract: {}", staking.dimmed());
     println!("  Network:  {} (Testnet)", rpc.dimmed());
 
@@ -240,8 +244,8 @@ pub async fn stake_publisher(amount_eth: f64, key: &str, rpc_url: Option<&str>) 
     Ok(())
 }
 
-/// Stake as validator on testnet
-pub async fn stake_validator(amount_eth: f64, key: &str, rpc_url: Option<&str>) -> Result<()> {
+/// Stake as validator on testnet. `amount_wei` is exact integer wei (ECA-19).
+pub async fn stake_validator(amount_wei: u128, key: &str, rpc_url: Option<&str>) -> Result<()> {
     let sepolia_rpc_url = std::env::var("SEPOLIA_RPC_URL").ok();
     let creg_eth_rpc = std::env::var("CREG_ETH_RPC").ok();
     let rpc = rpc_url
@@ -255,13 +259,17 @@ pub async fn stake_validator(amount_eth: f64, key: &str, rpc_url: Option<&str>) 
         .or_else(|_| std::env::var("TESTNET_TOKEN_ADDR"))
         .unwrap_or_else(|_| "0x167Ab975dc95b79727Ed76BD8AAb70463F6499E2".to_string());
 
-    if amount_eth < 100.0 {
+    if amount_wei < 100 * 10u128.pow(crate::secret_input::TOKEN_DECIMALS) {
         bail!("Minimum validator stake on testnet is 100 tCREG");
     }
 
-    let wei = (amount_eth * 1e18) as u128;
+    let wei = amount_wei;
 
-    println!("{} Staking {} tCREG as validator", "🔐".cyan(), amount_eth);
+    println!(
+        "{} Staking {} tCREG as validator",
+        "🔐".cyan(),
+        crate::secret_input::format_wei(wei)
+    );
     println!("  Contract: {}", staking.dimmed());
     println!("  Network:  {} (Testnet)", rpc.dimmed());
 
@@ -531,8 +539,8 @@ QUICK START
     creg testnet drip 0xYourAddress
 
 4. Stake and participate:
-    creg testnet stake-publisher 1 --key 0xYourPrivateKey
-    creg testnet stake-validator 100 --key 0xYourPrivateKey
+    creg testnet stake-publisher 1 --key-file ~/.creg/eth.key
+    creg testnet stake-validator 100 --key-ref env:CREG_ETH_KEY
 
 5. Stop the cluster:
     creg testnet stop

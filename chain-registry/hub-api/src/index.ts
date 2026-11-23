@@ -2,6 +2,7 @@ import { serve } from "@hono/node-server";
 import { Hono } from "hono";
 import { HubDatabase } from "./db/index.js";
 import { rateLimit } from "./middleware/rateLimit.js";
+import { singleFlightCache } from "./status/singleFlight.js";
 import { sessionMiddleware, type SessionVariables } from "./middleware/session.js";
 import { createAuthRoutes } from "./routes/auth.js";
 import { createContributionRoutes } from "./routes/contributions.js";
@@ -42,6 +43,11 @@ const contributionRateLimitWindowMs = Number(
   process.env.HUB_CONTRIBUTION_RATE_WINDOW_MS ?? "60000",
 );
 const contributionRateLimitMax = Number(process.env.HUB_CONTRIBUTION_RATE_MAX ?? "40");
+// ECA-36: one upstream fan-out per window, shared by concurrent callers.
+const statusCacheTtlMs = Math.min(
+  Math.max(Number(process.env.HUB_STATUS_CACHE_MS ?? "7500") || 7500, 1000),
+  10000,
+);
 
 type UpstreamProbe = {
   name: string;
@@ -147,6 +153,8 @@ if (hubDb.getState() === "ready") {
   app.route("/api/v1/contributions", contributionRoutes);
 }
 
+const publicStatus = singleFlightCache(statusCacheTtlMs, buildPublicStatus);
+
 app.get(
   "/api/status/public",
   rateLimit({
@@ -155,6 +163,14 @@ app.get(
     keyPrefix: "status-public",
   }),
   async (c) => {
+    c.header("Cache-Control", `public, max-age=${Math.floor(statusCacheTtlMs / 1000)}`);
+    return c.json(await publicStatus.get());
+  },
+);
+
+// Return type is inferred so `c.json` sees the same literal JSON shape the
+// handler returned before it was cached.
+async function buildPublicStatus() {
     const checkedAt = new Date().toISOString();
     const [nodeHealth, nodeStats, faucetHealth, faucetStats, spec, explorer] =
       await Promise.all([
@@ -182,7 +198,7 @@ app.get(
     const chainStats = asRecord(nodeStats.data);
     const faucetStatsData = asRecord(faucetStats.data);
 
-    return c.json({
+    return {
       status: criticalOk && allOk ? "ok" : "degraded",
       service: "hub-api",
       phase: IMPLEMENTATION_PHASE,
@@ -216,9 +232,8 @@ app.get(
           "faucet_native_balance_formatted",
         ),
       },
-    });
-  },
-);
+    };
+}
 
 serve({ fetch: app.fetch, port }, (info) => {
   console.log(`hub-api listening on http://127.0.0.1:${info.port} (phase ${IMPLEMENTATION_PHASE})`);

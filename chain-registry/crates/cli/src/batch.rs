@@ -86,10 +86,8 @@ pub async fn install_batch(
 
     // Count statistics
     let verified = results.iter().filter(|r| r.success).count();
-    let revoked = results
-        .iter()
-        .filter(|r| matches!(r.status, VerdictStatus::Revoked { .. }))
-        .count();
+    // Revoked and quarantined are both hard blocks (ECA-07).
+    let revoked = results.iter().filter(|r| r.status.is_blocked()).count();
     let unknown = results
         .iter()
         .filter(|r| matches!(r.status, VerdictStatus::Unknown))
@@ -98,14 +96,14 @@ pub async fn install_batch(
 
     println!("\n{} Batch verification complete:", "▶".cyan());
     println!("  {} Verified: {}", "✓".green(), verified);
-    println!("  {} Revoked: {}", "✗".red(), revoked);
+    println!("  {} Revoked/quarantined: {}", "✗".red(), revoked);
     println!("  {} Unknown: {}", "?".yellow(), unknown);
     println!("  {} Errors: {}", "!".red(), errors);
 
     // Check if we should proceed
     if revoked > 0 {
         eprintln!(
-            "\n{} {} package(s) are REVOKED. Installation aborted.",
+            "\n{} {} package(s) are REVOKED or QUARANTINED. Installation aborted.",
             "✗".red().bold(),
             revoked
         );
@@ -300,6 +298,7 @@ fn print_result(result: &BatchResult) {
     let status_str = match &result.status {
         VerdictStatus::Verified { .. } => "VERIFIED".green(),
         VerdictStatus::Revoked { .. } => "REVOKED".red(),
+        VerdictStatus::Quarantined { .. } => "QUARANTINED".magenta(),
         VerdictStatus::Unverified => "UNVERIFIED".yellow(),
         VerdictStatus::Unknown => "UNKNOWN".dimmed(),
     };

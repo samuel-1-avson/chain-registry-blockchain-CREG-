@@ -1,8 +1,12 @@
-//! Ethereum L1 State Root Checkpoint Relayer Service
+//! Ethereum L1 State Root Checkpoint Relayer Service — **simulation only**.
 //!
-//! Connects the `CheckpointRelayQueue` with live Ethereum Sepolia (or local Anvil)
-//! JSON-RPC providers, signing and transmitting state root anchoring transactions
-//! to `CrossChainRegistry.sol` / `Registry.sol`.
+//! ECA-26 (ADR-019 Increment 1): this service never contacted an RPC. Its
+//! former "live" mode fabricated `Confirmed` receipts (synthetic tx hash,
+//! constant block number and gas) for `anchorStateRoot(uint64,bytes32,bytes32)`,
+//! a function no contract in `chain-registry/contracts/` defines. Live mode
+//! (`dry_run = false`) is now refused with an explicit error, and dry-run
+//! receipts are labelled `Simulated`. Real L1 state-root anchoring is
+//! `node::bridge`. ADR-019 Increment 6 retires this crate.
 
 use crate::checkpoint_relayer::{CheckpointRelayQueue, L1CheckpointBatch};
 use anyhow::{bail, Context, Result};
@@ -51,13 +55,29 @@ impl Default for L1RelayerConfig {
     }
 }
 
+/// Error returned for `dry_run = false`.
+pub const LIVE_RELAY_UNSUPPORTED: &str = "cross-chain L1RelayerService has no live L1 transport: it would only fabricate receipts for a contract function that does not exist (ECA-26). Use dry_run = true for calldata simulation; real state-root anchoring is performed by the node bridge (node::bridge).";
+
 /// Status of an L1 checkpoint relay transaction
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub enum RelayTxStatus {
     Pending,
-    Submitted { tx_hash: String, submitted_at: u64 },
-    Confirmed { tx_hash: String, block_number: u64 },
-    Failed { reason: String },
+    Submitted {
+        tx_hash: String,
+        submitted_at: u64,
+    },
+    Confirmed {
+        tx_hash: String,
+        block_number: u64,
+    },
+    /// Dry-run only: calldata was encoded and a deterministic digest
+    /// computed; nothing was sent to any chain.
+    Simulated {
+        tx_hash: String,
+    },
+    Failed {
+        reason: String,
+    },
 }
 
 /// Record of an anchored checkpoint on Ethereum L1
@@ -67,6 +87,7 @@ pub struct AnchoredCheckpointReceipt {
     pub state_root: String,
     pub transparency_root: String,
     pub tx_hash: String,
+    /// Estimated gas for the anchoring call (constant in simulation).
     pub gas_used: u64,
     pub anchored_at: u64,
     pub status: RelayTxStatus,
@@ -129,8 +150,12 @@ impl L1RelayerService {
         Ok(calldata)
     }
 
-    /// Process next available checkpoint in queue
+    /// Process next available checkpoint in queue (simulation only).
     pub async fn process_next_batch(&self) -> Result<Option<AnchoredCheckpointReceipt>> {
+        // Refuse before touching the queue, so no batch is consumed.
+        if !self.config.dry_run {
+            bail!(LIVE_RELAY_UNSUPPORTED);
+        }
         let mut queue = self.queue.lock().await;
         let batch = match queue.pop_next() {
             Some(b) => b,
@@ -150,37 +175,24 @@ impl L1RelayerService {
             &batch.transparency_root,
         )?;
 
-        let tx_hash = if self.config.dry_run {
-            // Simulated transaction digest
-            let sim_payload = format!(
-                "sim-tx:{}:{}:{}:{}",
-                self.config.chain_id,
-                batch.block_height,
-                hex::encode(&calldata),
-                Utc::now().timestamp_nanos_opt().unwrap_or(0)
-            );
-            format!("0x{}", sha256_hex(sim_payload.as_bytes()))
-        } else {
-            // Live broadcast path via Ethereum JSON-RPC client
-            info!(
-                "[L1 Relayer] Broadcasting transaction to {}",
-                self.config.rpc_url
-            );
-            let payload = format!("live-tx:{}:{}", batch.block_height, batch.state_root);
-            format!("0x{}", sha256_hex(payload.as_bytes()))
-        };
+        // Simulated transaction digest; nothing is broadcast.
+        let sim_payload = format!(
+            "sim-tx:{}:{}:{}:{}",
+            self.config.chain_id,
+            batch.block_height,
+            hex::encode(&calldata),
+            Utc::now().timestamp_nanos_opt().unwrap_or(0)
+        );
+        let tx_hash = format!("0x{}", sha256_hex(sim_payload.as_bytes()));
 
         let receipt = AnchoredCheckpointReceipt {
             block_height: batch.block_height,
             state_root: batch.state_root,
             transparency_root: batch.transparency_root,
             tx_hash: tx_hash.clone(),
-            gas_used: 48_520, // Standard state root anchoring gas cost
+            gas_used: 48_520, // Estimated state root anchoring gas cost
             anchored_at: Utc::now().timestamp() as u64,
-            status: RelayTxStatus::Confirmed {
-                tx_hash,
-                block_number: 6_840_120,
-            },
+            status: RelayTxStatus::Simulated { tx_hash },
         };
 
         // Advance confirmed height in queue
@@ -190,7 +202,7 @@ impl L1RelayerService {
         receipts.push(receipt.clone());
 
         info!(
-            "[L1 Relayer] ✓ Checkpoint Height #{} Anchored on L1 (Tx: {})",
+            "[L1 Relayer] Simulated anchoring of checkpoint height #{} (digest {}; not broadcast)",
             receipt.block_height, receipt.tx_hash
         );
 
@@ -204,6 +216,9 @@ impl L1RelayerService {
 
     /// Run an automated relayer soak test, anchoring `count` consecutive state roots to Ethereum Sepolia.
     pub async fn run_soak(&self, count: usize, start_height: u64) -> Result<RelayerSoakReport> {
+        if !self.config.dry_run {
+            bail!(LIVE_RELAY_UNSUPPORTED);
+        }
         let start_time = std::time::Instant::now();
         info!(
             "[L1 Relayer Soak] Starting soak test: anchoring {} checkpoints starting at height #{} to Sepolia contract {}",
@@ -363,7 +378,41 @@ mod tests {
 
         assert_eq!(receipt.block_height, 1);
         assert!(receipt.tx_hash.starts_with("0x"));
+        assert!(matches!(receipt.status, RelayTxStatus::Simulated { .. }));
         assert_eq!(service.list_receipts().await.len(), 1);
+    }
+
+    #[tokio::test]
+    async fn live_mode_is_refused_without_consuming_the_queue() {
+        let mut raw_queue = CheckpointRelayQueue::new(10);
+        raw_queue
+            .enqueue(L1CheckpointBatch {
+                block_height: 7,
+                block_hash: "0xblock7".into(),
+                state_root: "0x1111111111111111111111111111111111111111111111111111111111111111"
+                    .into(),
+                transparency_root:
+                    "0x2222222222222222222222222222222222222222222222222222222222222222".into(),
+                package_count: 1,
+                bls_aggregate_signature: None,
+                participant_bitmask: None,
+                timestamp: 1724760000,
+            })
+            .unwrap();
+        let queue = Arc::new(Mutex::new(raw_queue));
+        let service = L1RelayerService::new(
+            L1RelayerConfig {
+                dry_run: false,
+                ..Default::default()
+            },
+            Arc::clone(&queue),
+        );
+
+        let err = service.process_next_batch().await.unwrap_err();
+        assert!(err.to_string().contains("ECA-26"), "{err}");
+        assert!(service.run_soak(1, 1).await.is_err());
+        assert!(service.list_receipts().await.is_empty());
+        assert!(queue.lock().await.pop_next().is_some(), "batch consumed");
     }
 
     #[tokio::test]

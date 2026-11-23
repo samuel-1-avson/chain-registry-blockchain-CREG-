@@ -8,33 +8,37 @@ import { SkeletonCard } from '../components/Skeleton.jsx'
 import { ErrorState, EmptyState } from '../components/ErrorState.jsx'
 import { StatusBadge } from '../components/StatusBadge.jsx'
 import { ShareButton } from '../components/ShareButton.jsx'
+import { txDisplayStatus } from '../api/normalize.js'
 
 /* ── Status timeline steps ─────────────────────────────────────────────────── */
 const TIMELINE_STEPS = ['pending', 'included', 'finalized']
+// ECA-34: terminal states drawn after the inclusion steps in their own colour.
+const TERMINAL_STEP_COLORS = { revoked: 'var(--accent-error)', quarantined: 'var(--accent-warning)' }
 
 function StatusTimeline({ status }) {
   const idx = TIMELINE_STEPS.indexOf(status)
-  const isRevoked = status === 'revoked'
+  const terminalColor = TERMINAL_STEP_COLORS[status]
 
-  const steps = isRevoked
-    ? [...TIMELINE_STEPS, 'revoked']
+  const steps = terminalColor
+    ? [...TIMELINE_STEPS, status]
     : TIMELINE_STEPS
 
-  const activeIdx = isRevoked ? steps.length - 1 : Math.max(0, idx)
+  // Unknown statuses reach no step rather than appearing to be pending.
+  const activeIdx = terminalColor ? steps.length - 1 : idx
 
   return (
     <div style={{ display: 'flex', alignItems: 'center', gap: 0, overflow: 'hidden' }}>
       {steps.map((step, i) => {
         const reached = i <= activeIdx
         const active = i === activeIdx
-        const isRevokedStep = step === 'revoked'
-        const color = isRevokedStep ? 'var(--accent-error)' : reached ? 'var(--accent-success)' : 'var(--border)'
+        const stepTerminalColor = i === steps.length - 1 ? terminalColor : undefined
+        const color = stepTerminalColor ?? (reached ? 'var(--accent-success)' : 'var(--border)')
         return (
           <React.Fragment key={step}>
             {i > 0 && (
               <div style={{
                 flex: 1, height: 2, minWidth: 24,
-                background: reached ? (isRevokedStep ? 'var(--accent-error)' : 'var(--accent-success)') : 'var(--border)',
+                background: reached ? (stepTerminalColor ?? 'var(--accent-success)') : 'var(--border)',
                 transition: 'background .3s',
               }} />
             )}
@@ -108,14 +112,15 @@ export default function TxDetail() {
   const t = data.transaction || data
   const blockHeight = data.block_height ?? t.block_height
   const blockHash = data.block_hash ?? t.block_hash
-  const status = t.type === 'revoke' ? 'revoked' : (blockHeight != null ? 'finalized' : 'pending')
+  const display = txDisplayStatus(t, { finalized: blockHeight != null })
+  const status = display.label
 
   return (
     <div style={{ display: 'grid', gap: 'var(--space-6)' }}>
       {/* ── Header ── */}
       <header style={{ display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
         <h1 style={{ margin: 0, fontSize: 18, fontFamily: 'var(--font-mono)', wordBreak: 'break-all' }}>{canonical}</h1>
-        <StatusBadge variant={status === 'finalized' ? 'success' : status === 'revoked' ? 'error' : 'info'}>{status}</StatusBadge>
+        <StatusBadge variant={display.variant}>{status}</StatusBadge>
         <div style={{ marginLeft: 'auto' }}>
           <ShareButton />
         </div>
@@ -143,7 +148,7 @@ export default function TxDetail() {
             <span style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
               <Link to={`/block/${blockHeight}`} style={{ color: 'var(--accent-primary-light)' }}>#{blockHeight}</Link>
               {blockHash && <Hash value={blockHash} start={8} end={6} showCopy />}
-              <StatusBadge variant={status === 'finalized' ? 'success' : 'info'}>{status}</StatusBadge>
+              <StatusBadge variant={display.variant}>{status}</StatusBadge>
             </span>
           ) : 'pending'
         } />

@@ -9,12 +9,15 @@
 //   rubygems:  Gemfile.lock
 //
 // Exits with code 0 if all packages are verified,
-//                  1 if any packages are revoked,
+//                  1 if any packages are revoked or quarantined,
 //                  2 if any packages are unverified/unknown (use --strict).
+//
+// Every package is resolved through the install-grade path (ECA-13); a
+// revoked package can no longer read VERIFIED from a 24h cache entry.
 
 use anyhow::{Context, Result};
 use colored::Colorize;
-use common::{PackageId, VerdictStatus};
+use common::{DisplayText, PackageId, VerdictStatus};
 use serde::Deserialize;
 use std::{collections::HashMap, path::Path};
 
@@ -23,6 +26,7 @@ pub struct AuditSummary {
     pub verified: usize,
     pub unverified: usize,
     pub revoked: usize,
+    pub quarantined: usize,
     pub unknown: usize,
     pub total: usize,
 }
@@ -107,6 +111,7 @@ pub async fn run(
         verified: 0,
         unverified: 0,
         revoked: 0,
+        quarantined: 0,
         unknown: 0,
         total: results.len(),
     };
@@ -156,7 +161,25 @@ pub async fn run(
                         "  {} {:50} {}",
                         "✗".red().bold(),
                         pkg.canonical().red().bold(),
-                        format!("REVOKED — {} ({} findings)", reason, findings.len()).red()
+                        format!(
+                            "REVOKED — {} ({} findings)",
+                            DisplayText::for_terminal(reason),
+                            findings.len()
+                        )
+                        .red()
+                    );
+                }
+                VerdictStatus::Quarantined { reason, .. } => {
+                    summary.quarantined += 1;
+                    println!(
+                        "  {} {:50} {}",
+                        "✗".magenta().bold(),
+                        pkg.canonical().magenta().bold(),
+                        format!(
+                            "QUARANTINED — {} (no override)",
+                            DisplayText::for_terminal(reason)
+                        )
+                        .magenta()
                     );
                 }
                 VerdictStatus::Unknown => {
@@ -176,7 +199,7 @@ pub async fn run(
     println!();
     println!("  {}", "─".repeat(58).dimmed());
     println!(
-        "  {} {} verified  {} unverified  {} revoked  {} unknown",
+        "  {} {} verified  {} unverified  {} revoked  {} quarantined  {} unknown",
         "▣".dimmed(),
         summary.verified.to_string().green(),
         summary.unverified.to_string().yellow(),
@@ -185,16 +208,22 @@ pub async fn run(
         } else {
             summary.revoked.to_string().green()
         },
+        if summary.quarantined > 0 {
+            summary.quarantined.to_string().magenta().bold()
+        } else {
+            summary.quarantined.to_string().green()
+        },
         summary.unknown.to_string().dimmed(),
     );
     println!("  {} total packages audited\n", summary.total);
 
     // ── Exit code ─────────────────────────────────────────────────────────────
-    if summary.revoked > 0 {
+    if summary.revoked > 0 || summary.quarantined > 0 {
         println!(
-            "  {} {} revoked package(s) found — remove them immediately!",
+            "  {} {} revoked and {} quarantined package(s) found — remove them immediately!",
             "✗".red().bold(),
-            summary.revoked
+            summary.revoked,
+            summary.quarantined
         );
         return Ok(1);
     }
@@ -236,6 +265,13 @@ fn print_json_report(
                             "finding_count": findings.len()
                         })
                     }
+                    VerdictStatus::Quarantined { reason, expires_at_unix, .. } => {
+                        serde_json::json!({
+                            "status": "quarantined",
+                            "reason": DisplayText::for_terminal(reason),
+                            "expires_at_unix": expires_at_unix,
+                        })
+                    }
                     VerdictStatus::Unverified => serde_json::json!({ "status": "unverified" }),
                     VerdictStatus::Unknown => serde_json::json!({ "status": "unknown" }),
                 },
@@ -243,18 +279,27 @@ fn print_json_report(
         })
     }).collect();
 
-    let revoked = entries.iter().filter(|e| e["status"] == "revoked").count();
+    // `status` is the nested object built above; read its `status` field.
+    let count_status = |wanted: &str| {
+        entries
+            .iter()
+            .filter(|e| e["status"]["status"] == wanted)
+            .count()
+    };
+    let revoked = count_status("revoked");
+    let quarantined = count_status("quarantined");
 
     println!(
         "{}",
         serde_json::to_string_pretty(&serde_json::json!({
             "total": entries.len(),
             "revoked": revoked,
+            "quarantined": quarantined,
             "packages": entries,
         }))?
     );
 
-    Ok(if revoked > 0 { 1 } else { 0 })
+    Ok(if revoked > 0 || quarantined > 0 { 1 } else { 0 })
 }
 
 // ─── Lockfile readers ─────────────────────────────────────────────────────────
@@ -472,7 +517,7 @@ pub async fn run_fix(ecosystem: Option<&str>, node_url: Option<&str>) -> Result<
                     "  {} {} is REVOKED ({})",
                     "✗".red().bold(),
                     pkg.canonical().red(),
-                    reason
+                    DisplayText::for_terminal(reason)
                 );
                 // Try to find a non-revoked alternative by checking the chain
                 // for the same package name at a different version.

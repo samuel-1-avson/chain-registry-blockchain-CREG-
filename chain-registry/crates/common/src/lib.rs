@@ -5,6 +5,7 @@ pub mod block;
 pub mod chain_spec;
 pub mod consensus_encoding;
 pub mod crypto;
+pub mod display_text;
 pub mod error;
 pub mod feature_flags;
 pub mod hot_key;
@@ -29,6 +30,7 @@ pub mod proto {
 pub use block::*;
 pub use chain_spec::*;
 pub use consensus_encoding::*;
+pub use display_text::{sanitize_for_terminal, DisplayText, DEFAULT_DISPLAY_MAX_CHARS};
 pub use error::*;
 pub use feature_flags::*;
 pub use hot_key::*;

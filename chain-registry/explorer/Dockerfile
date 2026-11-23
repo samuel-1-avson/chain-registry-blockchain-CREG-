@@ -49,6 +49,11 @@ ENV CREG_NODE_UPSTREAM=node:8080 \
     CREG_SEPOLIA_RPC_UPSTREAM=https://api.testnet.cregnet.dev/sepolia \
     CREG_SEPOLIA_RPC_HOST=api.testnet.cregnet.dev \
     NGINX_ENVSUBST_FILTER=^CREG_
+# ADR-019 Increment 1: main config loads njs for the /rpc method allowlist
+# (ECA-38); security headers are a snippet included in every location (ECA-35).
+COPY nginx-main.conf /etc/nginx/nginx.conf
+COPY security-headers.conf security-headers-docs.conf /etc/nginx/snippets/
+COPY rpc-allowlist.js /etc/nginx/njs/rpc-allowlist.js
 COPY nginx.conf /etc/nginx/templates/default.conf.template
 
 EXPOSE 80

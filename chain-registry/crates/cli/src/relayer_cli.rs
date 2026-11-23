@@ -1,5 +1,10 @@
 // crates/cli/src/relayer_cli.rs
-// Ethereum L1 State Root Relayer soak testing, batch verification, and checkpoint anchoring
+// L1 state-root relayer calldata simulation.
+//
+// ECA-26 (ADR-019 Increment 1): `--broadcast` was removed. The cross-chain
+// "live" path never contacted an RPC and fabricated confirmed receipts, so the
+// command now only simulates calldata encoding and labels every receipt
+// SIMULATED. Real anchoring is performed by the node bridge.
 
 use anyhow::Result;
 use colored::Colorize;
@@ -8,15 +13,15 @@ use std::sync::Arc;
 use std::time::Instant;
 use tokio::sync::Mutex;
 
-/// Run a comprehensive contract and relayer soak test, anchoring PBFT state roots to Sepolia
+/// Simulate anchoring `count` checkpoints (calldata encoding only; nothing is broadcast).
 pub async fn soak(
     count: usize,
     start_height: u64,
     rpc_url: &str,
     contract_address: &str,
-    dry_run: bool,
     json_output: bool,
 ) -> Result<()> {
+    let dry_run = true;
     if !json_output {
         println!(
             "\n{}",
@@ -49,11 +54,7 @@ pub async fn soak(
         );
         println!(
             "  Execution Mode:      {}",
-            if dry_run {
-                "Simulated Dry-Run (Full Calldata & Cryptographic Verification)".green()
-            } else {
-                "Live Sepolia On-Chain Broadcast".yellow().bold()
-            }
+            "Simulation only (calldata encoding; nothing is broadcast)".yellow()
         );
         println!(
             "  Anchoring Calldata:  {}",
@@ -138,7 +139,7 @@ pub async fn soak(
             state_abbr.dimmed(),
             trans_abbr.dimmed(),
             tx_abbr.cyan(),
-            "CONFIRMED".green()
+            "SIMULATED".yellow()
         );
     }
     if report.receipts.len() > display_count {
@@ -159,7 +160,7 @@ pub async fn soak(
 
     println!("  Checkpoints Submitted:     {}", report.total_batches);
     println!(
-        "  Checkpoints Confirmed:     {} ({:.1}%)",
+        "  Checkpoints Simulated:     {} ({:.1}%)",
         report.successful_batches.to_string().green().bold(),
         success_rate
     );
@@ -172,11 +173,11 @@ pub async fn soak(
         report.start_height, report.end_height
     );
     println!(
-        "  Total L1 Gas Consumed:     {} gas",
+        "  Estimated L1 Gas:          {} gas",
         report.total_gas_consumed.to_string().cyan().bold()
     );
     println!(
-        "  Avg Gas Per Anchor:        {} gas",
+        "  Est. Gas Per Anchor:       {} gas",
         format!("{:.0}", report.avg_gas_per_batch).cyan()
     );
     println!(
@@ -197,8 +198,8 @@ pub async fn soak(
     );
     if report.failed_batches == 0 && report.successful_batches == count {
         println!(
-            "  {} L1 Contract Relayer Soak Passed (100% Continuity, Monotonic Roots Anchored)",
-            "SUCCESS:".green().bold()
+            "  {} Calldata simulation passed (100% continuity, monotonic heights). Nothing was anchored on L1.",
+            "SIMULATED:".yellow().bold()
         );
     } else {
         println!(

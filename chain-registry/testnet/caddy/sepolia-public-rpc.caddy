@@ -3,6 +3,13 @@
 handle_path /rpc* {
 	@jsonrpc method POST
 	handle @jsonrpc {
+		# ADR-019 ECA-38: cap JSON-RPC bodies. Method allowlisting needs body
+		# inspection, which core Caddy lacks; it is enforced by the explorer
+		# image's /rpc (explorer/rpc-allowlist.js) and moves to the self-hosted
+		# RPC gateway in ADR-019 Increment 6.
+		request_body {
+			max_size 64KB
+		}
 		reverse_proxy {$CREG_SEPOLIA_PUBLIC_RPC_UPSTREAM} {
 			header_up Host {$CREG_SEPOLIA_PUBLIC_RPC_UPSTREAM_HOST}
 		}

@@ -1,13 +1,20 @@
 use colored::Colorize;
-use common::{TrustVerdict, VerdictSource, VerdictStatus};
+use common::{DisplayText, TrustVerdict, VerdictSource, VerdictStatus};
+
+/// ECA-17: every node- or package-derived string goes through this before it
+/// reaches the terminal.
+fn safe(text: &str) -> String {
+    DisplayText::for_terminal(text).into_string()
+}
 
 pub fn print_verdict(v: &TrustVerdict) {
     let label = v.status.label();
-    let canonical = v.package.canonical();
+    let canonical = safe(&v.package.canonical());
 
     let colored_label = match &v.status {
         VerdictStatus::Verified { .. } => label.green().bold().to_string(),
         VerdictStatus::Revoked { .. } => label.red().bold().to_string(),
+        VerdictStatus::Quarantined { .. } => label.magenta().bold().to_string(),
         VerdictStatus::Unverified => label.yellow().bold().to_string(),
         VerdictStatus::Unknown => label.dimmed().bold().to_string(),
     };
@@ -25,21 +32,38 @@ pub fn print_verdict(v: &TrustVerdict) {
                 println!(
                     "  {} block:   {}",
                     " ".dimmed(),
-                    &block_hash[..std::cmp::min(16, block_hash.len())]
+                    safe_prefix(block_hash, 16)
                 );
             }
             println!(
                 "  {} sha256:  {}",
                 " ".dimmed(),
-                &content_hash[..std::cmp::min(16, content_hash.len())]
+                safe_prefix(content_hash, 16)
             );
             print_risk_summary(v.deterministic_risk.as_ref());
             print_findings(findings, &v.source);
         }
         VerdictStatus::Revoked { reason, findings } => {
-            println!("  {} {}", "reason:".red(), reason.red());
+            println!("  {} {}", "reason:".red(), safe(reason).red());
             print_risk_summary(v.deterministic_risk.as_ref());
             print_findings(findings, &v.source);
+        }
+        VerdictStatus::Quarantined {
+            reason,
+            expires_at_unix,
+            ..
+        } => {
+            println!("  {} {}", "reason:".magenta(), safe(reason).magenta());
+            let deadline = expires_at_unix
+                .and_then(|secs| chrono::DateTime::<chrono::Utc>::from_timestamp(secs, 0))
+                .map(|at| at.format("%Y-%m-%d %H:%M UTC").to_string())
+                .unwrap_or_else(|| "no deadline reported".into());
+            println!(
+                "  {} fails closed → REVOKED at {} · override: none",
+                " ".dimmed(),
+                deadline
+            );
+            print_risk_summary(v.deterministic_risk.as_ref());
         }
         VerdictStatus::Unverified => {
             println!(
@@ -54,10 +78,15 @@ pub fn print_verdict(v: &TrustVerdict) {
     }
 }
 
+/// First `max` characters of an untrusted hex-ish field, sanitised.
+fn safe_prefix(text: &str, max: usize) -> String {
+    safe(&text.chars().take(max).collect::<String>())
+}
+
 fn print_pipeline_stages(v: &TrustVerdict) {
-    let evidence = v.evidence_phase.as_deref().unwrap_or("unknown");
-    let block = v.block_phase.as_deref().unwrap_or("unknown");
-    let chain = v.chain_status.as_deref().unwrap_or("unknown");
+    let evidence = safe(v.evidence_phase.as_deref().unwrap_or("unknown"));
+    let block = safe(v.block_phase.as_deref().unwrap_or("unknown"));
+    let chain = safe(v.chain_status.as_deref().unwrap_or("unknown"));
     println!(
         "  {} evidence: {} | block: {} | chain: {}",
         " ".dimmed(),
@@ -73,10 +102,11 @@ fn print_risk_summary(risk: Option<&common::DeterministicRiskSummary>) {
     let Some(r) = risk else { return };
 
     let band = if r.band.is_empty() {
-        "unrated"
+        "unrated".to_string()
     } else {
-        &r.band
+        safe(&r.band)
     };
+    let band = band.as_str();
     let colored_band = match band.to_ascii_lowercase().as_str() {
         "critical" | "high" => band.red().bold().to_string(),
         "medium" | "elevated" => band.yellow().bold().to_string(),
@@ -127,8 +157,8 @@ fn print_findings(findings: &[common::Finding], source: &VerdictSource) {
             "     {} {} {} ({}:{})",
             bullet,
             colored_severity,
-            f.title.bold(),
-            f.file,
+            safe(&f.title).bold(),
+            safe(&f.file),
             f.line.unwrap_or(0)
         );
     }
@@ -137,7 +167,7 @@ fn print_findings(findings: &[common::Finding], source: &VerdictSource) {
         VerdictSource::Cache { expires_at } => {
             format!("cache (expires {})", expires_at.format("%H:%M UTC"))
         }
-        VerdictSource::Chain { node_url } => format!("live node ({})", node_url),
+        VerdictSource::Chain { node_url } => format!("live node ({})", safe(node_url)),
     };
     println!("  {} {}\n", "source:".dimmed(), source_label.dimmed());
 }

@@ -52,6 +52,20 @@ pub enum VerdictStatus {
         reason: String,
         findings: Vec<crate::Finding>,
     },
+    /// Held out of `Verified` for Class C committee review (ADR-018) — hard
+    /// block with **no** break-glass override (ECA-07, ADR-019 open decision
+    /// #2). Fails closed into `Revoked` once `expires_at_unix` passes, the same
+    /// rule consensus applies in `resolve_quarantine_timeout`.
+    Quarantined {
+        reason: String,
+        /// Content hash the hold applies to, when the node reported one.
+        #[serde(default)]
+        content_hash: String,
+        /// Unix seconds at which the hold fails closed into revocation.
+        /// `None` when the node gave no expiry; the hold is then indefinite.
+        #[serde(default)]
+        expires_at_unix: Option<i64>,
+    },
     /// Package is entirely unknown to the chain.
     Unknown,
 }
@@ -63,8 +77,24 @@ impl VerdictStatus {
         matches!(self, VerdictStatus::Verified { .. })
     }
 
+    /// `true` for statuses that no flag or environment variable can install.
     pub fn is_blocked(&self) -> bool {
-        matches!(self, VerdictStatus::Revoked { .. })
+        matches!(
+            self,
+            VerdictStatus::Revoked { .. } | VerdictStatus::Quarantined { .. }
+        )
+    }
+
+    /// `true` when this is a quarantine whose hold has run out, i.e. it must
+    /// now be treated exactly like a revocation.
+    pub fn quarantine_expired(&self, now_unix: i64) -> bool {
+        matches!(
+            self,
+            VerdictStatus::Quarantined {
+                expires_at_unix: Some(expires_at),
+                ..
+            } if now_unix >= *expires_at
+        )
     }
 
     /// Human-readable label for terminal output.
@@ -73,6 +103,7 @@ impl VerdictStatus {
             VerdictStatus::Verified { .. } => "VERIFIED",
             VerdictStatus::Unverified => "UNVERIFIED",
             VerdictStatus::Revoked { .. } => "REVOKED",
+            VerdictStatus::Quarantined { .. } => "QUARANTINED",
             VerdictStatus::Unknown => "UNKNOWN",
         }
     }
@@ -83,7 +114,55 @@ impl VerdictStatus {
             VerdictStatus::Verified { .. } => "\x1b[32m", // green
             VerdictStatus::Unverified => "\x1b[33m",      // yellow
             VerdictStatus::Revoked { .. } => "\x1b[31m",  // red
+            VerdictStatus::Quarantined { .. } => "\x1b[35m", // magenta
             VerdictStatus::Unknown => "\x1b[33m",         // yellow
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn quarantined(expires_at_unix: Option<i64>) -> VerdictStatus {
+        VerdictStatus::Quarantined {
+            reason: "committee hold".into(),
+            content_hash: "abc".into(),
+            expires_at_unix,
+        }
+    }
+
+    #[test]
+    fn quarantine_is_blocked_and_never_safe() {
+        let status = quarantined(Some(100));
+        assert!(status.is_blocked());
+        assert!(!status.is_safe());
+        assert_eq!(status.label(), "QUARANTINED");
+    }
+
+    #[test]
+    fn quarantine_expiry_is_inclusive_and_needs_a_deadline() {
+        assert!(!quarantined(Some(100)).quarantine_expired(99));
+        assert!(quarantined(Some(100)).quarantine_expired(100));
+        assert!(!quarantined(None).quarantine_expired(i64::MAX));
+        assert!(!VerdictStatus::Unknown.quarantine_expired(i64::MAX));
+    }
+
+    #[test]
+    fn legacy_cache_entries_still_deserialize() {
+        let legacy = r#"{"Revoked":{"reason":"x","findings":[]}}"#;
+        let status: VerdictStatus = serde_json::from_str(legacy).unwrap();
+        assert!(status.is_blocked());
+        let minimal = r#"{"Quarantined":{"reason":"hold"}}"#;
+        let status: VerdictStatus = serde_json::from_str(minimal).unwrap();
+        assert_eq!(status, quarantined_minimal());
+    }
+
+    fn quarantined_minimal() -> VerdictStatus {
+        VerdictStatus::Quarantined {
+            reason: "hold".into(),
+            content_hash: String::new(),
+            expires_at_unix: None,
         }
     }
 }

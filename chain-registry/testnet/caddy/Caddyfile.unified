@@ -20,6 +20,10 @@ import hub.caddy
 	handle_path /sepolia* {
 		@jsonrpc_post method POST
 		handle @jsonrpc_post {
+			# ADR-019 ECA-38: body cap (see sepolia-public-rpc.caddy).
+			request_body {
+				max_size 64KB
+			}
 			reverse_proxy {$CREG_SEPOLIA_PUBLIC_RPC_UPSTREAM:https://ethereum-sepolia-rpc.publicnode.com} {
 				header_up Host {$CREG_SEPOLIA_PUBLIC_RPC_UPSTREAM_HOST:ethereum-sepolia-rpc.publicnode.com}
 				flush_interval -1

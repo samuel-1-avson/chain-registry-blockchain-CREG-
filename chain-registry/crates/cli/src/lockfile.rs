@@ -45,6 +45,7 @@ impl AuditReceipt {
             ),
             VerdictStatus::Unverified => ("unverified", None, None),
             VerdictStatus::Revoked { .. } => ("revoked", None, None),
+            VerdictStatus::Quarantined { .. } => ("quarantined", None, None),
             VerdictStatus::Unknown => ("unknown", None, None),
         };
 

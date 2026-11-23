@@ -198,6 +198,10 @@ pub struct PackageDetail {
     pub publisher: Option<String>,
     pub published_at: Option<String>,
     pub revocation_reason: Option<String>,
+    /// Present only when `status` is `quarantined` (ECA-07).
+    pub quarantine_reason: Option<String>,
+    /// Unix seconds at which a quarantine fails closed into `revoked`.
+    pub quarantine_expires_at_unix: Option<i64>,
     pub analysis_bundles: Option<AnalysisBundleRefs>,
     pub evidence_digest: Option<String>,
     pub deterministic_risk: Option<DeterministicRiskSummary>,

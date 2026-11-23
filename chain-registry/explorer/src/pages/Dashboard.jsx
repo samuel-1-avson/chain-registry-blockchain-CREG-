@@ -10,6 +10,7 @@ import { SkeletonCard, SkeletonRow } from '../components/Skeleton.jsx'
 import { StatusBadge } from '../components/StatusBadge.jsx'
 import { ErrorState, NoticeState } from '../components/ErrorState.jsx'
 import { formatNumber } from '../utils/format.js'
+import { packageStatusVariant } from '../api/normalize.js'
 
 /* ── Stat card with optional sparkline ─────────────────────────────────────── */
 function StatCard({ label, value, hint, variant = 'default', sparkData, animateValue }) {
@@ -311,7 +312,7 @@ export default function Dashboard({ recentEvents = [] }) {
                     <Link to={`/package/${encodeURIComponent(p.canonical)}`} style={{ color: 'var(--accent-primary-light)', fontFamily: 'var(--font-mono)', fontSize: 11, textDecoration: 'none', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                       {p.canonical || p.name}
                     </Link>
-                    <StatusBadge variant={p.status === 'verified' ? 'success' : p.status === 'revoked' ? 'error' : 'info'}>
+                    <StatusBadge variant={p.status ? packageStatusVariant(p.status) : 'info'}>
                       {p.status || 'pending'}
                     </StatusBadge>
                   </li>

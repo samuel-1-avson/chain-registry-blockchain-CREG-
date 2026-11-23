@@ -29,6 +29,8 @@ RUN npm run build
 FROM nginx:1.27-alpine
 
 COPY hub-web/nginx.conf /etc/nginx/conf.d/default.conf
+# ADR-019 Increment 1 (ECA-35): headers included by every location.
+COPY hub-web/security-headers.conf /etc/nginx/snippets/security-headers.conf
 COPY --from=builder /app/hub-web/dist /usr/share/nginx/html
 
 EXPOSE 80

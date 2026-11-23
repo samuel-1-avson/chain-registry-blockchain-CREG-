@@ -1,6 +1,9 @@
 // crates/resolver/src/cache.rs
 // Local sled-backed KV store for TrustVerdicts.
-// Verified packages cache for 24h; Unverified/Unknown cache for 5 minutes.
+// Positive and pending verdicts cache for the install freshness window
+// (ECA-13: no 24h unauthenticated reuse); revocations cache for 48h. The
+// anti-rollback journal in `freshness.rs`, not this cache, is what keeps a
+// revocation or quarantine sticky. ADR-019 Inc 3 replaces `sled` (ECA-15).
 
 use anyhow::Result;
 use chrono::{Duration, Utc};
@@ -54,10 +57,16 @@ pub fn get(id: &PackageId) -> Result<Option<TrustVerdict>> {
 /// Store a verdict with an appropriate TTL.
 pub fn set(id: &PackageId, verdict: &TrustVerdict) -> Result<()> {
     let ttl = match &verdict.status {
-        VerdictStatus::Verified { .. } => Duration::hours(24),
+        VerdictStatus::Verified { .. } => crate::install_gate::INSTALL_CACHE_MAX_AGE,
         VerdictStatus::Revoked { .. } => Duration::hours(48), // cache revocations longer
-        VerdictStatus::Unverified => Duration::minutes(5),
-        VerdictStatus::Unknown => Duration::minutes(5),
+        VerdictStatus::Quarantined { .. } => crate::install_gate::INSTALL_CACHE_MAX_AGE,
+        VerdictStatus::Unverified => crate::install_gate::INSTALL_CACHE_MAX_AGE,
+        // Never cache "unknown": a transient miss must not mask a later
+        // publication or revocation. Drop any older entry instead.
+        VerdictStatus::Unknown => {
+            db()?.remove(id.canonical().as_bytes())?;
+            return Ok(());
+        }
     };
     let expires_at = Utc::now() + ttl;
     let entry = CacheEntry {

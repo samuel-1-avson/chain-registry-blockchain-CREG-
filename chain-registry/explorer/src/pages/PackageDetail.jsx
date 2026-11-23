@@ -7,6 +7,7 @@ import { SkeletonCard } from '../components/Skeleton.jsx'
 import { ErrorState, EmptyState } from '../components/ErrorState.jsx'
 import { StatusBadge } from '../components/StatusBadge.jsx'
 import { PackageIntelligencePanel } from '../components/PackageIntelligencePanel.jsx'
+import { packageStatusVariant } from '../api/normalize.js'
 
 const TABS = [
   { id: 'overview', label: 'Overview' },
@@ -27,13 +28,17 @@ export default function PackageDetail() {
   const risk = p.deterministic_risk
   const packageStatus = typeof p.status === 'string' ? p.status.toLowerCase() : ''
   const isRevoked = p.revoked === true || packageStatus === 'revoked'
+  const isQuarantined = !isRevoked && packageStatus === 'quarantined'
+  const quarantineExpiry = Number.isSafeInteger(p.quarantine_expires_at_unix)
+    ? new Date(p.quarantine_expires_at_unix * 1000).toISOString().replace('T', ' ').slice(0, 16) + ' UTC'
+    : null
 
   return (
     <div style={{ display: 'grid', gap: 'var(--space-6)' }}>
       <header>
         <h1 style={{ margin: 0, fontSize: 18, fontFamily: 'var(--font-mono)', wordBreak: 'break-all' }}>{canonical}</h1>
         <div style={{ display: 'flex', gap: 'var(--space-2)', marginTop: 'var(--space-2)', flexWrap: 'wrap' }}>
-          {p.status && <StatusBadge variant={isRevoked ? 'error' : packageStatus === 'verified' ? 'success' : 'neutral'}>
+          {p.status && <StatusBadge variant={isRevoked ? 'error' : packageStatusVariant(packageStatus)}>
             {isRevoked ? 'Revoked' : p.status}
           </StatusBadge>}
           {risk?.band && <StatusBadge variant="warning">Risk: {risk.band}</StatusBadge>}
@@ -41,6 +46,13 @@ export default function PackageDetail() {
         {isRevoked && p.revocation_reason && (
           <p role="status" style={{ color: 'var(--accent-error)', fontSize: 12, marginTop: 'var(--space-2)' }}>
             Revocation reason: {p.revocation_reason}
+          </p>
+        )}
+        {isQuarantined && (
+          <p role="status" style={{ color: 'var(--accent-warning)', fontSize: 12, marginTop: 'var(--space-2)' }}>
+            Quarantined for committee review — not installable.
+            {quarantineExpiry ? ` Fails closed to revoked at ${quarantineExpiry} unless released.` : ''}
+            {p.quarantine_reason ? ` Reason: ${p.quarantine_reason}` : ''}
           </p>
         )}
       </header>

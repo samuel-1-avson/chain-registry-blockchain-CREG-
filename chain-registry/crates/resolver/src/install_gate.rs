@@ -2,17 +2,18 @@
 // Shared install admission for `creg install` and PATH shims (SHIM-301 +
 // CLIENT-FRESHNESS).
 //
-// Default is fail-closed: unverified, unknown, revoked, stale cache, high-
-// severity findings, an unreachable node, revocation rollback, freeze, and
-// (when a witness policy is configured) unsigned/stale/inconsistent tree heads
-// all refuse. `--unverified` or CREG_ALLOW_UNVERIFIED is the only break-glass
-// for unqualified packages; it cannot override revocation or anti-rollback.
+// Default is fail-closed: unverified, unknown, revoked, quarantined, stale
+// cache, high-severity findings, an unreachable node, revocation rollback,
+// freeze, and (when a witness policy is configured) unsigned/stale/inconsistent
+// tree heads all refuse. `--unverified` or CREG_ALLOW_UNVERIFIED is the only
+// break-glass for unqualified packages; it cannot override revocation,
+// quarantine (ECA-07, ADR-019 open decision #2) or anti-rollback.
 
 use crate::chain_client;
 use crate::{cache, parse_pkg};
 use anyhow::{bail, Result};
 use chrono::{DateTime, Duration, Utc};
-use common::{FindingSeverity, PackageId, TrustVerdict, VerdictSource, VerdictStatus};
+use common::{DisplayText, FindingSeverity, PackageId, TrustVerdict, VerdictSource, VerdictStatus};
 
 pub const ALLOW_UNVERIFIED_ENV: &str = "CREG_ALLOW_UNVERIFIED";
 pub const INSTALL_CACHE_MAX_AGE: Duration = Duration::minutes(5);
@@ -72,7 +73,11 @@ pub fn strip_unverified_flag(args: &[String]) -> Vec<String> {
 }
 
 pub fn install_cache_usable(verdict: &TrustVerdict, now: DateTime<Utc>) -> bool {
-    if matches!(verdict.status, VerdictStatus::Revoked { .. }) {
+    // A cached revocation, or a cached quarantine whose deadline has passed,
+    // can only ever block, so it stays usable past the freshness window.
+    if matches!(verdict.status, VerdictStatus::Revoked { .. })
+        || verdict.status.quarantine_expired(now.timestamp())
+    {
         return true;
     }
     let age = now.signed_duration_since(verdict.resolved_at);
@@ -85,15 +90,68 @@ pub fn install_cache_usable(verdict: &TrustVerdict, now: DateTime<Utc>) -> bool 
     }
 }
 
+/// Render a unix timestamp for block messages.
+pub(crate) fn format_unix(ts: Option<i64>) -> String {
+    match ts.and_then(|secs| DateTime::<Utc>::from_timestamp(secs, 0)) {
+        Some(at) => at.format("%Y-%m-%d %H:%M UTC").to_string(),
+        None => "an unreported time".into(),
+    }
+}
+
 pub fn evaluate_install(verdict: &TrustVerdict, allow_unverified: bool) -> InstallDecision {
+    evaluate_install_at(verdict, allow_unverified, Utc::now())
+}
+
+/// SHIM-301 status rules evaluated at `now`.
+pub fn evaluate_install_at(
+    verdict: &TrustVerdict,
+    allow_unverified: bool,
+    now: DateTime<Utc>,
+) -> InstallDecision {
     match &verdict.status {
         VerdictStatus::Revoked { reason, .. } => InstallDecision::Block {
             code: "revoked",
             message: format!(
-                "Package '{}' is REVOKED and cannot be installed. Reason: {reason}",
-                verdict.package.canonical()
+                "Package '{}' is REVOKED and cannot be installed. Reason: {}",
+                verdict.package.canonical(),
+                DisplayText::for_terminal(reason)
             ),
         },
+        // eco-adv-01: no `allow_unverified` branch. A committee hold is not an
+        // "unqualified package"; it is an explicit refusal.
+        status @ VerdictStatus::Quarantined {
+            reason,
+            expires_at_unix,
+            ..
+        } => {
+            if status.quarantine_expired(now.timestamp()) {
+                InstallDecision::Block {
+                    code: "quarantine_expired",
+                    message: format!(
+                        "Package '{}' was QUARANTINED and the hold expired at {}; it fails closed to REVOKED and cannot be installed. Reason: {}",
+                        verdict.package.canonical(),
+                        format_unix(*expires_at_unix),
+                        DisplayText::for_terminal(reason)
+                    ),
+                }
+            } else {
+                let deadline = match expires_at_unix {
+                    Some(_) => format!(
+                        "fails closed to REVOKED at {} unless the committee releases it",
+                        format_unix(*expires_at_unix)
+                    ),
+                    None => "no release deadline was reported".into(),
+                };
+                InstallDecision::Block {
+                    code: "quarantined",
+                    message: format!(
+                        "Package '{}' is QUARANTINED for committee review and cannot be installed; --unverified and {ALLOW_UNVERIFIED_ENV} do not override a quarantine ({deadline}). Reason: {}",
+                        verdict.package.canonical(),
+                        DisplayText::for_terminal(reason)
+                    ),
+                }
+            }
+        }
         VerdictStatus::Verified { findings, .. } => {
             let has_severe = findings.iter().any(|finding| {
                 matches!(
@@ -266,6 +324,13 @@ pub async fn gate_shim_package(
         Ok(verdict) => admit_install_live(&verdict, allow_unverified, node_url).await,
         Err(err) => {
             if allow_unverified {
+                // Break-glass covers an unreachable node, not a package this
+                // client already journaled as revoked or quarantined.
+                let (name, version) = parse_pkg(raw);
+                let id = PackageId::new(ecosystem, name, version.as_deref().unwrap_or("latest"));
+                if let Some(blocked) = offline_journal_block(&id)? {
+                    return Ok(blocked);
+                }
                 Ok(InstallDecision::AllowUnverified)
             } else {
                 bail!(
@@ -275,6 +340,41 @@ pub async fn gate_shim_package(
             }
         }
     }
+}
+
+/// Anti-rollback check used when the node cannot be reached: replays the
+/// journal against an `Unknown` observation so a revoked or quarantined
+/// package stays blocked even under break-glass.
+fn offline_journal_block(id: &PackageId) -> Result<Option<InstallDecision>> {
+    let store = crate::freshness::FreshnessStore::open_default()?;
+    let previous = store.get_package(&id.canonical())?;
+    Ok(offline_journal_decision(previous.as_ref(), id, Utc::now()))
+}
+
+fn offline_journal_decision(
+    previous: Option<&crate::freshness::PackageFreshnessRecord>,
+    id: &PackageId,
+    now: DateTime<Utc>,
+) -> Option<InstallDecision> {
+    let probe = TrustVerdict {
+        package: id.clone(),
+        status: VerdictStatus::Unknown,
+        resolved_at: now,
+        source: VerdictSource::Chain {
+            node_url: "unreachable".into(),
+        },
+        deterministic_risk: None,
+        evidence_phase: None,
+        block_phase: None,
+        chain_status: None,
+        publisher: None,
+    };
+    crate::freshness::evaluate_package_freshness(
+        previous,
+        &probe,
+        now,
+        Duration::seconds(crate::freshness::DEFAULT_MAX_FUTURE_SKEW_SECONDS),
+    )
 }
 
 #[cfg(test)]
@@ -466,6 +566,133 @@ mod tests {
             "install".into(),
             "requests".into()
         ]));
+    }
+
+    fn quarantined(expires_at_unix: Option<i64>) -> VerdictStatus {
+        VerdictStatus::Quarantined {
+            reason: "credential exfiltration\u{1b}]52;c;ZXZpbA==\u{07}".into(),
+            content_hash: "hash".into(),
+            expires_at_unix,
+        }
+    }
+
+    /// eco-adv-01: node reports `quarantined`; break-glass must not install.
+    #[test]
+    fn eco_adv_01_quarantine_blocks_even_with_break_glass() {
+        let now = Utc::now();
+        let v = verdict(
+            quarantined(Some(now.timestamp() + 3_600)),
+            VerdictSource::Chain {
+                node_url: "http://127.0.0.1:8080".into(),
+            },
+            now,
+        );
+        for allow in [false, true] {
+            match evaluate_install_at(&v, allow, now) {
+                InstallDecision::Block { code, message } => {
+                    assert_eq!(code, "quarantined");
+                    assert!(!message.contains('\u{1b}'), "{message}");
+                    assert!(!message.contains('\u{07}'), "{message}");
+                }
+                other => panic!("expected quarantine block, got {other:?}"),
+            }
+        }
+    }
+
+    #[test]
+    fn expired_quarantine_fails_closed_as_revoked() {
+        let now = Utc::now();
+        let v = verdict(
+            quarantined(Some(now.timestamp() - 1)),
+            VerdictSource::Chain {
+                node_url: "http://127.0.0.1:8080".into(),
+            },
+            now,
+        );
+        match evaluate_install_at(&v, true, now) {
+            InstallDecision::Block { code, .. } => assert_eq!(code, "quarantine_expired"),
+            other => panic!("expected expiry block, got {other:?}"),
+        }
+        // An expired hold behaves like a cached revocation.
+        let cached = verdict(
+            quarantined(Some(now.timestamp() - 1)),
+            VerdictSource::Cache {
+                expires_at: now + Duration::minutes(1),
+            },
+            now - Duration::hours(6),
+        );
+        assert!(install_cache_usable(&cached, now));
+    }
+
+    #[test]
+    fn quarantine_without_deadline_is_still_blocked() {
+        let now = Utc::now();
+        let v = verdict(
+            quarantined(None),
+            VerdictSource::Chain {
+                node_url: "http://127.0.0.1:8080".into(),
+            },
+            now,
+        );
+        assert!(evaluate_install_at(&v, true, now).is_blocked());
+    }
+
+    #[test]
+    fn revoked_reason_is_terminal_sanitized() {
+        let v = verdict(
+            VerdictStatus::Revoked {
+                reason: "ok\rREJECTED\u{202E}".into(),
+                findings: vec![],
+            },
+            VerdictSource::Chain {
+                node_url: "http://127.0.0.1:8080".into(),
+            },
+            Utc::now(),
+        );
+        match evaluate_install(&v, false) {
+            InstallDecision::Block { message, .. } => {
+                assert!(!message.contains('\r'));
+                assert!(!message.contains('\u{202E}'));
+            }
+            other => panic!("expected block, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn offline_break_glass_respects_journaled_revocation_and_quarantine() {
+        use crate::freshness::{PackageFreshnessKind, PackageFreshnessRecord};
+        let now = Utc::now();
+        let record = |kind| PackageFreshnessRecord {
+            canonical: pkg().canonical(),
+            kind,
+            resolved_at: now - Duration::minutes(10),
+            content_hash: None,
+        };
+
+        assert!(offline_journal_decision(None, &pkg(), now).is_none());
+
+        let revoked = record(PackageFreshnessKind::Revoked);
+        assert!(offline_journal_decision(Some(&revoked), &pkg(), now)
+            .is_some_and(|decision| decision.is_blocked()));
+
+        let held = record(PackageFreshnessKind::Quarantined {
+            expires_at_unix: Some(now.timestamp() + 3_600),
+        });
+        match offline_journal_decision(Some(&held), &pkg(), now) {
+            Some(InstallDecision::Block { code, .. }) => assert_eq!(code, "quarantined"),
+            other => panic!("expected quarantine block, got {other:?}"),
+        }
+
+        let lapsed = record(PackageFreshnessKind::Quarantined {
+            expires_at_unix: Some(now.timestamp() - 1),
+        });
+        match offline_journal_decision(Some(&lapsed), &pkg(), now) {
+            Some(InstallDecision::Block { code, .. }) => assert_eq!(code, "quarantine_expired"),
+            other => panic!("expected expiry block, got {other:?}"),
+        }
+
+        let verified = record(PackageFreshnessKind::Verified);
+        assert!(offline_journal_decision(Some(&verified), &pkg(), now).is_none());
     }
 
     struct EnvRestore {

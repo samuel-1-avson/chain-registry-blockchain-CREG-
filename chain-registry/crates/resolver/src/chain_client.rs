@@ -1,75 +1,84 @@
 // crates/resolver/src/chain_client.rs
-// Hybrid client that queries a chain node via gRPC (fast) or REST (fallback).
+// REST client for a chain node's package endpoint.
+//
+// ECA-11 (ADR-019 Increment 1): the former gRPC "fast path" was deleted. It
+// rewrote `https://` node URLs to plaintext `http://<host>:50051` and answered
+// with the *latest* verified version's content hash for whatever version was
+// requested, so a revoked `pkg@1` read as VERIFIED whenever `pkg@2` was.
+// Verdicts now come only from the per-version REST record.
 
 use anyhow::{Context, Result};
 use chrono::Utc;
-use common::proto::registry_service_client::RegistryServiceClient;
-use common::proto::GetVersionRequest;
-use common::{PackageId, TrustVerdict, VerdictSource, VerdictStatus};
+use common::{DisplayText, PackageId, TrustVerdict, VerdictSource, VerdictStatus};
 
-/// Resolve a verdict using the best available protocol (gRPC -> REST).
-pub async fn fetch_verdict(id: &PackageId, node_url: &str) -> Result<TrustVerdict> {
-    // ── 1. Attempt gRPC (Port 50051 - Industrial Speed) ──────────────────────
-    // Strip http/https and port from node_url to guess gRPC endpoint
-    let base_url = node_url
-        .trim_start_matches("http://")
-        .trim_start_matches("https://")
-        .split(':')
-        .next()
-        .unwrap_or("localhost");
-    let grpc_url = format!("http://{}:50051", base_url);
+/// Reason shown when the node reports `quarantined` without one.
+const DEFAULT_QUARANTINE_REASON: &str = "held for Class C committee review";
 
-    // Attempt connection
-    let mut client: RegistryServiceClient<tonic::transport::Channel> =
-        match RegistryServiceClient::connect(grpc_url).await {
-            Ok(c) => c,
-            Err(_) => return fetch_verdict_rest(id, node_url).await,
-        };
-
-    let request = tonic::Request::new(GetVersionRequest {
-        ecosystem: id.ecosystem.clone(),
-        name: id.name.clone(),
-    });
-
-    // Request version from gRPC registry
-    match client.get_latest_version(request).await {
-        Ok(response) => {
-            let res: common::proto::GetVersionResponse = response.into_inner();
-            if res.found {
-                let mut verdict = TrustVerdict {
-                    package: id.clone(),
-                    status: VerdictStatus::Verified {
-                        block_hash: String::new(),
-                        content_hash: res.content_hash,
-                        ipfs_cid: String::new(), // not in gRPC response; populated via REST fallback
-                        findings: vec![],
-                    },
-                    resolved_at: Utc::now(),
-                    source: VerdictSource::Chain {
-                        node_url: node_url.to_string(),
-                    },
-                    deterministic_risk: None,
-                    evidence_phase: None,
-                    block_phase: None,
-                    chain_status: Some("verified".into()),
-                    publisher: None,
-                };
-                if let Ok(rest) = fetch_verdict_rest(id, node_url).await {
-                    verdict.publisher = rest.publisher;
-                }
-                return Ok(verdict);
-            }
-        }
-        Err(_) => {
-            // Fallback handled below
-        }
-    }
-
-    // ── 2. Fallback to REST (Port 8080 - Universal Compatibility) ────────────
-    fetch_verdict_rest(id, node_url).await
+/// Wire shape of `GET /v1/public/packages/:canonical` (node `PackageResp`).
+#[derive(serde::Deserialize, Default)]
+pub(crate) struct PackageApiResp {
+    pub status: String,
+    pub block_hash: Option<String>,
+    pub content_hash: Option<String>,
+    pub ipfs_cid: Option<String>,
+    pub publisher: Option<String>,
+    pub revocation_reason: Option<String>,
+    #[serde(default)]
+    pub quarantine_reason: Option<String>,
+    #[serde(default)]
+    pub quarantine_expires_at_unix: Option<i64>,
+    pub deterministic_risk: Option<common::DeterministicRiskSummary>,
+    pub evidence_phase: Option<String>,
+    pub block_phase: Option<String>,
+    pub chain_status: Option<String>,
 }
 
-async fn fetch_verdict_rest(id: &PackageId, node_url: &str) -> Result<TrustVerdict> {
+/// Map the node's status string onto a client verdict, failing closed.
+///
+/// Only `verified`, `revoked`, `quarantined`, `pending` and `unverified` are
+/// understood. Anything else is held as an indefinite quarantine, because a
+/// status this client does not know (the way `quarantined` was once mapped to
+/// the break-glass-installable `Unverified`, ECA-07) must never become
+/// installable through `--unverified`.
+pub(crate) fn status_from_record(record: &PackageApiResp) -> VerdictStatus {
+    let content_hash = record.content_hash.clone().unwrap_or_default();
+    match record.status.as_str() {
+        "verified" => VerdictStatus::Verified {
+            block_hash: record.block_hash.clone().unwrap_or_default(),
+            content_hash,
+            ipfs_cid: record.ipfs_cid.clone().unwrap_or_default(),
+            findings: vec![], // Findings are not included in the lightweight REST response
+        },
+        "revoked" => VerdictStatus::Revoked {
+            reason: record
+                .revocation_reason
+                .clone()
+                .unwrap_or_else(|| "Revoked".into()),
+            findings: vec![],
+        },
+        "quarantined" => VerdictStatus::Quarantined {
+            reason: record
+                .quarantine_reason
+                .clone()
+                .filter(|reason| !reason.trim().is_empty())
+                .unwrap_or_else(|| DEFAULT_QUARANTINE_REASON.into()),
+            content_hash,
+            expires_at_unix: record.quarantine_expires_at_unix,
+        },
+        "pending" | "unverified" => VerdictStatus::Unverified,
+        other => VerdictStatus::Quarantined {
+            reason: format!(
+                "node reported an unrecognised package status '{}'; held fail-closed",
+                DisplayText::bounded(other, 32)
+            ),
+            content_hash,
+            expires_at_unix: None,
+        },
+    }
+}
+
+/// Resolve a verdict from the node's per-version REST record.
+pub async fn fetch_verdict(id: &PackageId, node_url: &str) -> Result<TrustVerdict> {
     let canonical = id.canonical();
     let encoded_canonical = urlencoding::encode(&canonical).into_owned();
     let grouped_url = format!(
@@ -126,24 +135,6 @@ async fn fetch_verdict_rest(id: &PackageId, node_url: &str) -> Result<TrustVerdi
         });
     }
 
-    // Deserialize as the API's PackageResp shape (not ChainRecord directly).
-    #[derive(serde::Deserialize, Default)]
-    struct PackageApiResp {
-        canonical: String,
-        status: String,
-        block_hash: Option<String>,
-        content_hash: Option<String>,
-        ipfs_cid: Option<String>,
-        publisher: Option<String>,
-        #[allow(dead_code)]
-        published_at: Option<String>,
-        revocation_reason: Option<String>,
-        deterministic_risk: Option<common::DeterministicRiskSummary>,
-        evidence_phase: Option<String>,
-        block_phase: Option<String>,
-        chain_status: Option<String>,
-    }
-
     let record: PackageApiResp = resp
         .error_for_status()
         .context("Chain node returned an error")?
@@ -151,20 +142,7 @@ async fn fetch_verdict_rest(id: &PackageId, node_url: &str) -> Result<TrustVerdi
         .await
         .context("Invalid JSON from chain node (expected package response)")?;
 
-    let status = match record.status.as_str() {
-        "verified" => VerdictStatus::Verified {
-            block_hash: record.block_hash.unwrap_or_default(),
-            content_hash: record.content_hash.unwrap_or_default(),
-            ipfs_cid: record.ipfs_cid.unwrap_or_default(),
-            findings: vec![], // Findings not included in the lightweight REST response
-        },
-        "revoked" => VerdictStatus::Revoked {
-            reason: record.revocation_reason.unwrap_or_else(|| "Revoked".into()),
-            findings: vec![],
-        },
-        _ => VerdictStatus::Unverified,
-    };
-    let _ = record.canonical; // suppress unused warning
+    let status = status_from_record(&record);
 
     Ok(TrustVerdict {
         package: id.clone(),
@@ -182,4 +160,68 @@ async fn fetch_verdict_rest(id: &PackageId, node_url: &str) -> Result<TrustVerdi
             .map(|p| p.trim().to_string())
             .filter(|p| !p.is_empty()),
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn record(status: &str) -> PackageApiResp {
+        PackageApiResp {
+            status: status.into(),
+            content_hash: Some("ab".repeat(32)),
+            ..Default::default()
+        }
+    }
+
+    #[test]
+    fn quarantined_maps_to_quarantined_not_unverified() {
+        let mut rec = record("quarantined");
+        rec.quarantine_reason = Some("credential exfiltration".into());
+        rec.quarantine_expires_at_unix = Some(1_800_000_000);
+        match status_from_record(&rec) {
+            VerdictStatus::Quarantined {
+                reason,
+                content_hash,
+                expires_at_unix,
+            } => {
+                assert_eq!(reason, "credential exfiltration");
+                assert_eq!(content_hash, "ab".repeat(32));
+                assert_eq!(expires_at_unix, Some(1_800_000_000));
+            }
+            other => panic!("expected quarantined, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn quarantined_without_reason_gets_default() {
+        match status_from_record(&record("quarantined")) {
+            VerdictStatus::Quarantined { reason, .. } => {
+                assert_eq!(reason, DEFAULT_QUARANTINE_REASON)
+            }
+            other => panic!("expected quarantined, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn unknown_status_strings_fail_closed() {
+        let status = status_from_record(&record("quarantined_v2\u{1b}]0;x\u{07}"));
+        assert!(status.is_blocked(), "{status:?}");
+        if let VerdictStatus::Quarantined { reason, .. } = status {
+            assert!(!reason.contains('\u{1b}'));
+        }
+    }
+
+    #[test]
+    fn pending_is_unverified_and_known_statuses_round_trip() {
+        assert_eq!(
+            status_from_record(&record("pending")),
+            VerdictStatus::Unverified
+        );
+        assert!(status_from_record(&record("verified")).is_safe());
+        assert!(matches!(
+            status_from_record(&record("revoked")),
+            VerdictStatus::Revoked { .. }
+        ));
+    }
 }

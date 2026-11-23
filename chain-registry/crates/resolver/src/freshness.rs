@@ -8,7 +8,7 @@
 // CREG_REQUIRE_WITNESSED_HEAD is set). Independent witness operations remain
 // out of this crate.
 
-use crate::install_gate::InstallDecision;
+use crate::install_gate::{format_unix, InstallDecision};
 use anyhow::{Context, Result};
 use chrono::{DateTime, Duration, Utc};
 use common::{
@@ -42,6 +42,25 @@ pub const DEFAULT_MAX_FUTURE_SKEW_SECONDS: i64 = 60;
 pub enum PackageFreshnessKind {
     Verified,
     Revoked,
+    /// A committee hold was observed (ECA-07). It may only end in `Revoked`,
+    /// or be released to `Verified` before `expires_at_unix`. After the
+    /// deadline it is treated as `Revoked` permanently. Certified releases
+    /// (`QuarantineResolutionV1`) replace the deadline rule in ADR-019 Inc 3.
+    Quarantined {
+        expires_at_unix: Option<i64>,
+    },
+}
+
+impl PackageFreshnessKind {
+    /// `true` for a quarantine whose deadline has passed at `now`.
+    pub fn quarantine_expired_at(&self, now: DateTime<Utc>) -> bool {
+        matches!(
+            self,
+            PackageFreshnessKind::Quarantined {
+                expires_at_unix: Some(expires_at),
+            } if now.timestamp() >= *expires_at
+        )
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -113,12 +132,35 @@ impl FreshnessStore {
     }
 
     pub fn persist_package(&self, record: PackageFreshnessRecord) -> Result<()> {
+        self.persist_package_at(record, Utc::now())
+    }
+
+    /// Persist `record` under the journal's monotonic rules:
+    /// `Revoked` is sticky; a `Quarantined` entry keeps its first-seen
+    /// deadline, may be released to `Verified` only before that deadline, and
+    /// is converted to `Revoked` once the deadline has passed.
+    pub fn persist_package_at(
+        &self,
+        mut record: PackageFreshnessRecord,
+        now: DateTime<Utc>,
+    ) -> Result<()> {
         let mut state = self.load()?;
         if let Some(existing) = state.packages.get(&record.canonical) {
-            if existing.kind == PackageFreshnessKind::Revoked
-                && record.kind != PackageFreshnessKind::Revoked
-            {
-                return Ok(());
+            match (existing.kind, record.kind) {
+                (PackageFreshnessKind::Revoked, PackageFreshnessKind::Revoked) => {}
+                (PackageFreshnessKind::Revoked, _) => return Ok(()),
+                (PackageFreshnessKind::Quarantined { .. }, PackageFreshnessKind::Revoked) => {}
+                (held @ PackageFreshnessKind::Quarantined { .. }, _)
+                    if held.quarantine_expired_at(now) =>
+                {
+                    record.kind = PackageFreshnessKind::Revoked;
+                    record.content_hash = existing.content_hash.clone();
+                }
+                (
+                    PackageFreshnessKind::Quarantined { .. },
+                    PackageFreshnessKind::Quarantined { .. },
+                ) => return Ok(()),
+                _ => {}
             }
         }
         state.packages.insert(record.canonical.clone(), record);
@@ -177,11 +219,18 @@ fn save_file(path: &Path, state: &FreshnessState) -> Result<()> {
     }
     let bytes = serde_json::to_vec_pretty(state).context("encode freshness state")?;
     let tmp = path.with_extension("json.tmp");
-    std::fs::write(&tmp, bytes)
-        .with_context(|| format!("write freshness temp {}", tmp.display()))?;
-    if path.exists() {
-        let _ = std::fs::remove_file(path);
+    {
+        use std::io::Write as _;
+        let mut file = std::fs::File::create(&tmp)
+            .with_context(|| format!("create freshness temp {}", tmp.display()))?;
+        file.write_all(&bytes)
+            .with_context(|| format!("write freshness temp {}", tmp.display()))?;
+        file.sync_all()
+            .with_context(|| format!("sync freshness temp {}", tmp.display()))?;
     }
+    // No pre-delete: `std::fs::rename` replaces the target atomically on Unix
+    // and via MOVEFILE_REPLACE_EXISTING on Windows. Deleting first opened a
+    // window in which the anti-rollback journal did not exist (ECA-15).
     std::fs::rename(&tmp, path).with_context(|| {
         format!(
             "replace freshness state {} with {}",
@@ -215,12 +264,38 @@ fn env_trimmed(name: &str) -> Option<String> {
 }
 
 pub fn record_from_verdict(verdict: &TrustVerdict) -> Option<PackageFreshnessRecord> {
+    record_from_verdict_at(verdict, Utc::now())
+}
+
+/// Journal record for `verdict` as observed at `now`. An already-expired
+/// quarantine is recorded as `Revoked`.
+pub fn record_from_verdict_at(
+    verdict: &TrustVerdict,
+    now: DateTime<Utc>,
+) -> Option<PackageFreshnessRecord> {
     let (kind, content_hash) = match &verdict.status {
         VerdictStatus::Verified { content_hash, .. } => (
             PackageFreshnessKind::Verified,
             Some(content_hash.clone()).filter(|hash| !hash.is_empty()),
         ),
         VerdictStatus::Revoked { .. } => (PackageFreshnessKind::Revoked, None),
+        status @ VerdictStatus::Quarantined {
+            content_hash,
+            expires_at_unix,
+            ..
+        } => {
+            let hash = Some(content_hash.clone()).filter(|hash| !hash.is_empty());
+            if status.quarantine_expired(now.timestamp()) {
+                (PackageFreshnessKind::Revoked, hash)
+            } else {
+                (
+                    PackageFreshnessKind::Quarantined {
+                        expires_at_unix: *expires_at_unix,
+                    },
+                    hash,
+                )
+            }
+        }
         VerdictStatus::Unverified | VerdictStatus::Unknown => return None,
     };
     Some(PackageFreshnessRecord {
@@ -248,6 +323,32 @@ pub fn evaluate_package_freshness(
     }
     let previous = previous?;
     let incoming_revoked = matches!(verdict.status, VerdictStatus::Revoked { .. });
+    if let PackageFreshnessKind::Quarantined { expires_at_unix } = previous.kind {
+        if !incoming_revoked {
+            if previous.kind.quarantine_expired_at(now) {
+                return Some(block(
+                    "quarantine_expired",
+                    format!(
+                        "Package '{}' was QUARANTINED and the hold expired at {}; it fails closed to REVOKED and cannot be installed.",
+                        verdict.package.canonical(),
+                        format_unix(expires_at_unix)
+                    ),
+                ));
+            }
+            if matches!(
+                verdict.status,
+                VerdictStatus::Unverified | VerdictStatus::Unknown
+            ) {
+                return Some(block(
+                    "quarantined",
+                    format!(
+                        "Package '{}' was previously observed as QUARANTINED; a hold ends only in revocation or a verified release, never in an unverified install (anti-rollback).",
+                        verdict.package.canonical()
+                    ),
+                ));
+            }
+        }
+    }
     if previous.kind == PackageFreshnessKind::Revoked && !incoming_revoked {
         return Some(block(
             "freshness_rollback",
@@ -494,9 +595,12 @@ pub fn admit_with_freshness(
 
     let decision = evaluate(verdict, allow_unverified);
     if let InstallDecision::Block { .. } = &decision {
-        if let Some(record) = record_from_verdict(verdict) {
-            if record.kind == PackageFreshnessKind::Revoked {
-                let _ = store.persist_package(record);
+        if let Some(record) = record_from_verdict_at(verdict, now) {
+            if matches!(
+                record.kind,
+                PackageFreshnessKind::Revoked | PackageFreshnessKind::Quarantined { .. }
+            ) {
+                let _ = store.persist_package_at(record, now);
             }
         }
         return decision;

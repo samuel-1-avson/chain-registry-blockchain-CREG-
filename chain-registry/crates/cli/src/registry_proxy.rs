@@ -126,7 +126,19 @@ impl RegistryProxy {
         match &verdict.status {
             VerdictStatus::Revoked { reason, .. } => ProxyVerdictOutcome::Block {
                 canonical: canonical.clone(),
-                reason: format!("Package is REVOKED on-chain: {}", reason),
+                reason: format!(
+                    "Package is REVOKED on-chain: {}",
+                    common::DisplayText::for_terminal(reason)
+                ),
+                status_code: 403,
+            },
+            // ECA-07: `allow_unverified` never forwards a committee hold.
+            VerdictStatus::Quarantined { reason, .. } => ProxyVerdictOutcome::Block {
+                canonical: canonical.clone(),
+                reason: format!(
+                    "Package is QUARANTINED for committee review: {}",
+                    common::DisplayText::for_terminal(reason)
+                ),
                 status_code: 403,
             },
             VerdictStatus::Verified { findings, .. } => {
@@ -230,6 +242,38 @@ mod tests {
             proxy.evaluate_verdict(&revoked_verdict, "https://registry.npmjs.org/malicious-pkg");
         assert!(matches!(
             res,
+            ProxyVerdictOutcome::Block {
+                status_code: 403,
+                ..
+            }
+        ));
+    }
+
+    #[test]
+    fn quarantine_is_blocked_even_when_unverified_is_allowed() {
+        let proxy = RegistryProxy::new(ProxyConfig {
+            allow_unverified: true,
+            ..ProxyConfig::default()
+        });
+        let verdict = TrustVerdict {
+            package: PackageId::new("npm", "held-pkg", "1.0.0"),
+            status: VerdictStatus::Quarantined {
+                reason: "credential exfiltration".into(),
+                content_hash: String::new(),
+                expires_at_unix: None,
+            },
+            resolved_at: Utc::now(),
+            source: VerdictSource::Chain {
+                node_url: "http://localhost".into(),
+            },
+            deterministic_risk: None,
+            evidence_phase: None,
+            block_phase: None,
+            chain_status: None,
+            publisher: None,
+        };
+        assert!(matches!(
+            proxy.evaluate_verdict(&verdict, "https://registry.npmjs.org/held-pkg"),
             ProxyVerdictOutcome::Block {
                 status_code: 403,
                 ..

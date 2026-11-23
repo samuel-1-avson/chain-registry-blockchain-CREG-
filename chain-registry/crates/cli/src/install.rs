@@ -103,7 +103,8 @@ pub async fn run(
                             {
                                 violations.push(format!(
                                     "Package has a {} finding: {}",
-                                    sev, finding.description
+                                    sev,
+                                    common::DisplayText::for_terminal(&finding.description)
                                 ));
                             }
                         }
@@ -166,7 +167,10 @@ pub async fn run(
         eprintln!("{} Failed to write audit receipt: {}", "⚠".yellow(), e);
     }
 
-    let mut local_tarball: Option<std::path::PathBuf> = None;
+    // ECA-14: the verified tarball lives in a private per-download directory
+    // owned by this handle; it is deleted when the handle drops after the
+    // package manager returns.
+    let mut verified_download: Option<resolver::downloader::VerifiedDownload> = None;
     match &verdict.status {
         VerdictStatus::Verified {
             content_hash,
@@ -185,23 +189,21 @@ pub async fn run(
                 .as_deref()
                 .unwrap_or("http://localhost:8080")
                 .to_string();
-            let temp_file =
-                std::env::temp_dir().join(format!("{}.tgz", pkg_id.name.replace('/', "_")));
 
             let ipfs_cid_owned = ipfs_cid.clone();
             let content_hash_owned = content_hash.clone();
-            let temp_file_owned = temp_file.clone();
+            let file_name = pkg_id.name.clone();
             match retry::with_retry("P2P download", 3, Duration::from_millis(500), || {
                 let dl = resolver::downloader::P2PDownloader::new(vec![fallback_node.clone()]);
                 let cid = ipfs_cid_owned.clone();
                 let hash = content_hash_owned.clone();
-                let path = temp_file_owned.clone();
-                async move { dl.download(&cid, &hash, &path).await }
+                let name = file_name.clone();
+                async move { dl.download_verified(&cid, &hash, &name).await }
             })
             .await
             {
-                Ok(_) => {
-                    local_tarball = Some(temp_file);
+                Ok(download) => {
+                    verified_download = Some(download);
                 }
                 Err(e) => {
                     bail!(
@@ -217,18 +219,25 @@ pub async fn run(
         VerdictStatus::Unverified | VerdictStatus::Unknown => {
             // For unverified/unknown packages, falling back to the original registry is acceptable.
         }
-        VerdictStatus::Revoked { .. } => {
-            // Already bailed above; unreachable.
+        VerdictStatus::Revoked { .. } | VerdictStatus::Quarantined { .. } => {
+            // Hard blocks: `admit_install_live` already refused above.
+            bail!(
+                "{} '{}' is {} and cannot be installed.",
+                "✗".red().bold(),
+                pkg_id.canonical(),
+                verdict.status.label()
+            );
         }
     }
 
     // ── 5. Delegate to the real package manager ───────────────────────────────
-    let install_target = local_tarball
+    let install_target = verified_download
         .as_ref()
-        .and_then(|p| p.to_str())
+        .and_then(|download| download.path().to_str())
         .unwrap_or(raw_package);
 
     delegate_to_real_pm(&ecosystem, install_target)?;
+    drop(verified_download);
 
     Ok(())
 }

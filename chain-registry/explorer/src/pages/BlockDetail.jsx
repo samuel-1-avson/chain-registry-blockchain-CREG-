@@ -10,6 +10,7 @@ import { ErrorState, EmptyState } from '../components/ErrorState.jsx'
 import { StatusBadge } from '../components/StatusBadge.jsx'
 import { ShareButton } from '../components/ShareButton.jsx'
 import { isHash32, formatNumber } from '../utils/format.js'
+import { txDisplayStatus } from '../api/normalize.js'
 
 /** /block/:id — id is either a decimal height or a 0x… hash. */
 export default function BlockDetail() {
@@ -169,7 +170,7 @@ export default function BlockDetail() {
               <tbody>
                 {txs.map((t, i) => {
                   const canonical = t.canonical
-                  const txStatus = t.type === 'revoke' ? 'revoked' : (isFinalized ? 'finalized' : 'included')
+                  const txStatus = txDisplayStatus(t, { finalized: isFinalized, included: true })
                   return (
                     <tr key={canonical || t.hash || i}>
                       <td style={{ color: 'var(--text-tertiary)', fontFamily: 'var(--font-mono)' }}>{i}</td>
@@ -184,8 +185,8 @@ export default function BlockDetail() {
                       </td>
                       <td><Hash value={t.publisher} kind="publisher" start={6} end={4} /></td>
                       <td>
-                        <StatusBadge variant={txStatus === 'finalized' ? 'success' : txStatus === 'revoked' ? 'error' : 'info'}>
-                          {txStatus}
+                        <StatusBadge variant={txStatus.variant}>
+                          {txStatus.label}
                         </StatusBadge>
                       </td>
                     </tr>
