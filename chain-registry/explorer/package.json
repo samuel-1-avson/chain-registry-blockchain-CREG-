@@ -14,7 +14,7 @@
     "test:lighthouse": "lhci autorun"
   },
   "dependencies": {
-    "@walletconnect/ethereum-provider": "2.11.0",
+    "@walletconnect/ethereum-provider": "2.26.0",
     "react": "^19.2.4",
     "react-dom": "^19.3.1",
     "react-is": "^19.2.4",
