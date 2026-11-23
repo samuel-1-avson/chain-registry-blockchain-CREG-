@@ -250,7 +250,7 @@ jobs:
         # repositories. The Sigstore checksum signature above remains required
         # for every release, regardless of repository visibility.
         if: github.event.repository.private == false
-        uses: actions/attest-build-provenance@v2
+        uses: actions/attest-build-provenance@v4
         with:
           subject-path: |
             chain-registry/release/chain-registry-*
