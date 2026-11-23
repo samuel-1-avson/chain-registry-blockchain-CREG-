@@ -72,6 +72,9 @@ pub enum HotKeyRole {
     Relayer,
     /// Ed25519 validator key stored as hex in Vault or env (node only).
     ValidatorEd25519,
+    /// 32-byte ML-DSA-44 seed of the validator's hybrid key (`ADR-017`),
+    /// stored as hex in Vault or env (node only).
+    ValidatorMlDsa44,
     /// Governance.sol execution signer key (node only, `VNA-32`).
     Governance,
 }
@@ -83,6 +86,7 @@ impl HotKeyRole {
             Self::Faucet => "FAUCET_PRIVATE_KEY",
             Self::Relayer => "RELAYER_PRIVATE_KEY",
             Self::ValidatorEd25519 => "CREG_VALIDATOR_KEY",
+            Self::ValidatorMlDsa44 => "CREG_VALIDATOR_PQ_KEY",
             Self::Governance => "CREG_GOVERNANCE_KEY",
         }
     }
@@ -93,6 +97,7 @@ impl HotKeyRole {
             Self::Faucet => "secret/data/creg/faucet",
             Self::Relayer => "secret/data/creg/relayer",
             Self::ValidatorEd25519 => "secret/data/creg/validator",
+            Self::ValidatorMlDsa44 => "secret/data/creg/validator-pq",
             Self::Governance => "secret/data/creg/governance",
         }
     }
@@ -103,6 +108,7 @@ impl HotKeyRole {
             Self::Faucet => "CREG_VAULT_SECRET_PATH_FAUCET",
             Self::Relayer => "CREG_VAULT_SECRET_PATH_RELAYER",
             Self::ValidatorEd25519 => "CREG_VAULT_SECRET_PATH_VALIDATOR",
+            Self::ValidatorMlDsa44 => "CREG_VAULT_SECRET_PATH_VALIDATOR_PQ",
             Self::Governance => "CREG_VAULT_SECRET_PATH_GOVERNANCE",
         }
     }
@@ -113,12 +119,18 @@ impl HotKeyRole {
             Self::Faucet => &["private_key", "faucet_key", "key"],
             Self::Relayer => &["private_key", "relayer_key", "key"],
             Self::ValidatorEd25519 => &["validator_key", "private_key", "key"],
+            Self::ValidatorMlDsa44 => &["validator_pq_key", "pq_seed", "key"],
             Self::Governance => &["governance_key", "private_key", "key"],
         }
     }
 
     pub fn is_ed25519(self) -> bool {
         matches!(self, Self::ValidatorEd25519)
+    }
+
+    /// Seeds kept as bare lowercase hex (no `0x`), unlike EVM keys.
+    pub fn is_bare_hex_seed(self) -> bool {
+        matches!(self, Self::ValidatorEd25519 | Self::ValidatorMlDsa44)
     }
 }
 
@@ -251,6 +263,7 @@ pub fn validate_vault_exclusivity(backend: SecretsBackend) -> Vec<String> {
     let mut errors = Vec::new();
     for role in [
         HotKeyRole::ValidatorEd25519,
+        HotKeyRole::ValidatorMlDsa44,
         HotKeyRole::Bridge,
         HotKeyRole::Governance,
     ] {
@@ -300,7 +313,7 @@ pub fn normalize_signing_key_secret(key: &str, role: HotKeyRole) -> Result<Secre
             bytes.len()
         );
     }
-    if role.is_ed25519() {
+    if role.is_bare_hex_seed() {
         Ok(SecretString::new(hex::encode(bytes.as_slice())))
     } else {
         Ok(SecretString::new(format!(
@@ -451,6 +464,21 @@ mod tests {
                 .expect("valid governance key");
         assert_eq!(gov.expose_secret(), format!("0x{}", "bb".repeat(32)));
         assert_eq!(HotKeyRole::Governance.env_var(), "CREG_GOVERNANCE_KEY");
+
+        // The ML-DSA-44 seed is a bare hex seed like the Ed25519 key.
+        let pq = normalize_signing_key_secret(
+            &format!("0x{}", "CC".repeat(32)),
+            HotKeyRole::ValidatorMlDsa44,
+        )
+        .expect("valid ML-DSA-44 seed");
+        assert_eq!(pq.expose_secret(), "cc".repeat(32));
+        assert_eq!(
+            HotKeyRole::ValidatorMlDsa44.env_var(),
+            "CREG_VALIDATOR_PQ_KEY"
+        );
+        assert!(
+            normalize_signing_key_secret(&"cc".repeat(31), HotKeyRole::ValidatorMlDsa44).is_err()
+        );
     }
 
     #[test]

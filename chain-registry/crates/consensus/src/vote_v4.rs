@@ -471,6 +471,130 @@ impl WitnessReplayGuard {
     pub fn should_slash_for_bogus_witness(&self, validator_id: &str) -> bool {
         self.bogus_count(validator_id) > 0
     }
+
+    /// Deterministic, serializable copy of the guard for durable storage
+    /// (ADR-019: `cf_meta`), so a restart cannot reset replay budgets or
+    /// forget bogus-witness penalties.
+    pub fn snapshot(&self) -> WitnessReplayGuardStateV1 {
+        let mut replay_counts: Vec<WitnessReplayCountV1> = self
+            .replay_counts
+            .iter()
+            .map(|((package, content_hash), used)| WitnessReplayCountV1 {
+                package_canonical: package.clone(),
+                content_hash: content_hash.clone(),
+                replays_used: *used,
+            })
+            .collect();
+        replay_counts.sort_by(|a, b| {
+            (&a.package_canonical, &a.content_hash).cmp(&(&b.package_canonical, &b.content_hash))
+        });
+        let mut cached_outcomes: Vec<WitnessReplayOutcomeV1> = self
+            .cached_outcomes
+            .iter()
+            .map(
+                |((package, content_hash, witness_digest), reproduced)| WitnessReplayOutcomeV1 {
+                    package_canonical: package.clone(),
+                    content_hash: content_hash.clone(),
+                    witness_digest: witness_digest.clone(),
+                    reproduced: *reproduced,
+                },
+            )
+            .collect();
+        cached_outcomes.sort_by(|a, b| {
+            (&a.package_canonical, &a.content_hash, &a.witness_digest).cmp(&(
+                &b.package_canonical,
+                &b.content_hash,
+                &b.witness_digest,
+            ))
+        });
+        let mut bogus_penalties: Vec<WitnessBogusPenaltyV1> = self
+            .bogus_penalties
+            .iter()
+            .map(|(validator_id, count)| WitnessBogusPenaltyV1 {
+                validator_id: validator_id.clone(),
+                count: *count,
+            })
+            .collect();
+        bogus_penalties.sort_by(|a, b| a.validator_id.cmp(&b.validator_id));
+        WitnessReplayGuardStateV1 {
+            schema_version: WITNESS_REPLAY_GUARD_STATE_VERSION,
+            replay_counts,
+            cached_outcomes,
+            bogus_penalties,
+        }
+    }
+
+    /// Rebuild a guard from [`Self::snapshot`]. Budgets are clamped to
+    /// `MAX_WITNESS_REPLAYS_PER_PACKAGE`, never raised.
+    pub fn restore(state: &WitnessReplayGuardStateV1) -> Result<Self> {
+        if state.schema_version != WITNESS_REPLAY_GUARD_STATE_VERSION {
+            bail!(
+                "unsupported witness replay guard state version {}",
+                state.schema_version
+            );
+        }
+        let mut guard = Self::new();
+        for entry in &state.replay_counts {
+            guard.replay_counts.insert(
+                Self::pkg_key(&entry.package_canonical, &entry.content_hash),
+                entry.replays_used.min(MAX_WITNESS_REPLAYS_PER_PACKAGE),
+            );
+        }
+        for entry in &state.cached_outcomes {
+            let (package, content_hash) =
+                Self::pkg_key(&entry.package_canonical, &entry.content_hash);
+            guard.cached_outcomes.insert(
+                (package, content_hash, entry.witness_digest.clone()),
+                entry.reproduced,
+            );
+        }
+        for entry in &state.bogus_penalties {
+            let validator_id = entry.validator_id.trim();
+            if !validator_id.is_empty() {
+                guard
+                    .bogus_penalties
+                    .insert(validator_id.to_string(), entry.count);
+            }
+        }
+        Ok(guard)
+    }
+}
+
+/// Version of [`WitnessReplayGuardStateV1`].
+pub const WITNESS_REPLAY_GUARD_STATE_VERSION: u16 = 1;
+
+/// Durable form of [`WitnessReplayGuard`], sorted for deterministic bytes.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct WitnessReplayGuardStateV1 {
+    pub schema_version: u16,
+    pub replay_counts: Vec<WitnessReplayCountV1>,
+    pub cached_outcomes: Vec<WitnessReplayOutcomeV1>,
+    pub bogus_penalties: Vec<WitnessBogusPenaltyV1>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct WitnessReplayCountV1 {
+    pub package_canonical: String,
+    pub content_hash: String,
+    pub replays_used: usize,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct WitnessReplayOutcomeV1 {
+    pub package_canonical: String,
+    pub content_hash: String,
+    pub witness_digest: String,
+    pub reproduced: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct WitnessBogusPenaltyV1 {
+    pub validator_id: String,
+    pub count: u32,
 }
 
 #[derive(Debug, Clone)]
@@ -1113,6 +1237,34 @@ mod tests {
                 &params,
             )
             .is_err());
+
+        // ADR-019: a restart must not reset budgets or forget penalties.
+        let snapshot = guard.snapshot();
+        let bytes = serde_json::to_vec(&snapshot).unwrap();
+        assert_eq!(bytes, serde_json::to_vec(&guard.snapshot()).unwrap());
+        let mut restored =
+            WitnessReplayGuard::restore(&serde_json::from_slice(&bytes).unwrap()).unwrap();
+        assert_eq!(restored.snapshot(), snapshot);
+        assert_eq!(
+            restored.replays_used("npm:pkg@1.0.0", &"aa".repeat(32)),
+            MAX_WITNESS_REPLAYS_PER_PACKAGE
+        );
+        assert!(restored.should_slash_for_bogus_witness(&v2.id));
+        assert!(restored
+            .preflight_and_reserve(
+                &w,
+                "npm:pkg@1.0.0",
+                &"aa".repeat(32),
+                Some("bundle-v1"),
+                &validators,
+                10,
+                &params,
+            )
+            .is_err());
+        let mut tampered = snapshot.clone();
+        tampered.replay_counts[0].replays_used = 0;
+        tampered.schema_version = 2;
+        assert!(WitnessReplayGuard::restore(&tampered).is_err());
     }
 
     #[test]

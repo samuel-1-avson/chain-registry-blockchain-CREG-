@@ -80,6 +80,8 @@ const STATUS_ROOT_KEY: &[u8] = b"m\0root";
 const STATUS_TIP_KEY: &[u8] = b"m\0tip";
 const META_WITNESS_PREFIX: &str = "witness:";
 const META_WITNESS_ID_PREFIX: &str = "witness_id:";
+/// Node-local, not chain-derived: never cleared by a rebuild.
+const META_WITNESS_GUARD_KEY: &[u8] = b"witness_guard:v1";
 const PUB_IDX_STATS_PREFIX: &str = "stats\0";
 const PUB_IDX_PKG_PREFIX: &str = "pkg\0";
 const PUB_IDX_TIP_KEY: &[u8] = b"meta\0indexed_tip";
@@ -2169,6 +2171,39 @@ impl ChainStore {
             .transpose()
             .context("decode witness index")?
             .unwrap_or_default())
+    }
+
+    /// Node-local witness replay guard (budgets, cached outcomes, bogus
+    /// penalties). Kept in `meta` under a key a rebuild never clears, so a
+    /// restart cannot reset replay budgets (ADR-019 decision #3).
+    pub fn load_witness_replay_guard(&self) -> Result<consensus::vote_v4::WitnessReplayGuard> {
+        let Some(cf) = self.db.cf_handle(CF_META) else {
+            return Ok(consensus::vote_v4::WitnessReplayGuard::new());
+        };
+        match self.db.get_cf(&cf, META_WITNESS_GUARD_KEY)? {
+            None => Ok(consensus::vote_v4::WitnessReplayGuard::new()),
+            Some(bytes) => {
+                let state: consensus::vote_v4::WitnessReplayGuardStateV1 =
+                    serde_json::from_slice(&bytes).context("decode witness replay guard")?;
+                consensus::vote_v4::WitnessReplayGuard::restore(&state)
+            }
+        }
+    }
+
+    /// Durably store the witness replay guard (synchronous write).
+    pub fn save_witness_replay_guard(
+        &self,
+        guard: &consensus::vote_v4::WitnessReplayGuard,
+    ) -> Result<()> {
+        let _mutation = self.ensure_no_active_reorg()?;
+        let cf = self.db.cf_handle(CF_META).context("cf meta")?;
+        self.db.put_cf_opt(
+            &cf,
+            META_WITNESS_GUARD_KEY,
+            serde_json::to_vec(&guard.snapshot())?,
+            &Self::reorg_write_options(),
+        )?;
+        Ok(())
     }
 
     /// Version an indexed witness digest belongs to.

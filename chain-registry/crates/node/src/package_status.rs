@@ -25,7 +25,10 @@
 //! parity, `ECO-INV-03`). The signing committee is either the record's
 //! snapshot-bound analysis committee (valid assignment proof) or, for legacy
 //! records and never-published versions, the full active validator set at the
-//! certificate's authority height.
+//! certificate's authority height. A signer counts only when it is active with
+//! the same key both at the certificate's authority height and at the block's
+//! height ([`signing_authority`]), so a validator that has left or rotated its
+//! key cannot sign under an old authority height.
 
 use anyhow::{bail, Context, Result};
 use common::status_tree::{split_canonical, Hash32};
@@ -40,11 +43,6 @@ use std::collections::{BTreeMap, HashMap};
 
 use crate::chain_store::ChainStore;
 use crate::namespace_consensus::NamespaceConsensusConfig;
-
-/// A certificate's `authority_height` may trail the block by at most this
-/// many blocks, so validators that have since left cannot sign with an old
-/// authority height.
-pub const QC_AUTHORITY_WINDOW_BLOCKS: u64 = 1024;
 
 /// Seed of the synthetic committee formed by the full active validator set.
 pub const FULL_SET_COMMITTEE_SEED: &str = "creg-full-validator-set-v1";
@@ -154,6 +152,49 @@ pub fn leaf_for(
         status,
         height,
     })
+}
+
+/// Validators of `at_authority` that may sign a certificate verified at a
+/// later height: active at the authority height **and** at the block height,
+/// with the same key id (hybrid when `require_hybrid`) in both sets.
+pub fn signing_authority(
+    at_authority: &[Validator],
+    at_block: &[Validator],
+    require_hybrid: bool,
+) -> Vec<Validator> {
+    let key_id = |validator: &Validator| {
+        validator
+            .verifying_key(require_hybrid)
+            .ok()
+            .map(|key| key.key_id())
+    };
+    at_authority
+        .iter()
+        .filter(|validator| common::validator_status_is_active(&validator.status))
+        .filter(|validator| {
+            let Some(authority_key) = key_id(validator) else {
+                return false;
+            };
+            at_block.iter().any(|current| {
+                current.id == validator.id
+                    && common::validator_status_is_active(&current.status)
+                    && key_id(current).as_deref() == Some(authority_key.as_str())
+            })
+        })
+        .cloned()
+        .collect()
+}
+
+/// The record's analysis committee when its assignment proof is valid. The
+/// proof is made at admission, before the pipeline may expand
+/// `effective_size`, so it is checked with `effective_size = size`.
+pub fn assigned_committee(record: &ChainRecord) -> Option<AnalysisCommittee> {
+    let committee = record.analysis_committee.as_ref()?;
+    let mut admitted = committee.clone();
+    admitted.effective_size = admitted.size;
+    admitted
+        .assignment_proof_is_valid(&record.id.canonical(), &record.content_hash)
+        .then(|| committee.clone())
 }
 
 /// Committee made of every active validator in `authority`, sorted by id.
@@ -290,31 +331,13 @@ impl Transition<'_, '_> {
         {
             bail!("committee QC targets another content hash");
         }
-        if qc
-            .authority_height
-            .saturating_add(QC_AUTHORITY_WINDOW_BLOCKS)
-            < self.height
-        {
-            bail!(
-                "committee QC authority height {} is more than {} blocks below height {}",
-                qc.authority_height,
-                QC_AUTHORITY_WINDOW_BLOCKS,
-                self.height
-            );
-        }
-        let authority = self.authority_set(qc.authority_height)?;
-        let record_committee = record
-            .and_then(|record| record.analysis_committee.as_ref())
-            .filter(|committee| {
-                record.is_some_and(|record| {
-                    committee
-                        .assignment_proof_is_valid(&record.id.canonical(), &record.content_hash)
-                })
-            })
-            .cloned();
-        let committee = record_committee
+        let at_authority = self.authority_set(qc.authority_height)?;
+        let at_block = self.authority_set(self.height)?;
+        let authority = signing_authority(&at_authority, &at_block, self.active);
+        let committee = record
+            .and_then(assigned_committee)
             .into_iter()
-            .chain(std::iter::once(full_set_committee(&authority)))
+            .chain(std::iter::once(full_set_committee(&at_authority)))
             .find(|committee| {
                 common::committee_digest(committee)
                     .eq_ignore_ascii_case(qc.committee_digest.trim())
@@ -486,8 +509,12 @@ impl Transition<'_, '_> {
                             certified = true;
                         }
                         None if authority.is_self_revocation() => {}
+                        // A rejected submission that was never published
+                        // changes no committed state; it stays uncertified,
+                        // so clients do not treat it as a revocation.
+                        None if record.is_none() => {}
                         None => bail!(
-                            "a validator revocation needs a committee quorum certificate after hybrid activation"
+                            "a validator revocation of a committed version needs a committee quorum certificate after hybrid activation"
                         ),
                     }
                     let qc_witness = quorum_certificate
@@ -1239,41 +1266,108 @@ mod tests {
     }
 
     #[test]
-    fn stale_certificate_authority_is_refused() {
-        let fx = fixture(Some(1));
-        let rec = record("epsilon", "publisher");
-        let canonical = rec.id.canonical();
-        fx.commit(fx.block(10, vec![Transaction::Publish(rec.clone())]))
-            .expect("publish");
-        let qc = fx.qc(QUARANTINE_QC_DOMAIN, &canonical, &rec.content_hash, None, 4);
-        let block = fx.block(
-            20,
-            vec![Transaction::QuarantineV1 {
-                record: rec.clone(),
-                reason_code: CregFindingCategoryV1::Other,
-                quorum_certificate: qc,
-            }],
+    fn signers_must_be_active_with_the_same_key_at_both_heights() {
+        let members: Vec<Member> = (1..=4).map(member).collect();
+        let at_authority: Vec<Validator> = members.iter().map(|m| m.validator.clone()).collect();
+
+        // Later: validator-1 left, validator-2 is inactive, validator-3
+        // rotated its post-quantum key, validator-4 is unchanged.
+        let rotated = SigningKey::hybrid_from_seeds(&[3; 32], &[200; 32]);
+        let (_, rotated_pq) = rotated.public_key().hybrid_parts().expect("hybrid key");
+        let mut at_block: Vec<Validator> = at_authority[1..].to_vec();
+        at_block[0].status = "inactive".into();
+        at_block[1].pq_pubkey = Some(hex::encode(rotated_pq));
+
+        let hybrid: Vec<String> = signing_authority(&at_authority, &at_block, true)
+            .into_iter()
+            .map(|validator| validator.id)
+            .collect();
+        assert_eq!(hybrid, vec!["validator-4".to_string()]);
+        // Before activation only the Ed25519 key matters, so the PQ rotation
+        // does not exclude validator-3.
+        let classical: Vec<String> = signing_authority(&at_authority, &at_block, false)
+            .into_iter()
+            .map(|validator| validator.id)
+            .collect();
+        assert_eq!(
+            classical,
+            vec!["validator-3".to_string(), "validator-4".to_string()]
         );
-        let mut transition = Transition {
-            chain: &fx.store,
-            config: &fx.config,
-            height: 1 + QC_AUTHORITY_WINDOW_BLOCKS + 1,
-            now: block.header.timestamp.timestamp(),
-            active: true,
-            overlay: Overlay::new(&fx.store),
-            effects: StatusBlockEffects::default(),
+    }
+
+    #[test]
+    fn expanded_record_committee_keeps_its_assignment_proof() {
+        let mut committee = AnalysisCommittee {
+            size: 2,
+            members: vec![
+                "validator-1".into(),
+                "validator-2".into(),
+                "validator-3".into(),
+            ],
+            seed: "seed".into(),
+            effective_size: 2,
+            validator_snapshot_hash: "snapshot".into(),
+            selection_randomness: "randomness".into(),
+            ..AnalysisCommittee::default()
         };
-        let Transaction::QuarantineV1 {
-            record,
-            reason_code,
-            quorum_certificate,
-        } = &block.transactions[0]
-        else {
-            unreachable!("built above");
+        let mut rec = record("zeta", "publisher");
+        committee.assignment_proof =
+            common::committee_assignment_proof(&rec.id.canonical(), &rec.content_hash, &committee);
+        // The pipeline expanded the committee after admission.
+        committee.effective_size = 3;
+        rec.analysis_committee = Some(committee.clone());
+        assert_eq!(assigned_committee(&rec).map(|c| c.effective_size), Some(3));
+        // Any other edit still invalidates the assignment.
+        committee.members.swap(0, 1);
+        rec.analysis_committee = Some(committee);
+        assert!(assigned_committee(&rec).is_none());
+    }
+
+    #[test]
+    fn witness_replay_guard_survives_rebuild_and_reopen() {
+        use consensus::vote_v4::{
+            WitnessBogusPenaltyV1, WitnessReplayGuard, WitnessReplayGuardStateV1,
+            WITNESS_REPLAY_GUARD_STATE_VERSION,
         };
-        let error = transition
-            .apply_quarantine(record, *reason_code, quorum_certificate)
-            .unwrap_err();
-        assert!(format!("{error:#}").contains("blocks below"), "{error:#}");
+        let fx = fixture(Some(1));
+        assert_eq!(
+            fx.store
+                .load_witness_replay_guard()
+                .expect("load empty")
+                .bogus_count("validator-9"),
+            0
+        );
+        let guard = WitnessReplayGuard::restore(&WitnessReplayGuardStateV1 {
+            schema_version: WITNESS_REPLAY_GUARD_STATE_VERSION,
+            bogus_penalties: vec![WitnessBogusPenaltyV1 {
+                validator_id: "validator-9".into(),
+                count: 2,
+            }],
+            ..WitnessReplayGuardStateV1::default()
+        })
+        .expect("restore");
+        fx.store.save_witness_replay_guard(&guard).expect("save");
+        fx.store.rebuild_package_index().expect("rebuild");
+        assert_eq!(
+            fx.store
+                .load_witness_replay_guard()
+                .expect("load")
+                .bogus_count("validator-9"),
+            2
+        );
+    }
+
+    #[test]
+    fn uncertified_rejection_of_an_unpublished_version_changes_nothing() {
+        let fx = fixture(Some(1));
+        let unpublished = record("eta", "publisher").id.canonical();
+        let validator_key = &fx.members[0].ed;
+        fx.commit(fx.block(
+            10,
+            vec![revoke_v2(revocation(validator_key, &unpublished), None)],
+        ))
+        .expect("rejection of a never-published submission");
+        assert!(fx.store.status_leaf(&unpublished).expect("read").is_none());
+        assert!(fx.store.get_package(&unpublished).expect("read").is_none());
     }
 }

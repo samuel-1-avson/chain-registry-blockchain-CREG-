@@ -13,6 +13,7 @@ mod block_time;
 mod bridge;
 mod bridge_anchors;
 mod chain_store;
+mod committee_qc;
 mod config;
 mod consensus_admission;
 mod db_sync_proxy;

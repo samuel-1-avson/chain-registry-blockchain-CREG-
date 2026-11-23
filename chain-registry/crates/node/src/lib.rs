@@ -11,6 +11,7 @@ pub mod block_producer;
 pub mod block_time;
 pub mod bridge_anchors;
 pub mod chain_store;
+pub mod committee_qc;
 pub mod config;
 pub mod consensus_admission;
 pub mod equivocation_monitor;

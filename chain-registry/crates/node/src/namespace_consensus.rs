@@ -411,9 +411,14 @@ fn validate_revoke_v2(
     }
 
     // ADR-019 §3.2: the "any active validator" branch ends at hybrid
-    // activation; after it a validator-signed revocation must carry a
-    // committee certificate.
-    if config.vote_v4_active_at(block.header.height) && !has_quorum_certificate {
+    // activation for committed versions; after it a validator-signed
+    // revocation of one must carry a committee certificate. Rejecting a
+    // never-published submission changes no state and stays uncertified.
+    if config.vote_v4_active_at(block.header.height)
+        && !has_quorum_certificate
+        && (in_block_published.contains_key(&request.package_canonical)
+            || chain.get_package(&request.package_canonical)?.is_some())
+    {
         anyhow::bail!(
             "revocation signer is not the owner or a controller, and carries no committee quorum certificate"
         );

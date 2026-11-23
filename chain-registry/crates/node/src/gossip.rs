@@ -90,6 +90,13 @@ pub struct VoteGossip {
     // === HYBRID FIELDS ===
     #[serde(default)]
     pub is_mandatory: bool, // true if this voter was in the primary mandatory committee for the package
+
+    /// ADR-019 (part 2b): this member's signature over the committee
+    /// certificate for its own decision (`committee_qc::sign_vote_qc`).
+    /// Sent from hybrid activation on; omitted before it, so older peers
+    /// see the same wire form.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub committee_qc_signature: Option<common::QcSignatureV1>,
 }
 
 /// Message sent to peers when we write a new block.

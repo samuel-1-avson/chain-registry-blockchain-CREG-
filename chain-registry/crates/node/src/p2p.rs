@@ -443,6 +443,23 @@ async fn record_validated_vote_gossip(
         vote.consensus_subject.clone(),
         vote_gossip_to_signature(vote),
     );
+    // The certificate signature is self-authenticating and is checked when
+    // the certificate is assembled; here it only has to belong to the voter.
+    if let Some(signature) = vote
+        .committee_qc_signature
+        .as_ref()
+        .filter(|signature| signature.validator_id == vote.validator_id)
+    {
+        state.record_package_qc_signature(
+            &vote.consensus_subject,
+            crate::committee_qc::QcVoteSignature {
+                approved: vote.approved,
+                content_hash: vote.content_hash.clone(),
+                evidence_digest: vote.evidence_digest.clone(),
+                signature: signature.clone(),
+            },
+        );
+    }
 }
 
 fn report_validation_result(
@@ -2199,6 +2216,7 @@ mod tests {
             reject_reason: None,
             signature: hex::encode(signing_key.sign(message.as_bytes()).to_bytes()),
             is_mandatory: true,
+            committee_qc_signature: None,
         }
     }
 

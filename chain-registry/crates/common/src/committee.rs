@@ -185,15 +185,18 @@ pub struct CommitteeQuorumCertificateV1 {
     pub signatures: Vec<QcSignatureV1>,
 }
 
-/// Commitment to the members, seed and effective size of an analysis
-/// committee: `sha256("creg-committee-v1|" + members.join(",") + "|" + seed + "|" + effective_size)`.
+/// Commitment to the ordered members and seed of an analysis committee:
+/// `sha256("creg-committee-v2|" + members.join(",") + "|" + seed)`.
+///
+/// `effective_size` is deliberately excluded: the pipeline expands it while
+/// votes arrive, and a signature made before an expansion must stay valid.
+/// The signer set and the threshold still follow it ([`committee_signers`]).
 pub fn committee_digest(committee: &AnalysisCommittee) -> String {
     sha256_hex(
         format!(
-            "creg-committee-v1|{}|{}|{}",
+            "creg-committee-v2|{}|{}",
             committee.members.join(","),
             committee.seed.trim(),
-            committee.effective_size
         )
         .as_bytes(),
     )
@@ -589,6 +592,56 @@ mod tests {
         assert!(qc
             .count_valid_signers(REVOKE_QC_DOMAIN, &other, &authority, false)
             .is_err());
+    }
+
+    #[test]
+    fn signatures_survive_committee_expansion() {
+        // 6 ranked members, primary committee of 3: threshold 3 of 3.
+        let members: Vec<_> = (0..6)
+            .map(|i| member(&format!("v{i}"), 60 + i as u8, false))
+            .collect();
+        let ids: Vec<&str> = members.iter().map(|(v, _)| v.id.as_str()).collect();
+        let primary = AnalysisCommittee {
+            size: 3,
+            effective_size: 3,
+            ..committee(&ids)
+        };
+        let authority: Vec<Validator> = members.iter().map(|(v, _)| v.clone()).collect();
+        // Two primary members signed before the pipeline expanded the
+        // committee; two volunteers signed after.
+        let mut qc = signed_qc(&members, 2, &primary);
+        let expanded = AnalysisCommittee {
+            effective_size: 6,
+            ..primary.clone()
+        };
+        assert_eq!(committee_digest(&primary), committee_digest(&expanded));
+        for (validator, key) in members.iter().skip(3).take(2) {
+            qc.add_signature(qc.sign_member(&validator.id, key));
+        }
+        // Against the primary committee only its members count (2 < 3).
+        assert_eq!(
+            qc.count_valid_signers(REVOKE_QC_DOMAIN, &primary, &authority, false)
+                .unwrap(),
+            2
+        );
+        assert!(qc
+            .verify_quorum(REVOKE_QC_DOMAIN, &primary, &authority, false)
+            .is_err());
+        // Against the expanded committee all four count, and 4 < 2*6/3+1 = 5.
+        assert_eq!(
+            qc.count_valid_signers(REVOKE_QC_DOMAIN, &expanded, &authority, false)
+                .unwrap(),
+            4
+        );
+        assert!(qc
+            .verify_quorum(REVOKE_QC_DOMAIN, &expanded, &authority, false)
+            .is_err());
+        qc.add_signature(qc.sign_member(&members[2].0.id, &members[2].1));
+        assert_eq!(
+            qc.verify_quorum(REVOKE_QC_DOMAIN, &expanded, &authority, false)
+                .unwrap(),
+            5
+        );
     }
 
     #[test]

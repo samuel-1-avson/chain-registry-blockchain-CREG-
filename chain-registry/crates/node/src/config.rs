@@ -29,6 +29,46 @@ fn address_is_unset(raw: &str) -> bool {
     matches!(parse_staking_contract_address(raw), Ok(None))
 }
 
+/// The validator's signing keys: the Ed25519 key used before hybrid
+/// activation, and the hybrid Ed25519 + ML-DSA-44 key (`ADR-017`) when the
+/// ML-DSA-44 seed is configured.
+pub struct ValidatorSigningKeys {
+    pub ed25519: common::crypto::SigningKey,
+    pub hybrid: Option<common::crypto::SigningKey>,
+}
+
+impl ValidatorSigningKeys {
+    /// Key to sign with at `height`: hybrid from activation on.
+    pub fn for_height(
+        &self,
+        vote_v4_activation_height: Option<u64>,
+        height: u64,
+    ) -> Option<&common::crypto::SigningKey> {
+        if vote_v4_activation_height.is_some_and(|activation| height >= activation) {
+            self.hybrid.as_ref()
+        } else {
+            Some(&self.ed25519)
+        }
+    }
+}
+
+fn decode_seed(
+    secret: &chain_registry_secrets::SecretString,
+    name: &str,
+) -> Result<zeroize::Zeroizing<[u8; 32]>, String> {
+    let raw = secret.expose_secret().trim();
+    let raw = raw.strip_prefix("0x").unwrap_or(raw);
+    let bytes =
+        zeroize::Zeroizing::new(hex::decode(raw).map_err(|_| format!("{name} is not valid hex"))?);
+    let seed: [u8; 32] = bytes.as_slice().try_into().map_err(|_| {
+        format!(
+            "{name} must be 32 bytes (64 hex chars), got {} bytes",
+            bytes.len()
+        )
+    })?;
+    Ok(zeroize::Zeroizing::new(seed))
+}
+
 fn same_evm_address(left: &str, right: &str) -> bool {
     match (
         left.trim().parse::<Address>(),
@@ -239,6 +279,10 @@ pub struct NodeConfig {
     pub node_id: String,
     /// This node's Ed25519 private key (hex), zeroizing & redacted in `Debug` (`VNA-25`).
     pub validator_privkey: Option<chain_registry_secrets::SecretString>,
+    /// 32-byte ML-DSA-44 seed (hex) completing the hybrid validator key
+    /// (`ADR-017`, `CREG_VALIDATOR_PQ_KEY`). Required for a validator once
+    /// `hybrid_signature_activation_height` is scheduled.
+    pub validator_pq_seed: Option<chain_registry_secrets::SecretString>,
     /// Separate secp256k1 private key for Ethereum bridge operations, zeroizing & redacted (`VNA-25`).
     pub bridge_privkey: Option<chain_registry_secrets::SecretString>,
     /// Whether this node is a validator (votes on packages).
@@ -301,6 +345,7 @@ impl Default for NodeConfig {
             pinning_rewards_addr: None,
             node_id: String::new(),
             validator_privkey: None,
+            validator_pq_seed: None,
             bridge_privkey: None,
             is_validator: false,
             peers: Vec::new(),
@@ -384,6 +429,7 @@ impl NodeConfig {
             data_dir: PathBuf::from(env("CREG_DATA_DIR", "./data")),
             node_id: env("CREG_NODE_ID", &Uuid::new_v4().to_string()),
             validator_privkey: None,
+            validator_pq_seed: None,
             bridge_privkey: None,
             is_validator: common::parse_env_bool("CREG_IS_VALIDATOR"),
             peers: std::env::var("CREG_PEERS")
@@ -458,6 +504,16 @@ impl NodeConfig {
                         "failed to load validator key from secrets backend: {err}"
                     )),
                 }
+                match secrets
+                    .try_signing_key_secret(chain_registry_secrets::HotKeyRole::ValidatorMlDsa44)
+                    .await
+                {
+                    Ok(Some(seed)) => config.validator_pq_seed = Some(seed),
+                    Ok(None) => {}
+                    Err(err) => config.secrets_config_errors.push(format!(
+                        "failed to load validator ML-DSA-44 seed from secrets backend: {err}"
+                    )),
+                }
             }
             Err(err) => {
                 config
@@ -467,6 +523,28 @@ impl NodeConfig {
         }
 
         config
+    }
+
+    /// Ed25519 and (when the ML-DSA-44 seed is configured) hybrid validator
+    /// signing keys; `None` for a node without a validator key.
+    pub fn validator_signing_keys(&self) -> Result<Option<ValidatorSigningKeys>, String> {
+        let Some(ed_secret) = &self.validator_privkey else {
+            return Ok(None);
+        };
+        let ed_seed = decode_seed(ed_secret, "CREG_VALIDATOR_KEY")?;
+        let hybrid = self
+            .validator_pq_seed
+            .as_ref()
+            .map(|pq_secret| {
+                decode_seed(pq_secret, "CREG_VALIDATOR_PQ_KEY").map(|pq_seed| {
+                    common::crypto::SigningKey::hybrid_from_seeds(&ed_seed, &pq_seed)
+                })
+            })
+            .transpose()?;
+        Ok(Some(ValidatorSigningKeys {
+            ed25519: common::crypto::SigningKey::from_ed25519_seed(&ed_seed),
+            hybrid,
+        }))
     }
 
     /// Validate the configuration and return a list of human-readable errors.
@@ -545,6 +623,50 @@ impl NodeConfig {
                     bytes.len()
                 )),
                 Err(_) => errors.push("CREG_VALIDATOR_KEY is not valid hex".into()),
+            }
+        }
+
+        // ADR-017 hybrid key: a validator must hold its ML-DSA-44 seed once
+        // hybrid activation is scheduled, and it must match the registered
+        // ML-DSA-44 public key when this validator is in the set.
+        if let Some(seed) = &self.validator_pq_seed {
+            if let Err(error) = decode_seed(seed, "CREG_VALIDATOR_PQ_KEY") {
+                errors.push(error);
+            }
+        }
+        if self.is_validator && self.vote_v4_activation_height.is_some() {
+            match self.validator_signing_keys() {
+                Ok(Some(ValidatorSigningKeys {
+                    ed25519,
+                    hybrid: Some(hybrid),
+                })) => {
+                    let ed_pubkey = ed25519.public_key().to_hex();
+                    let registered = self
+                        .validator_set
+                        .validators
+                        .iter()
+                        .find(|validator| validator.pubkey.eq_ignore_ascii_case(&ed_pubkey));
+                    if let Some(validator) = registered {
+                        let derived = hybrid
+                            .public_key()
+                            .hybrid_parts()
+                            .map(|(_, pq)| hex::encode(pq));
+                        if validator.pq_pubkey.as_deref().map(str::to_ascii_lowercase)
+                            != derived
+                        {
+                            errors.push(
+                                "CREG_VALIDATOR_PQ_KEY does not derive the ML-DSA-44 public key registered for this validator"
+                                    .into(),
+                            );
+                        }
+                    }
+                }
+                Ok(Some(ValidatorSigningKeys { hybrid: None, .. })) => errors.push(
+                    "hybrid_signature_activation_height is scheduled but CREG_VALIDATOR_PQ_KEY is not set; a validator needs its ML-DSA-44 seed to sign after activation (ADR-017)"
+                        .into(),
+                ),
+                // A missing or malformed key is reported by the checks above.
+                Ok(None) | Err(_) => {}
             }
         }
 
@@ -1070,6 +1192,7 @@ mod tests {
             pinning_rewards_addr: None,
             node_id: "node-test".into(),
             validator_privkey: None,
+            validator_pq_seed: None,
             bridge_privkey: None,
             is_validator: false,
             peers: vec![],
@@ -1231,6 +1354,55 @@ mod tests {
             "expected missing key error, got: {:?}",
             errors
         );
+    }
+
+    #[test]
+    fn scheduled_hybrid_activation_requires_the_matching_ml_dsa_seed() {
+        let pq_error = |errors: &[String]| {
+            errors
+                .iter()
+                .any(|error| error.contains("CREG_VALIDATOR_PQ_KEY"))
+        };
+        let mut cfg = base_config();
+        cfg.is_validator = true;
+        cfg.validator_privkey = Some("11".repeat(32).into());
+        // Not scheduled: no ML-DSA seed is needed.
+        assert!(!pq_error(&cfg.validate()));
+
+        cfg.vote_v4_activation_height = Some(100);
+        assert!(pq_error(&cfg.validate()), "seed required once scheduled");
+
+        cfg.validator_pq_seed = Some("22".repeat(31).into());
+        assert!(pq_error(&cfg.validate()), "seed must be 32 bytes");
+
+        cfg.validator_pq_seed = Some("22".repeat(32).into());
+        let keys = cfg
+            .validator_signing_keys()
+            .expect("valid keys")
+            .expect("validator keys");
+        let hybrid = keys.hybrid.as_ref().expect("hybrid key");
+        let (_, pq) = hybrid.public_key().hybrid_parts().expect("hybrid parts");
+        let registered = |pq_pubkey: String| common::Validator {
+            id: "node-test".into(),
+            pubkey: keys.ed25519.public_key().to_hex(),
+            pq_pubkey: Some(pq_pubkey),
+            status: "active".into(),
+            ..common::Validator::default()
+        };
+        cfg.validator_set = common::ValidatorSet::new(vec![registered(hex::encode(&pq))]);
+        assert!(!pq_error(&cfg.validate()), "matching registration");
+        cfg.validator_set = common::ValidatorSet::new(vec![registered("ab".repeat(1312))]);
+        assert!(pq_error(&cfg.validate()), "mismatched registration");
+
+        // The hybrid key signs exactly from activation.
+        assert!(std::ptr::eq(
+            keys.for_height(Some(100), 99).expect("ed25519"),
+            &keys.ed25519
+        ));
+        assert!(std::ptr::eq(
+            keys.for_height(Some(100), 100).expect("hybrid"),
+            hybrid
+        ));
     }
 
     #[test]

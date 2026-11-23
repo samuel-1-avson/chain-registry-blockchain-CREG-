@@ -480,10 +480,57 @@ async fn process_package(
         }
     };
 
+    // ADR-019 part 2b: from hybrid activation, also sign the committee
+    // certificate for our own decision with the hybrid key and gossip it.
+    let approved_vote = matches!(vote, ValidatorVote::Approve);
+    let committee_qc_signature = {
+        let s = state.read().await;
+        let next_height = s.chain.tip_height().unwrap_or(0).saturating_add(1);
+        let hybrid_active = s
+            .config
+            .vote_v4_activation_height
+            .is_some_and(|activation| next_height >= activation);
+        if hybrid_active && should_analyze {
+            match s.config.validator_signing_keys() {
+                Ok(Some(crate::config::ValidatorSigningKeys {
+                    hybrid: Some(key), ..
+                })) => Some(crate::committee_qc::sign_vote_qc(
+                    &committee,
+                    &canonical,
+                    &req.content_hash,
+                    &evidence_digest,
+                    approved_vote,
+                    &node_id,
+                    &key,
+                )),
+                _ => {
+                    tracing::warn!(
+                        canonical = %canonical,
+                        "No hybrid validator key; voting without a committee certificate signature"
+                    );
+                    None
+                }
+            }
+        } else {
+            None
+        }
+    };
+
     // Store our own vote locally
     {
         let mut sw = state.write().await;
         sw.record_package_vote(canonical.clone(), our_sig.clone());
+        if let Some(signature) = committee_qc_signature.clone() {
+            sw.record_package_qc_signature(
+                &canonical,
+                crate::committee_qc::QcVoteSignature {
+                    approved: approved_vote,
+                    content_hash: req.content_hash.clone(),
+                    evidence_digest: evidence_digest.clone(),
+                    signature,
+                },
+            );
+        }
     }
 
     // Gossip our vote to peers via P2P Gossipsub
@@ -512,6 +559,7 @@ async fn process_package(
             reject_reason,
             signature: gossip_sig,
             is_mandatory: our_sig.is_mandatory,
+            committee_qc_signature: committee_qc_signature.clone(),
         };
 
         let gossip_bytes = match serde_json::to_vec(&gossip_vote) {
@@ -693,6 +741,33 @@ async fn process_package(
                 analysis_mandatory_contributed: mandatory_contributed,
                 analysis_committee: Some(committee_for_record),
             };
+            // ADR-019 part 2b: from hybrid activation, attach the approval
+            // certificate assembled from gossiped member signatures when it
+            // already passes the check block validation applies (same
+            // committee resolution, signer rule and verifier). It is optional
+            // for approvals, so a short certificate is left out rather than
+            // delaying the publication.
+            let committee_qc = {
+                let s = state.read().await;
+                let height = s.chain.tip_height().unwrap_or(0).saturating_add(1);
+                crate::committee_qc::approval_qc_for_record(
+                    &record,
+                    s.package_round(&canonical)
+                        .into_iter()
+                        .flat_map(|round| round.qc_signatures()),
+                    s.chain.data_dir(),
+                    &s.validator_set_bootstrap,
+                    s.config.vote_v4_activation_height,
+                    height,
+                )
+                .unwrap_or_else(|error| {
+                    tracing::warn!(
+                        canonical = %canonical,
+                        "Publishing without an approval certificate: {error:#}"
+                    );
+                    None
+                })
+            };
             // This path runs before canonical block finality. Reward sends are
             // held until a durable, governance-authorized dispatcher can bind
             // them to the finalized record and recover their receipts.
@@ -720,7 +795,7 @@ async fn process_package(
                 Transaction::PublishAuthorizedV1 {
                     record,
                     authorization,
-                    committee_qc: None,
+                    committee_qc,
                 }
             } else {
                 Transaction::Publish(record)

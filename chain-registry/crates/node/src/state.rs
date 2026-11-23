@@ -4,7 +4,7 @@
 // include it, enabling integration tests to construct and inspect the state.
 
 use std::{
-    collections::HashMap,
+    collections::{BTreeMap, HashMap},
     sync::Arc,
     time::{Duration, Instant},
 };
@@ -132,6 +132,9 @@ pub struct PackageRound {
     pub first_vote_at: DateTime<Utc>,
     pub last_vote_at: DateTime<Utc>,
     signatures: Vec<common::ValidatorSignature>,
+    /// Committee certificate signatures gossiped with votes (ADR-019 2b),
+    /// one per validator id (the latest wins).
+    qc_signatures: BTreeMap<String, crate::committee_qc::QcVoteSignature>,
 }
 
 impl PackageRound {
@@ -141,9 +144,19 @@ impl PackageRound {
             first_vote_at: Utc::now(),
             last_vote_at: Utc::now(),
             signatures: vec![vote],
+            qc_signatures: BTreeMap::new(),
         };
         round.refresh_timestamps();
         round
+    }
+
+    pub fn record_qc_signature(&mut self, entry: crate::committee_qc::QcVoteSignature) {
+        self.qc_signatures
+            .insert(entry.signature.validator_id.clone(), entry);
+    }
+
+    pub fn qc_signatures(&self) -> impl Iterator<Item = &crate::committee_qc::QcVoteSignature> {
+        self.qc_signatures.values()
     }
 
     pub fn record_vote(&mut self, vote: common::ValidatorSignature) {
@@ -424,6 +437,20 @@ impl NodeState {
 
     pub fn package_round(&self, subject: &str) -> Option<&PackageRound> {
         self.package_rounds.get(subject)
+    }
+
+    /// Attach a gossiped committee certificate signature to the round its
+    /// vote opened (`record_package_vote` runs first). Signatures for rounds
+    /// this node does not track are dropped, which keeps memory bounded by
+    /// `MAX_PACKAGE_ROUNDS`.
+    pub fn record_package_qc_signature(
+        &mut self,
+        subject: &str,
+        entry: crate::committee_qc::QcVoteSignature,
+    ) {
+        if let Some(round) = self.package_rounds.get_mut(subject) {
+            round.record_qc_signature(entry);
+        }
     }
 
     pub fn clear_package_round(&mut self, subject: &str) {
