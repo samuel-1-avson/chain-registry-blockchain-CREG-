@@ -29,6 +29,6 @@
     "vite-plugin-pwa": "^1.2.0",
     "workbox-window": "^7.4.0",
     "@playwright/test": "^1.49.0",
-    "@lhci/cli": "^0.14.0"
+    "@lhci/cli": "^0.16.1"
   }
 }
