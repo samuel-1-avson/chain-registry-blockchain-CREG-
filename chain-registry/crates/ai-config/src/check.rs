@@ -1,6 +1,6 @@
 //! Offline static diagnostics for `ValidatorAiConfig` (`creg ai check`, ADR-019 §4.3).
 
-use crate::secret::{check_secret_file_non_empty, parse_secret_ref, SecretRefKind};
+use crate::key_ref::{check_secret_file_non_empty, parse_secret_ref, SecretRefKind};
 use crate::{validate_and_classify_provider_url, AgentMode, EndpointClass, ValidatorAiConfig};
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeSet;

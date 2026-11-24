@@ -3,7 +3,8 @@
 //! and offline configuration diagnostics (`ADR-019` `ECA-16`, §4.3).
 
 pub mod check;
-pub mod secret;
+pub mod key_ref;
+pub use key_ref as secret;
 
 use anyhow::{bail, Context, Result};
 use serde::{Deserialize, Serialize};
@@ -15,7 +16,7 @@ use std::path::Path;
 pub use check::{
     check_ai_config, AiConfigCheckReportV1, AiProviderCheckV1, RECOMMENDED_MIN_MODEL_FAMILIES,
 };
-pub use secret::{
+pub use key_ref::{
     check_secret_file, check_secret_file_non_empty, parse_secret_ref, read_secret_file_zeroized,
     validate_secret_file_path, SecretRefKind, MAX_SECRET_FILE_BYTES,
 };
