@@ -3,6 +3,7 @@
 #![deny(clippy::unwrap_used)]
 #![cfg_attr(test, allow(clippy::unwrap_used, clippy::expect_used))]
 
+mod ai_ops;
 mod audit;
 mod auth;
 mod batch;
@@ -37,6 +38,7 @@ mod stake;
 mod supply_chain;
 mod testnet;
 mod update;
+mod validator_ops;
 mod verify;
 mod watch;
 mod witness;
@@ -475,7 +477,7 @@ enum Commands {
         command: ObserverCommands,
     },
 
-    /// Authenticate your Ethereum wallet (MetaMask) and derive CREG consensus identity.
+    /// Authenticate your Ethereum wallet (MetaMask) and bind a locally generated CREG publisher key.
     Login {
         /// File holding the Ethereum private key (hex) for headless/CI login
         /// without a browser. Must not be group/world-readable on Unix.
@@ -495,6 +497,11 @@ enum Commands {
         #[arg(long)]
         token: Option<String>,
 
+        /// Local owner-only Ed25519 publisher key file (for `--token` verification
+        /// or custom key output path; defaults to ~/.creg/publisher.key).
+        #[arg(long, value_name = "PATH")]
+        publisher_key_file: Option<std::path::PathBuf>,
+
         /// Local callback port for browser OAuth loopback (defaults to 18888).
         #[arg(long, default_value_t = 18888)]
         port: u16,
@@ -512,6 +519,18 @@ enum Commands {
         #[command(subcommand)]
         command: Option<ProfileCommands>,
     },
+
+    /// Inspect and probe validator AI provider configurations.
+    Ai {
+        #[command(subcommand)]
+        command: AiCommands,
+    },
+
+    /// Validator operator diagnostics across the four runtime zones.
+    Validator {
+        #[command(subcommand)]
+        command: ValidatorCommands,
+    },
 }
 
 #[derive(Subcommand, Debug, Clone)]
@@ -520,6 +539,56 @@ enum ProfileCommands {
     Show,
     /// Clear the active authenticated profile.
     Clear,
+}
+
+#[derive(Subcommand, Debug, Clone)]
+enum AiCommands {
+    /// Offline static validation of validator-ai.toml (schema, SSRF URLs, secret refs, diversity).
+    Check {
+        /// Path to validator-ai.toml (defaults to CREG_AI_CONFIG or env fallback).
+        #[arg(long, value_name = "PATH")]
+        config: Option<std::path::PathBuf>,
+
+        /// Emit machine-readable AiConfigCheckReportV1 JSON.
+        #[arg(long)]
+        json: bool,
+    },
+    /// Live delegated canary probe routed to creg-agent-runner over operator IPC.
+    Probe {
+        /// Specific provider name from validator-ai.toml (probes all active providers if omitted).
+        #[arg(long, value_name = "NAME")]
+        provider: Option<String>,
+
+        /// Path to owner-only operator IPC key bundle (defaults to CREG_OPERATOR_IPC_KEY_FILE).
+        #[arg(long, value_name = "PATH")]
+        operator_key_file: Option<std::path::PathBuf>,
+
+        /// Emit machine-readable ProviderProbeReportV1 JSON.
+        #[arg(long)]
+        json: bool,
+    },
+}
+
+#[derive(Subcommand, Debug, Clone)]
+enum ValidatorCommands {
+    /// Probe Gateway, Consensus, Sandbox, and AgentRunner zones via ZoneRequest::Capabilities.
+    Doctor {
+        /// Show detailed per-zone capability summaries.
+        #[arg(long)]
+        zones: bool,
+
+        /// Path to owner-only operator IPC key bundle (defaults to CREG_OPERATOR_IPC_KEY_FILE).
+        #[arg(long, value_name = "PATH")]
+        operator_key_file: Option<std::path::PathBuf>,
+
+        /// Path to validator-ai.toml (defaults to CREG_AI_CONFIG or env fallback).
+        #[arg(long, value_name = "PATH")]
+        config: Option<std::path::PathBuf>,
+
+        /// Emit machine-readable ValidatorDoctorReportV1 JSON.
+        #[arg(long)]
+        json: bool,
+    },
 }
 
 #[derive(Subcommand)]
@@ -1051,6 +1120,7 @@ async fn run(cli: Cli) -> Result<()> {
             private_key_ref,
             private_key,
             token,
+            publisher_key_file,
             port,
             no_browser,
         } => {
@@ -1063,33 +1133,47 @@ async fn run(cli: Cli) -> Result<()> {
                 replacement: "--private-key-file <path> or --private-key-ref env:VAR|file:PATH",
             })?;
 
-            let identity = if let Some(ref tok) = token {
-                println!("  Verifying authorization token...");
-                auth::derive_from_token(
+            let (identity, target_key_path) = if let Some(ref tok) = token {
+                let key_path = publisher_key_file
+                    .clone()
+                    .unwrap_or_else(profile::default_publisher_key_path);
+                let local_key = auth::load_local_publisher_key(&key_path)?;
+                println!("  Verifying publisher key binding token...");
+                let identity = auth::verify_binding_token(
                     tok,
+                    &local_key,
+                    None,
                     auth::DEFAULT_CHAIN_ID,
                     auth::DEFAULT_VERIFYING_CONTRACT,
-                )?
+                )?;
+                (identity, Some(key_path))
             } else if let Some(ref pk) = private_key {
-                println!("  Deriving CREG identity from provided Ethereum private key...");
-                auth::derive_from_private_key(
+                println!(
+                    "  Generating local Ed25519 publisher key and binding to Ethereum wallet..."
+                );
+                let identity = auth::bind_with_private_key(
                     pk,
                     auth::DEFAULT_CHAIN_ID,
                     auth::DEFAULT_VERIFYING_CONTRACT,
-                )?
+                )?;
+                (identity, publisher_key_file)
             } else {
-                auth::start_loopback_auth(
+                let identity = auth::start_loopback_auth(
                     port,
                     no_browser,
                     auth::DEFAULT_CHAIN_ID,
                     auth::DEFAULT_VERIFYING_CONTRACT,
                 )
-                .await?
+                .await?;
+                (identity, publisher_key_file)
             };
 
-            let prof = profile::save_identity(&identity, &node_url)?;
+            let prof = profile::save_identity_to(&identity, &node_url, target_key_path.as_deref())?;
             println!();
-            println!("  {} Authentication successful!", "✓".green().bold());
+            println!(
+                "  {} Authentication & key binding successful!",
+                "✓".green().bold()
+            );
             profile::print_profile(&prof);
             println!("  You can now publish packages without any key flags:");
             println!("    {}", "creg publish <tarball.tgz>".cyan());
@@ -1127,6 +1211,45 @@ async fn run(cli: Cli) -> Result<()> {
                 }
             }
         },
+        Commands::Ai { command } => {
+            let global_json = matches!(cli.output, OutputFormat::Json);
+            match command {
+                AiCommands::Check { config, json } => {
+                    ai_ops::run_check(config.as_deref(), json || global_json)?;
+                }
+                AiCommands::Probe {
+                    provider,
+                    operator_key_file,
+                    json,
+                } => {
+                    ai_ops::run_probe(
+                        operator_key_file.as_deref(),
+                        provider.as_deref(),
+                        json || global_json,
+                    )
+                    .await?;
+                }
+            }
+        }
+        Commands::Validator { command } => {
+            let global_json = matches!(cli.output, OutputFormat::Json);
+            match command {
+                ValidatorCommands::Doctor {
+                    zones,
+                    operator_key_file,
+                    config,
+                    json,
+                } => {
+                    validator_ops::run_doctor(
+                        operator_key_file.as_deref(),
+                        config.as_deref(),
+                        zones,
+                        json || global_json,
+                    )
+                    .await?;
+                }
+            }
+        }
         Commands::Recovery { action } => match action {
             RecoveryAction::Split {
                 key,
@@ -1565,4 +1688,85 @@ async fn run(cli: Cli) -> Result<()> {
         },
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn cli_parses_operator_diagnostics_and_login_binding_flags() {
+        let ai_check = Cli::try_parse_from([
+            "creg",
+            "ai",
+            "check",
+            "--config",
+            "/tmp/validator-ai.toml",
+            "--json",
+        ])
+        .unwrap();
+        assert!(matches!(
+            ai_check.command,
+            Commands::Ai {
+                command: AiCommands::Check { json: true, .. }
+            }
+        ));
+
+        let ai_probe = Cli::try_parse_from([
+            "creg",
+            "ai",
+            "probe",
+            "--provider",
+            "fast",
+            "--operator-key-file",
+            "/tmp/operator-ipc-keys.json",
+            "--json",
+        ])
+        .unwrap();
+        assert!(matches!(
+            ai_probe.command,
+            Commands::Ai {
+                command: AiCommands::Probe { json: true, .. }
+            }
+        ));
+
+        let doc = Cli::try_parse_from([
+            "creg",
+            "validator",
+            "doctor",
+            "--zones",
+            "--operator-key-file",
+            "/tmp/operator-ipc-keys.json",
+            "--json",
+        ])
+        .unwrap();
+        assert!(matches!(
+            doc.command,
+            Commands::Validator {
+                command: ValidatorCommands::Doctor {
+                    zones: true,
+                    json: true,
+                    ..
+                }
+            }
+        ));
+
+        let login = Cli::try_parse_from([
+            "creg",
+            "login",
+            "--token",
+            "e30=",
+            "--publisher-key-file",
+            "/tmp/publisher.key",
+        ])
+        .unwrap();
+        assert!(matches!(
+            login.command,
+            Commands::Login {
+                token: Some(_),
+                publisher_key_file: Some(_),
+                ..
+            }
+        ));
+    }
 }

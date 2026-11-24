@@ -202,7 +202,9 @@ async fn configure_publisher_identity() -> Result<()> {
         .interact()?;
 
     if choice == 0 {
-        println!("\n  Connecting via Web3 Loopback Bridge (Port 18888)...");
+        println!(
+            "\n  Connecting via Web3 Loopback Bridge (Port 18888) to bind a local publisher key..."
+        );
         let node_url = std::env::var("CREG_NODE_URL")
             .unwrap_or_else(|_| "https://api.testnet.cregnet.dev".into());
 
@@ -216,7 +218,10 @@ async fn configure_publisher_identity() -> Result<()> {
         {
             Ok(identity) => {
                 let prof = crate::profile::save_identity(&identity, &node_url)?;
-                println!("\n  {} Web3 Authentication Successful!", "✓".green().bold());
+                println!(
+                    "\n  {} Publisher Key Bound & Authenticated!",
+                    "✓".green().bold()
+                );
                 crate::profile::print_profile(&prof);
             }
             Err(err) => {

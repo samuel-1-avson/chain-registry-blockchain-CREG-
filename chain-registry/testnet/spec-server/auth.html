@@ -442,8 +442,8 @@
 
     <div class="card" id="mainCard">
       <div class="card-header">
-        <h1 class="card-title">Link CREG Identity</h1>
-        <p class="card-desc">Authorize your Ethereum wallet to derive your CREG consensus Ed25519 identity key.</p>
+        <h1 class="card-title">Bind CREG Publisher Key</h1>
+        <p class="card-desc">Sign an attestation with your Ethereum wallet to bind your locally generated Ed25519 publisher key.</p>
       </div>
 
       <div class="info-box">
@@ -454,6 +454,10 @@
         <div class="info-row">
           <span class="info-label">Domain</span>
           <span class="info-value">ChainRegistry v1</span>
+        </div>
+        <div class="info-row">
+          <span class="info-label">Publisher Pubkey</span>
+          <span class="info-value" id="pubkeyDisplay">Missing (?pubkey=...)</span>
         </div>
         <div class="info-row">
           <span class="info-label">CLI Loopback</span>
@@ -472,7 +476,7 @@
             <rect x="3" y="11" width="18" height="11" rx="2" ry="2"></rect>
             <path d="M7 11V7a5 5 0 0 1 10 0v4"></path>
           </svg>
-          Authorize With Selected Wallet
+          Bind Publisher Key With Selected Wallet
         </button>
       </div>
 
@@ -504,21 +508,41 @@
     </div>
 
     <div class="footer">
-      <p>Chain Registry (CREG) • Cryptographically Secured via EIP-712 + HKDF-SHA512</p>
+      <p>Chain Registry (CREG) • Cryptographically Secured via EIP-712 Publisher Key Binding</p>
     </div>
   </div>
 
   <script>
     const urlParams = new URLSearchParams(window.location.search);
     const port = urlParams.get('port') || '18888';
-    const state = urlParams.get('state') || '';
+    const state = (urlParams.get('state') || '').trim();
     const chainId = parseInt(urlParams.get('chainId') || '11155111', 10);
     const contractAddress = urlParams.get('contract') || '0x30604Aa6f763fbde6aDCffbd8960af3031037331';
+    const publisherPubkeyRaw = (urlParams.get('pubkey') || '').trim();
+    const publisherPubkey = publisherPubkeyRaw.replace(/^0x/i, '').toLowerCase();
+    const isValidPubkey = /^[0-9a-f]{64}$/.test(publisherPubkey);
+    const hasValidBindingParams = isValidPubkey && state.length > 0;
 
     let discoveredWallets = new Map();
     let selectedProvider = null;
     let isLoopbackOnline = false;
     let generatedTokenString = '';
+
+    (function initBindingDisplay() {
+      const pubkeyEl = document.getElementById('pubkeyDisplay');
+      if (isValidPubkey) {
+        pubkeyEl.textContent = `${publisherPubkey.slice(0, 10)}...${publisherPubkey.slice(-8)}`;
+        pubkeyEl.title = publisherPubkey;
+      } else {
+        pubkeyEl.textContent = 'Invalid / Missing';
+        pubkeyEl.style.color = 'var(--error)';
+        showError('Missing or invalid publisher public key (?pubkey=...). Re-run "creg login" from your terminal.');
+        return;
+      }
+      if (!state) {
+        showError('Missing binding challenge nonce (?state=...). Re-run "creg login" from your terminal.');
+      }
+    })();
 
     // Check local CLI loopback health
     async function checkLoopbackHealth() {
@@ -610,12 +634,12 @@
       }
 
       const connectBtn = document.getElementById('connectBtn');
-      connectBtn.disabled = false;
+      connectBtn.disabled = !hasValidBindingParams;
       connectBtn.innerHTML = `
         <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
           <rect x="3" y="11" width="18" height="11" rx="2" ry="2"></rect><path d="M7 11V7a5 5 0 0 1 10 0v4"></path>
         </svg>
-        Authorize with ${item.name}
+        Bind Publisher Key With ${item.name}
       `;
     }
 
@@ -687,6 +711,11 @@
     }
 
     async function handleAuthorizeSelected() {
+      if (!hasValidBindingParams) {
+        showError('Missing or invalid local Ed25519 publisher pubkey (?pubkey=...) or challenge nonce (?state=...). Re-run "creg login" from your terminal.');
+        return;
+      }
+
       const provider = selectedProvider || window.ethereum;
       if (!provider) {
         showError('No Web3 wallet extension found. Please install MetaMask or Rabby.');
@@ -703,7 +732,7 @@
         }
         const account = accounts[0];
 
-        setStatus('Awaiting Signature...', `Sign the typed authorization message in your wallet for ${account.slice(0, 6)}...${account.slice(-4)}.`);
+        setStatus('Awaiting Signature...', `Sign the key-binding attestation in your wallet for ${account.slice(0, 6)}...${account.slice(-4)}.`);
 
         const domain = {
           name: "ChainRegistry",
@@ -719,23 +748,25 @@
             { name: "chainId", type: "uint256" },
             { name: "verifyingContract", type: "address" }
           ],
-          DeriveIdentity: [
+          BindPublisherKey: [
             { name: "action", type: "string" },
             { name: "wallet", type: "address" },
-            { name: "salt", type: "string" }
+            { name: "publisherPubkey", type: "string" },
+            { name: "nonce", type: "string" }
           ]
         };
 
         const message = {
-          action: "Derive CREG Consensus Key",
+          action: "Bind CREG Publisher Key",
           wallet: account,
-          salt: "CREG_IDENTITY_V1"
+          publisherPubkey: publisherPubkey,
+          nonce: state
         };
 
         const msgParams = JSON.stringify({
           types,
           domain,
-          primaryType: "DeriveIdentity",
+          primaryType: "BindPublisherKey",
           message
         });
 
@@ -744,16 +775,18 @@
           params: [account, msgParams]
         });
 
-        // Construct Auth Token
+        // Construct Publisher Key Binding Token
         const tokenObj = {
           wallet: account,
           signature: signature,
-          state: state
+          state: state,
+          nonce: state,
+          publisher_pubkey: publisherPubkey
         };
         generatedTokenString = btoa(JSON.stringify(tokenObj));
-        const fullCmd = `creg login --token "${generatedTokenString}"`;
+        const fullCmd = `creg login --token "${generatedTokenString}" --publisher-key-file ~/.creg/publisher.key`;
 
-        setStatus('Finalizing Authentication...', 'Connecting to your local terminal session...');
+        setStatus('Finalizing Key Binding...', 'Connecting to your local terminal session...');
 
         // Attempt transmission to loopback server
         let transmitted = false;
@@ -780,15 +813,15 @@
 
         if (transmitted) {
           setStatus(
-            'Identity Linked Successfully!',
-            'Your consensus identity is derived and saved. You can close this browser tab and return to your terminal.',
+            'Publisher Key Bound Successfully!',
+            'Your locally generated Ed25519 publisher key is bound and saved. You can close this browser tab and return to your terminal.',
             true
           );
         } else {
           // Manual token fallback display
           setStatus(
-            'Signature Verified!',
-            'Your signature was created successfully. CLI loopback was not reachable, so you can activate your session using the token below:',
+            'Binding Signature Created!',
+            'Your signature was created successfully. CLI loopback was not reachable, so you can complete binding using the token below:',
             true
           );
           document.getElementById('tokenCmdText').textContent = fullCmd;

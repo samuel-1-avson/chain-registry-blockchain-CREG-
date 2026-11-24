@@ -1,8 +1,8 @@
 // crates/cli/src/profile.rs
 // Profile and credential management for CREG Dual-Key Architecture.
-// Stores authenticated wallet, derived consensus keys, and network preferences.
+// Stores authenticated wallet, locally generated wallet-bound publisher keys, and network preferences.
 
-use crate::auth::DerivedIdentity;
+use crate::auth::BoundIdentity;
 use anyhow::{Context, Result};
 use colored::Colorize;
 use serde::{Deserialize, Serialize};
@@ -15,6 +15,10 @@ pub struct Profile {
     pub key_path: PathBuf,
     pub network_url: String,
     pub created_at: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub binding_signature: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub binding_nonce: Option<String>,
 }
 
 pub fn creg_dir() -> PathBuf {
@@ -54,12 +58,26 @@ pub fn save_profile(profile: &Profile) -> Result<()> {
     Ok(())
 }
 
-pub fn save_identity(identity: &DerivedIdentity, network_url: &str) -> Result<Profile> {
+pub fn save_identity(identity: &BoundIdentity, network_url: &str) -> Result<Profile> {
+    save_identity_to(identity, network_url, None)
+}
+
+pub fn save_identity_to(
+    identity: &BoundIdentity,
+    network_url: &str,
+    target_key_path: Option<&Path>,
+) -> Result<Profile> {
     let dir = creg_dir();
     std::fs::create_dir_all(&dir)
         .with_context(|| format!("Failed to create directory {}", dir.display()))?;
 
-    let key_path = default_publisher_key_path();
+    let key_path = target_key_path
+        .map(PathBuf::from)
+        .unwrap_or_else(default_publisher_key_path);
+    if let Some(parent) = key_path.parent().filter(|p| !p.as_os_str().is_empty()) {
+        std::fs::create_dir_all(parent)
+            .with_context(|| format!("Failed to create key directory {}", parent.display()))?;
+    }
     std::fs::write(&key_path, identity.ed25519_privkey_hex.trim())
         .with_context(|| format!("Failed to write key to {}", key_path.display()))?;
 
@@ -77,6 +95,8 @@ pub fn save_identity(identity: &DerivedIdentity, network_url: &str) -> Result<Pr
         key_path,
         network_url: network_url.to_string(),
         created_at: chrono::Utc::now().to_rfc3339(),
+        binding_signature: Some(identity.binding_signature.clone()),
+        binding_nonce: Some(identity.binding_nonce.clone()),
     };
 
     save_profile(&profile)?;
@@ -131,6 +151,9 @@ pub fn print_profile(profile: &Profile) {
         "Network RPC URL:".bold(),
         profile.network_url
     );
+    if let Some(nonce) = profile.binding_nonce.as_deref() {
+        println!("  {:<22} {}", "Binding Nonce:".bold(), nonce.dimmed());
+    }
     println!(
         "  {:<22} {}",
         "Authenticated At:".bold(),
@@ -215,11 +238,28 @@ mod tests {
             key_path: PathBuf::from("/tmp/test.key"),
             network_url: "https://api.testnet.cregnet.dev".to_string(),
             created_at: "2026-09-19T00:00:00Z".to_string(),
+            binding_signature: Some("0x11".to_string()),
+            binding_nonce: Some("nonce-123".to_string()),
         };
 
         let json = serde_json::to_string(&profile).unwrap();
         let deserialized: Profile = serde_json::from_str(&json).unwrap();
         assert_eq!(deserialized.wallet_address, profile.wallet_address);
         assert_eq!(deserialized.ed25519_pubkey, profile.ed25519_pubkey);
+        assert_eq!(deserialized.binding_signature.as_deref(), Some("0x11"));
+        assert_eq!(deserialized.binding_nonce.as_deref(), Some("nonce-123"));
+
+        // Legacy profiles saved prior to ECA-20 must still deserialize cleanly.
+        let legacy_json = serde_json::json!({
+            "wallet_address": "0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266",
+            "ed25519_pubkey": "abcd1234abcd1234abcd1234abcd1234abcd1234abcd1234abcd1234abcd1234",
+            "key_path": "/tmp/legacy.key",
+            "network_url": "https://api.testnet.cregnet.dev",
+            "created_at": "2026-09-19T00:00:00Z"
+        })
+        .to_string();
+        let legacy: Profile = serde_json::from_str(&legacy_json).unwrap();
+        assert!(legacy.binding_signature.is_none());
+        assert!(legacy.binding_nonce.is_none());
     }
 }

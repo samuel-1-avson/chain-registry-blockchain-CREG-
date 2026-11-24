@@ -1148,3 +1148,29 @@ No consensus wire type, signed message, block or header format changed; the froz
 | `cargo test --locked -p creg-dev --no-fail-fast` | 5/5 passed (4 moved + 1 new CLI parser test) |
 | `cargo test --locked -p common --test consensus_golden_vectors --no-fail-fast` (frozen) | 10/10 |
 | `cargo test --locked -p consensus --test signed_message_formats --no-fail-fast` (frozen) | 6/6 |
+
+### Increment 4, part 5c — Operator diagnostics (`creg ai check|probe`, `creg validator doctor`) and `creg login` key-binding redesign (`ECA-20`) (implemented 2026-11-24)
+
+No consensus wire type, signed message, block or header format changed; `Cargo.lock` and the frozen test files are untouched.
+
+| Area | What shipped | Where |
+| --- | --- | --- |
+| `creg ai check` & `creg ai probe` (`§4.3`) | Added `crates/cli/src/ai_ops.rs` implementing static offline validation (`check_config_report` / `run_check`) over `ai_config::check_ai_config` (schema, routing, budgets, SSRF classification, owner-only `file:` / `env:` / `vault:` secret-ref presence without leaking secret values, and single-family diversity advisory) and delegated live probing (`probe_providers_report` / `run_probe`) sending `ZoneRequest::ProbeProvider` to `ZoneId::AgentRunner` over `OperatorIpcKeyBundleV1` (API keys never leave Zone 4), with 3 unit/async loopback IPC tests. | `crates/cli/src/{ai_ops,main}.rs` |
+| `creg validator doctor` (`§4.3`, `ECA-04`) | Added `crates/cli/src/validator_ops.rs` probing all four validator zones in fixed order (`gateway`, `consensus`, `sandbox`, `agent_runner`) with `ZoneRequest::Capabilities {}` over `ZoneId::Operator` links (`5s` per-zone timeout), continuing cleanly past unreachable zones, validating response zone/capability variants, optionally checking `validator-ai.toml`, and emitting `ValidatorDoctorReportV1` JSON (`schema_version: 1`) for `--zones` / `--json`, with schema-snapshot and partial-failure async tests. | `crates/cli/src/{validator_ops,main}.rs` |
+| `creg login` `ECA-20` key binding & bridge (`§4.2`, `ECA-20`) | Replaced deterministic HKDF-from-signature Ed25519 key derivation (`DeriveIdentity`) in `crates/cli/src/auth.rs` with local `OsRng` Ed25519 key generation (`generate_local_publisher_key`, `load_local_publisher_key`) bound by an EIP-712 `BindPublisherKey(string action,address wallet,string publisherPubkey,string nonce)` wallet signature (`bind_with_private_key`, `verify_binding_token`). Added `--publisher-key-file` to `Commands::Login`, updated `Profile` (`save_identity_to`, optional `binding_signature`/`binding_nonce` keeping legacy profiles readable), updated `wizard.rs` messaging, restricted loopback HTTP `OPTIONS`/`GET`/`POST` CORS in `accept_auth_loop` to exact canonical bridge origin matching (`extract_origin`, `is_origin_allowed`, HTTP `403` without CORS headers on mismatch), and updated `auth.html` (`?pubkey=` validation/display, `BindPublisherKey` signing, `publisher_pubkey` token payload). | `crates/cli/src/{auth,profile,wizard,main}.rs`, `testnet/spec-server/auth.html` |
+
+**`ECO-INV-06` dependency check (`cargo tree --locked -p chain-registry-cli -e normal`):** zero matches for `validator`, `ml-validator`, `wasm-sandbox`, `wasmtime`, `yara-x`, `ark-*`, `ethers`, `sled`, `libp2p`, `rocksdb`, or `pgp`.
+
+**Verification (local, 2026-11-24, rustc 1.98.1, `CARGO_BUILD_JOBS=2`, `CARGO_INCREMENTAL=0`, `CARGO_PROFILE_DEV_DEBUG=0`).** All 9 gates in `stage5c-gates.bat` exited `0`:
+- `cargo fmt --all -- --check`
+- `cargo clippy --locked --workspace --all-targets -- -D warnings`
+- `cargo clippy --locked -p chain-registry-node --features phase-c-real-fleet --all-targets -- -D warnings`
+- `cargo deny --workspace check advisories bans sources`: `advisories ok, bans ok, sources ok`
+- `cargo tree --locked -p chain-registry-cli -e normal`: clean (`ECO-INV-06`)
+- `cargo build --locked -p chain-registry-cli --bin creg`
+
+| Test run | Passed |
+| --- | --- |
+| `cargo test --locked -p chain-registry-cli --no-fail-fast` | 113/113 passed, 1 ignored (pre-existing `explorer_tui::tests::render_console_preview_html`), 0 failed (plus 5 shims, 0 tests each; includes 10 new Part 5c tests) |
+| `cargo test --locked -p common --test consensus_golden_vectors --no-fail-fast` (frozen) | 10/10 |
+| `cargo test --locked -p consensus --test signed_message_formats --no-fail-fast` (frozen) | 6/6 |
