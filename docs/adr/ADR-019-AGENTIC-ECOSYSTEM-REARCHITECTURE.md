@@ -1090,3 +1090,34 @@ Stage 4 (Increment 3) is complete. No consensus wire format or frozen golden-vec
 - Delegated namespace-controller `RevokeV2` offline proofs without a committee QC remain a follow-up (`ProofBundleV2` does not yet carry namespace lifecycle proof ancestry, so clients fail closed as `unproven_status` rather than trusting unauthenticated non-owner signers).
 - Pre-activation `k`-of-`n` observer agreement (open decision #8) remains deferred per maintainer guidance.
 - Stage 5 (Increment 4) exposes `--require-v4-quorum` on the CLI, renders v4 evidence panels, and executes the CLI crate dependency diet.
+
+### Increment 4, part 5a — `ai-config` extraction, `zone-ipc` `ECA-04` hardening, and four-zone diagnostics (implemented 2026-11-24)
+
+No consensus wire type, signed message, block or header format changed; the frozen test files are untouched.
+
+| Area | What shipped | Where |
+| --- | --- | --- |
+| Dependency-minimal `ai-config` & `file:` secrets (`ECA-16`, §4.3) | Extracted `ValidatorAiConfig`, `AgentPolicyConfig`, `AgentMode`, `ProviderKind`, `ProviderProfile`, `RoutingConfig`, `validate_provider_url`, and SSRF guards into a standalone workspace crate (`crates/ai-config`) with zero `reqwest`/`validator`/`ml-validator`/`wasm-sandbox` edges. Added `file:<abs_path>` secret references (owner-only `0600` on Unix, regular non-symlink file, `<= 4,096` bytes, zeroized reads), `EndpointClass::{Loopback, Lan, Api}` / `classify_endpoint`, and offline `check_ai_config` reporting (including `< 2` model-family diversity advisory warning without failing `ok`). Added `SecretRefTarget::File` resolution in `crates/secrets` and `LlmProxy::resolve_key_for` fallback, plus `AgentRunner::proxy()`, and re-exported `ai-config` from `validator::ai_agent::config`. | `Cargo.toml`, `Cargo.lock`, `crates/ai-config/`, `secrets/src/lib.rs`, `validator/Cargo.toml`, `validator/src/ai_agent/{config,proxy,runner}.rs` |
+| `zone-ipc` `ECA-04` cryptographic & privilege hardening | Derived isolated 256-bit HKDF-SHA256 per-link keys (`ZoneLinkKey`, `ZoneKeyring`, `creg-zone-link-v1|<caller>|<server>`) via `hmac` 0.12 + `hkdf` 0.12 (already in `Cargo.lock`, zero new external crates), replacing the legacy SHA-256 pre-hash MAC with standard HMAC-SHA256. Added per-link 128-slot sliding `ReplayWindow` (rejecting `request_id == 0`, duplicates, and stale sequence numbers), Unix domain socket `0600` inside `0700` dir + `SO_PEERCRED` UID allowlist (`libc` on Unix), strict `ZoneId::Operator` privilege gating (`Health`, `Capabilities`, and `AgentRunner`-only `ProbeProvider` enforced before handler dispatch), and versioned diagnostic payloads (`ZoneCapabilityReportV1`, `ZoneCapabilitiesV1`, `ProviderProbeReportV1`, `OperatorIpcKeyBundleV1`). | `zone-ipc/Cargo.toml`, `zone-ipc/src/{lib,diagnostics}.rs`, `Cargo.lock` |
+| Four-zone supervisor & daemon wiring | Updated `creg-node-supervisor` to omit master `CREG_ZONE_IPC_TOKEN` from all child environments, inject ONLY each zone's `CREG_ZONE_LINK_KEY_<CALLER>_TO_<TARGET>` variables plus `CREG_GATEWAY_IPC_ADDR` (`127.0.0.1:19001`), and write the owner-only `operator-ipc-keys.json` bundle (`write_owner_only`). Switched `creg-gateway`, `creg-consensusd`, `creg-sandboxd`, `creg-agent-runner`, and `node::intelligence::worker` to `ZoneKeyring::from_env_for_zone`, added a `ZoneIpcServer` diagnostic listener to `creg-gateway`, implemented `Capabilities` across all four zones, and implemented bounded non-package canary `ProbeProvider` in `creg-agent-runner`. | `node/src/bin/{creg_node_supervisor,creg_consensusd}.rs`, `node/src/intelligence/worker.rs`, `gateway/src/main.rs`, `validator/src/bin/{creg_sandboxd,creg_agent_runner}.rs` |
+
+**Verification (local, 2026-11-24, rustc 1.98.1, `CARGO_BUILD_JOBS=2`, `CARGO_INCREMENTAL=0`, `CARGO_PROFILE_DEV_DEBUG=0`).** All 16 gates in `stage5a-gates.bat` exited `0`:
+- `cargo fmt --all -- --check`
+- `cargo clippy --locked --workspace --all-targets -- -D warnings`
+- `cargo clippy --locked -p chain-registry-node --features phase-c-real-fleet --all-targets -- -D warnings`
+- `cargo deny --workspace check advisories bans sources`: `advisories ok, bans ok, sources ok` (35 ignores retained, zero unmatched)
+
+| Test run | Passed |
+| --- | --- |
+| `cargo test --locked -p ai-config --no-fail-fast` | 4/4 |
+| `cargo test --locked -p chain-registry-secrets --no-fail-fast` | 6/6 |
+| `cargo test --locked -p zone-ipc --no-fail-fast` | 7/7 (`#[cfg(unix)]` `SO_PEERCRED` test compiled only on Unix targets; exercised on CI Linux) |
+| `cargo test --locked -p creg-gateway --no-fail-fast` | 4/4 |
+| `cargo test --locked -p validator --lib ai_agent --no-fail-fast` | 6/6 filtered (`50 filtered out`) |
+| `cargo test --locked -p validator --bin creg-sandboxd --no-fail-fast` | 3/3 |
+| `cargo test --locked -p validator --bin creg-agent-runner --no-fail-fast` | 4/4 |
+| `cargo test --locked -p chain-registry-node --bin creg-node-supervisor --no-fail-fast` | 2/2 |
+| `cargo test --locked -p chain-registry-node --bin creg-consensusd --no-fail-fast` | 2/2 |
+| `cargo test --locked -p chain-registry-node --lib intelligence::worker --no-fail-fast` | 1/1 filtered (`329 filtered out`) |
+| `cargo test --locked -p common --test consensus_golden_vectors --no-fail-fast` (frozen) | 10/10 |
+| `cargo test --locked -p consensus --test signed_message_formats --no-fail-fast` (frozen) | 6/6 |

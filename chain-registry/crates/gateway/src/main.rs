@@ -23,8 +23,9 @@ use tokio::net::TcpListener;
 use tower_http::limit::RequestBodyLimitLayer;
 use tower_http::trace::TraceLayer;
 use zone_ipc::{
-    decode_b64, encode_b64, enforce_zone_forbidden_env, ZoneEndpoint, ZoneId, ZoneIpcClient,
-    ZoneIpcToken, ZoneRequest, ZoneResponse, GATEWAY_FORBIDDEN_ENV, ZONE_IPC_TOKEN_ENV,
+    decode_b64, encode_b64, enforce_zone_forbidden_env, ZoneCapabilitiesV1, ZoneCapabilityReportV1,
+    ZoneEndpoint, ZoneId, ZoneIpcClient, ZoneIpcServer, ZoneIpcToken, ZoneKeyring, ZoneRequest,
+    ZoneResponse, GATEWAY_FORBIDDEN_ENV,
 };
 
 pub const PUBLIC_BODY_LIMIT_BYTES: usize = 1024 * 1024;
@@ -71,6 +72,77 @@ impl IpRateLimiter {
 }
 
 #[derive(Clone)]
+pub struct GatewayIpcInfo {
+    pub public_listen: String,
+    pub admin_listen: String,
+    pub ipc_listen: String,
+    pub rate_limit_max: usize,
+    pub rate_limit_window_secs: u64,
+    pub admin_token_configured: bool,
+    pub consensus_client: ZoneIpcClient,
+    pub next_request_id: Arc<AtomicU64>,
+}
+
+impl GatewayIpcInfo {
+    fn next_id(&self) -> u64 {
+        self.next_request_id.fetch_add(1, Ordering::Relaxed)
+    }
+}
+
+pub async fn handle_gateway_ipc_request(
+    sender: ZoneId,
+    req: ZoneRequest,
+    info: &GatewayIpcInfo,
+) -> ZoneResponse {
+    match req {
+        ZoneRequest::Health {} => ZoneResponse::Health {
+            zone: ZoneId::Gateway,
+            status: "ok".into(),
+        },
+        ZoneRequest::Capabilities {} => {
+            let probe = tokio::time::timeout(
+                Duration::from_secs(2),
+                info.consensus_client
+                    .call(info.next_id(), &ZoneRequest::Health {}),
+            )
+            .await;
+            let consensus_ipc_reachable = matches!(
+                probe,
+                Ok(Ok(ZoneResponse::Health {
+                    zone: ZoneId::Consensus,
+                    ..
+                }))
+            );
+            let report = ZoneCapabilityReportV1 {
+                schema_version: 1,
+                zone: ZoneId::Gateway,
+                status: "ok".into(),
+                capabilities: ZoneCapabilitiesV1::Gateway {
+                    public_listen: info.public_listen.clone(),
+                    admin_listen: info.admin_listen.clone(),
+                    ipc_listen: info.ipc_listen.clone(),
+                    rate_limit_max: info.rate_limit_max,
+                    rate_limit_window_secs: info.rate_limit_window_secs,
+                    admin_token_configured: info.admin_token_configured,
+                    consensus_ipc_reachable,
+                },
+            };
+            match serde_json::to_string(&report) {
+                Ok(report_json) => ZoneResponse::Capabilities { report_json },
+                Err(err) => ZoneResponse::Error {
+                    code: 500,
+                    message: format!("serialize gateway capability report failed: {err}"),
+                },
+            }
+        }
+        _ => ZoneResponse::Error {
+            code: 403,
+            message: format!("unsupported zone request '{sender}' -> gateway"),
+        },
+    }
+}
+
+#[derive(Clone)]
 pub struct GatewayState {
     pub ipc_client: ZoneIpcClient,
     pub admin_token: String,
@@ -90,6 +162,11 @@ impl GatewayState {
             rate_limiter,
             next_request_id: Arc::new(AtomicU64::new(1)),
         }
+    }
+
+    pub fn with_shared_request_counter(mut self, counter: Arc<AtomicU64>) -> Self {
+        self.next_request_id = counter;
+        self
     }
 
     fn next_id(&self) -> u64 {
@@ -310,10 +387,14 @@ async fn main() -> Result<()> {
     // secret, or LLM API key was passed in the process environment.
     enforce_zone_forbidden_env(ZoneId::Gateway, GATEWAY_FORBIDDEN_ENV)?;
 
-    let ipc_token = ZoneIpcToken::from_env(ZONE_IPC_TOKEN_ENV)?;
+    let keyring = ZoneKeyring::from_env_for_zone(ZoneId::Gateway)?;
+    let consensus_link_key = keyring.outbound_key(ZoneId::Consensus)?;
     let consensus_addr =
         std::env::var("CREG_CONSENSUS_IPC_ADDR").unwrap_or_else(|_| "127.0.0.1:19002".to_string());
     let endpoint = ZoneEndpoint::parse(&consensus_addr)?;
+    let gateway_ipc_addr =
+        std::env::var("CREG_GATEWAY_IPC_ADDR").unwrap_or_else(|_| "127.0.0.1:19001".to_string());
+    let gateway_ipc_ep = ZoneEndpoint::parse(&gateway_ipc_addr)?;
 
     let public_listen: SocketAddr = std::env::var("CREG_GATEWAY_PUBLIC_LISTEN")
         .unwrap_or_else(|_| "0.0.0.0:8080".to_string())
@@ -336,19 +417,41 @@ async fn main() -> Result<()> {
     let admin_token = std::env::var("CREG_GATEWAY_ADMIN_TOKEN")
         .unwrap_or_else(|_| ZoneIpcToken::generate().to_hex());
 
-    let client = ZoneIpcClient::new(ZoneId::Gateway, ZoneId::Consensus, endpoint, ipc_token);
+    let shared_request_id = Arc::new(AtomicU64::new(1));
+    let client = ZoneIpcClient::with_link_key(
+        ZoneId::Gateway,
+        ZoneId::Consensus,
+        endpoint,
+        consensus_link_key,
+    );
     let rate_limit_max = std::env::var("CREG_GATEWAY_RATE_LIMIT_MAX")
         .ok()
         .and_then(|v| v.parse().ok())
         .unwrap_or(DEFAULT_RATE_LIMIT_MAX_REQUESTS);
-    let state = Arc::new(GatewayState::new(
-        client,
-        admin_token,
-        IpRateLimiter::new(
-            rate_limit_max,
-            Duration::from_secs(DEFAULT_RATE_LIMIT_WINDOW_SECS),
-        ),
-    ));
+    let state = Arc::new(
+        GatewayState::new(
+            client.clone(),
+            &admin_token,
+            IpRateLimiter::new(
+                rate_limit_max,
+                Duration::from_secs(DEFAULT_RATE_LIMIT_WINDOW_SECS),
+            ),
+        )
+        .with_shared_request_counter(Arc::clone(&shared_request_id)),
+    );
+
+    let ipc_info = GatewayIpcInfo {
+        public_listen: public_listen.to_string(),
+        admin_listen: admin_listen.to_string(),
+        ipc_listen: gateway_ipc_addr.clone(),
+        rate_limit_max,
+        rate_limit_window_secs: DEFAULT_RATE_LIMIT_WINDOW_SECS,
+        admin_token_configured: !admin_token.is_empty(),
+        consensus_client: client,
+        next_request_id: shared_request_id,
+    };
+    let ipc_server =
+        ZoneIpcServer::bind_with_keyring(ZoneId::Gateway, gateway_ipc_ep, keyring).await?;
 
     let public_app = public_router(Arc::clone(&state));
     let admin_app = admin_router(state);
@@ -363,6 +466,7 @@ async fn main() -> Result<()> {
     tracing::info!(
         public = %public_listen,
         admin = %admin_listen,
+        gateway_ipc = %gateway_ipc_addr,
         consensus_ipc = %consensus_addr,
         "Zone 1 creg-gateway online (INV-01 enforced)"
     );
@@ -380,6 +484,15 @@ async fn main() -> Result<()> {
             axum::serve(admin_listener, admin_app)
                 .await
                 .context("gateway admin server failed")
+        },
+        async {
+            ipc_server
+                .serve(move |sender, req| {
+                    let info = ipc_info.clone();
+                    Box::pin(async move { handle_gateway_ipc_request(sender, req, &info).await })
+                })
+                .await
+                .context("gateway IPC diagnostic server failed")
         }
     )?;
     Ok(())
@@ -587,5 +700,66 @@ mod tests {
         assert_eq!(json["zone"], "consensus");
         assert_eq!(json["channel"], "admin");
         assert_eq!(json["path"], "/v1/operator/nodes");
+    }
+
+    #[tokio::test]
+    async fn gateway_ipc_capabilities_reports_consensus_reachability() {
+        let token = ZoneIpcToken::generate();
+        let addr: SocketAddr = "127.0.0.1:0".parse().unwrap();
+        let cons_srv =
+            ZoneIpcServer::bind(ZoneId::Consensus, ZoneEndpoint::Tcp(addr), token.clone())
+                .await
+                .unwrap();
+        let cons_ep = cons_srv.local_endpoint().unwrap();
+        tokio::spawn(cons_srv.serve(|_, req| {
+            Box::pin(async move {
+                match req {
+                    ZoneRequest::Health {} => ZoneResponse::Health {
+                        zone: ZoneId::Consensus,
+                        status: "ok".into(),
+                    },
+                    _ => ZoneResponse::Error {
+                        code: 403,
+                        message: "forbidden".into(),
+                    },
+                }
+            })
+        }));
+
+        let gw_info = GatewayIpcInfo {
+            public_listen: "0.0.0.0:8080".into(),
+            admin_listen: "127.0.0.1:18080".into(),
+            ipc_listen: "127.0.0.1:19001".into(),
+            rate_limit_max: DEFAULT_RATE_LIMIT_MAX_REQUESTS,
+            rate_limit_window_secs: DEFAULT_RATE_LIMIT_WINDOW_SECS,
+            admin_token_configured: true,
+            consensus_client: ZoneIpcClient::new(
+                ZoneId::Gateway,
+                ZoneId::Consensus,
+                cons_ep,
+                token,
+            ),
+            next_request_id: Arc::new(AtomicU64::new(1)),
+        };
+
+        let resp =
+            handle_gateway_ipc_request(ZoneId::Operator, ZoneRequest::Capabilities {}, &gw_info)
+                .await;
+        match resp {
+            ZoneResponse::Capabilities { report_json } => {
+                let parsed: ZoneCapabilityReportV1 = serde_json::from_str(&report_json).unwrap();
+                assert_eq!(parsed.schema_version, 1);
+                assert_eq!(parsed.zone, ZoneId::Gateway);
+                assert!(matches!(
+                    parsed.capabilities,
+                    ZoneCapabilitiesV1::Gateway {
+                        consensus_ipc_reachable: true,
+                        admin_token_configured: true,
+                        ..
+                    }
+                ));
+            }
+            other => panic!("unexpected response: {other:?}"),
+        }
     }
 }

@@ -1,14 +1,29 @@
-//! Authenticated Inter-Zone IPC Transport (`ADR-018` Four-Zone Validator Split).
+//! Authenticated Inter-Zone IPC Transport (`ADR-018` Four-Zone Validator Split,
+//! hardened in `ADR-019` `ECA-04`).
 //!
 //! Strictly dependency-minimal crate linking Zone 1 (`creg-gateway`), Zone 2
-//! (`creg-consensusd`), Zone 3 (`creg-sandboxd`), and Zone 4 (`creg-agent-runner`).
-//! Contains zero consensus engines, archive parsers, sandboxes, vaults, or HTTP
-//! LLM clients (`INV-01`).
+//! (`creg-consensusd`), Zone 3 (`creg-sandboxd`), Zone 4 (`creg-agent-runner`),
+//! and the read-only local `ZoneId::Operator` diagnostic role.
+//!
+//! Security properties:
+//! - HKDF-SHA256 per-link keys (`creg-zone-link-v1|<caller>|<server>`) so
+//!   compromising one zone never exposes another zone's inbound or outbound keys
+//! - Standard RFC 2104 HMAC-SHA256 frame authentication (domain, sender, target,
+//!   request_id, payload length + payload)
+//! - Per-link monotonic sliding replay window (128-entry bitmask, rejecting
+//!   `request_id == 0`, duplicates, and stale sequence numbers)
+//! - Unix domain socket `0600` inside `0700` dir + `SO_PEERCRED` UID allowlist
+//! - Strict `ZoneId::Operator` privilege cap (`Health`, `Capabilities`, and
+//!   `AgentRunner`-only `ProbeProvider`) enforced inside `ZoneIpcServer`
+
+pub mod diagnostics;
 
 use anyhow::{bail, Context, Result};
+use hkdf::Hkdf;
+use hmac::{Hmac, Mac};
 use rand::RngCore;
 use serde::{Deserialize, Serialize};
-use sha2::{Digest, Sha256};
+use sha2::Sha256;
 use std::collections::BTreeMap;
 use std::fmt;
 use std::future::Future;
@@ -16,14 +31,24 @@ use std::net::SocketAddr;
 #[cfg(unix)]
 use std::path::PathBuf;
 use std::pin::Pin;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 use subtle::ConstantTimeEq;
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
 use tokio::net::{TcpListener, TcpStream};
+use zeroize::Zeroize;
 
-pub const ZONE_IPC_DOMAIN: &str = "creg-zone-ipc-v1";
+pub use diagnostics::{
+    OperatorIpcKeyBundleV1, OperatorZoneEndpointKeyV1, ProviderProbeEntryV1, ProviderProbeReportV1,
+    ZoneCapabilitiesV1, ZoneCapabilityReportV1, OPERATOR_KEY_FILE_ENV,
+};
+
+pub const ZONE_IPC_DOMAIN: &str = "creg-zone-ipc-v2";
+pub const ZONE_IPC_HKDF_SALT: &[u8] = b"creg-zone-ipc-v2";
 pub const MAX_ZONE_FRAME_BYTES: usize = 4 * 1024 * 1024;
 pub const ZONE_IPC_TOKEN_ENV: &str = "CREG_ZONE_IPC_TOKEN";
+pub const REPLAY_WINDOW_SIZE: u64 = 128;
+
+type HmacSha256 = Hmac<Sha256>;
 
 /// Every signing secret the consensus node reads, under the names it reads
 /// them (`chain_registry_secrets::HotKeyRole::env_var`, the shielded-bundle
@@ -88,13 +113,14 @@ pub const AGENT_RUNNER_FORBIDDEN_ENV: &[&str] = &[
     "VAULT_TOKEN",
 ];
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum ZoneId {
     Gateway,
     Consensus,
     Sandbox,
     AgentRunner,
+    Operator,
 }
 
 impl ZoneId {
@@ -104,6 +130,17 @@ impl ZoneId {
             Self::Consensus => "consensus",
             Self::Sandbox => "sandbox",
             Self::AgentRunner => "agent_runner",
+            Self::Operator => "operator",
+        }
+    }
+
+    pub const fn env_upper(self) -> &'static str {
+        match self {
+            Self::Gateway => "GATEWAY",
+            Self::Consensus => "CONSENSUS",
+            Self::Sandbox => "SANDBOX",
+            Self::AgentRunner => "AGENT_RUNNER",
+            Self::Operator => "OPERATOR",
         }
     }
 }
@@ -114,10 +151,52 @@ impl fmt::Display for ZoneId {
     }
 }
 
-/// 256-bit per-boot symmetric authentication token shared across the four
-/// validator zones via `CREG_ZONE_IPC_TOKEN`.
+/// Canonical per-link env var name shared between the supervisor and each zone.
+pub fn link_key_env_var(caller: ZoneId, target: ZoneId) -> String {
+    format!(
+        "CREG_ZONE_LINK_KEY_{}_TO_{}",
+        caller.env_upper(),
+        target.env_upper()
+    )
+}
+
+/// Callers permitted to initiate IPC requests into `zone`.
+pub const fn allowed_inbound_callers(zone: ZoneId) -> &'static [ZoneId] {
+    match zone {
+        ZoneId::Gateway => &[ZoneId::Operator],
+        ZoneId::Consensus => &[ZoneId::Gateway, ZoneId::Operator],
+        ZoneId::Sandbox => &[ZoneId::AgentRunner, ZoneId::Consensus, ZoneId::Operator],
+        ZoneId::AgentRunner => &[ZoneId::Consensus, ZoneId::Operator],
+        ZoneId::Operator => &[],
+    }
+}
+
+/// Targets that `zone` is permitted to initiate IPC requests toward.
+pub const fn allowed_outbound_targets(zone: ZoneId) -> &'static [ZoneId] {
+    match zone {
+        ZoneId::Gateway => &[ZoneId::Consensus],
+        ZoneId::Consensus => &[ZoneId::AgentRunner, ZoneId::Sandbox],
+        ZoneId::Sandbox => &[],
+        ZoneId::AgentRunner => &[ZoneId::Sandbox],
+        ZoneId::Operator => &[
+            ZoneId::Gateway,
+            ZoneId::Consensus,
+            ZoneId::Sandbox,
+            ZoneId::AgentRunner,
+        ],
+    }
+}
+
+/// 256-bit per-boot master token held ONLY by the supervisor (or legacy single-token
+/// dev environments) to derive isolated HKDF-SHA256 per-link keys.
 #[derive(Clone)]
 pub struct ZoneIpcToken([u8; 32]);
+
+impl Drop for ZoneIpcToken {
+    fn drop(&mut self) {
+        self.0.zeroize();
+    }
+}
 
 impl fmt::Debug for ZoneIpcToken {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
@@ -136,17 +215,12 @@ impl ZoneIpcToken {
         Self(bytes)
     }
 
+    pub fn as_bytes(&self) -> &[u8; 32] {
+        &self.0
+    }
+
     pub fn from_hex(raw: &str) -> Result<Self> {
-        let clean = raw.trim().strip_prefix("0x").unwrap_or(raw.trim());
-        let decoded = hex::decode(clean).context("invalid ZoneIpcToken hex")?;
-        if decoded.len() != 32 {
-            bail!(
-                "invalid ZoneIpcToken length: expected 32 bytes, got {}",
-                decoded.len()
-            );
-        }
-        let mut arr = [0u8; 32];
-        arr.copy_from_slice(&decoded);
+        let arr = parse_32_byte_hex(raw, "ZoneIpcToken")?;
         Ok(Self(arr))
     }
 
@@ -160,6 +234,14 @@ impl ZoneIpcToken {
         hex::encode(self.0)
     }
 
+    /// Derive the isolated 256-bit HKDF-SHA256 link key for `(caller, target)`.
+    pub fn derive_link_key(&self, caller: ZoneId, target: ZoneId) -> ZoneLinkKey {
+        ZoneLinkKey::derive(self, caller, target)
+    }
+
+    /// Convenience helper authenticating a directional frame under the HKDF key
+    /// derived for `(sender, target)`. For server replies, pass the inbound
+    /// caller's `ZoneLinkKey` via [`AuthenticatedZoneFrame::sign_with_link_key`].
     pub fn compute_mac(
         &self,
         sender: ZoneId,
@@ -167,24 +249,84 @@ impl ZoneIpcToken {
         request_id: u64,
         payload: &[u8],
     ) -> [u8; 32] {
-        // Pre-hashed keyed MAC binding token, direction, sequence id, and exact payload length.
-        let mut inner = Sha256::new();
-        inner.update(ZONE_IPC_DOMAIN.as_bytes());
-        inner.update([0x00]);
-        inner.update(self.0);
-        inner.update(sender.as_str().as_bytes());
-        inner.update([0x00]);
-        inner.update(target.as_str().as_bytes());
-        inner.update([0x00]);
-        inner.update(request_id.to_be_bytes());
-        inner.update((payload.len() as u64).to_be_bytes());
-        inner.update(payload);
-        let inner_digest: [u8; 32] = inner.finalize().into();
+        self.derive_link_key(sender, target)
+            .compute_mac(sender, target, request_id, payload)
+    }
 
-        let mut outer = Sha256::new();
-        outer.update(self.0);
-        outer.update(inner_digest);
-        outer.finalize().into()
+    pub fn verify_mac(
+        &self,
+        sender: ZoneId,
+        target: ZoneId,
+        request_id: u64,
+        payload: &[u8],
+        mac_hex: &str,
+    ) -> bool {
+        self.derive_link_key(sender, target)
+            .verify_mac(sender, target, request_id, payload, mac_hex)
+    }
+}
+
+/// 256-bit HKDF-SHA256 link key scoped strictly to one `(caller, target)` pair.
+#[derive(Clone, PartialEq, Eq)]
+pub struct ZoneLinkKey([u8; 32]);
+
+impl Drop for ZoneLinkKey {
+    fn drop(&mut self) {
+        self.0.zeroize();
+    }
+}
+
+impl fmt::Debug for ZoneLinkKey {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str("ZoneLinkKey([REDACTED])")
+    }
+}
+
+impl ZoneLinkKey {
+    pub fn from_bytes(bytes: [u8; 32]) -> Self {
+        Self(bytes)
+    }
+
+    pub fn from_hex(raw: &str) -> Result<Self> {
+        let arr = parse_32_byte_hex(raw, "ZoneLinkKey")?;
+        Ok(Self(arr))
+    }
+
+    pub fn to_hex(&self) -> String {
+        hex::encode(self.0)
+    }
+
+    pub fn derive(master: &ZoneIpcToken, caller: ZoneId, target: ZoneId) -> Self {
+        let hkdf = Hkdf::<Sha256>::new(Some(ZONE_IPC_HKDF_SALT), master.as_bytes());
+        let info = format!("creg-zone-link-v1|{}|{}", caller.as_str(), target.as_str());
+        let mut okm = [0u8; 32];
+        // 32-byte expand always succeeds for SHA-256 HKDF (max = 255 * 32).
+        let _ = hkdf.expand(info.as_bytes(), &mut okm);
+        Self(okm)
+    }
+
+    pub fn compute_mac(
+        &self,
+        sender: ZoneId,
+        target: ZoneId,
+        request_id: u64,
+        payload: &[u8],
+    ) -> [u8; 32] {
+        // Key length is fixed 32 bytes, so HmacSha256::new_from_slice cannot fail.
+        let mut mac =
+            HmacSha256::new_from_slice(&self.0).expect("32-byte key valid for HMAC-SHA256");
+        mac.update(ZONE_IPC_DOMAIN.as_bytes());
+        mac.update(b"|");
+        mac.update(sender.as_str().as_bytes());
+        mac.update(b"|");
+        mac.update(target.as_str().as_bytes());
+        mac.update(b"|");
+        mac.update(&request_id.to_be_bytes());
+        mac.update(b"|");
+        mac.update(&(payload.len() as u64).to_be_bytes());
+        mac.update(b"|");
+        mac.update(payload);
+        mac.finalize().into_bytes().into()
     }
 
     pub fn verify_mac(
@@ -206,6 +348,183 @@ impl ZoneIpcToken {
     }
 }
 
+fn parse_32_byte_hex(raw: &str, label: &str) -> Result<[u8; 32]> {
+    let clean = raw.trim().strip_prefix("0x").unwrap_or(raw.trim());
+    let decoded = zeroize::Zeroizing::new(
+        hex::decode(clean).with_context(|| format!("invalid {label} hex"))?,
+    );
+    if decoded.len() != 32 {
+        bail!(
+            "invalid {label} length: expected 32 bytes, got {}",
+            decoded.len()
+        );
+    }
+    let mut arr = [0u8; 32];
+    arr.copy_from_slice(&decoded);
+    Ok(arr)
+}
+
+/// Isolated keyring holding ONLY the inbound and outbound link keys permitted
+/// for a single zone.
+#[derive(Debug, Clone)]
+pub struct ZoneKeyring {
+    local_zone: ZoneId,
+    inbound: BTreeMap<ZoneId, ZoneLinkKey>,
+    outbound: BTreeMap<ZoneId, ZoneLinkKey>,
+}
+
+impl ZoneKeyring {
+    pub fn empty(local_zone: ZoneId) -> Self {
+        Self {
+            local_zone,
+            inbound: BTreeMap::new(),
+            outbound: BTreeMap::new(),
+        }
+    }
+
+    pub fn with_inbound(mut self, caller: ZoneId, key: ZoneLinkKey) -> Self {
+        self.inbound.insert(caller, key);
+        self
+    }
+
+    pub fn with_outbound(mut self, target: ZoneId, key: ZoneLinkKey) -> Self {
+        self.outbound.insert(target, key);
+        self
+    }
+
+    /// Derive ONLY this zone's allowed inbound and outbound link keys from a master token.
+    pub fn from_master_token(local_zone: ZoneId, master: &ZoneIpcToken) -> Self {
+        let mut inbound = BTreeMap::new();
+        for &caller in allowed_inbound_callers(local_zone) {
+            inbound.insert(caller, master.derive_link_key(caller, local_zone));
+        }
+        let mut outbound = BTreeMap::new();
+        for &target in allowed_outbound_targets(local_zone) {
+            outbound.insert(target, master.derive_link_key(local_zone, target));
+        }
+        Self {
+            local_zone,
+            inbound,
+            outbound,
+        }
+    }
+
+    /// Load per-link keys from `CREG_ZONE_LINK_KEY_<CALLER>_TO_<TARGET>` env vars.
+    /// Falls back to `CREG_ZONE_IPC_TOKEN` only if NO per-link env vars are set
+    /// for `local_zone`.
+    pub fn from_env_for_zone(local_zone: ZoneId) -> Result<Self> {
+        let mut inbound = BTreeMap::new();
+        let mut outbound = BTreeMap::new();
+        let mut found_link_key = false;
+
+        for &caller in allowed_inbound_callers(local_zone) {
+            let var = link_key_env_var(caller, local_zone);
+            if let Ok(raw) = std::env::var(&var) {
+                if !raw.trim().is_empty() {
+                    inbound.insert(
+                        caller,
+                        ZoneLinkKey::from_hex(&raw)
+                            .with_context(|| format!("parse inbound link key {var}"))?,
+                    );
+                    found_link_key = true;
+                }
+            }
+        }
+        for &target in allowed_outbound_targets(local_zone) {
+            let var = link_key_env_var(local_zone, target);
+            if let Ok(raw) = std::env::var(&var) {
+                if !raw.trim().is_empty() {
+                    outbound.insert(
+                        target,
+                        ZoneLinkKey::from_hex(&raw)
+                            .with_context(|| format!("parse outbound link key {var}"))?,
+                    );
+                    found_link_key = true;
+                }
+            }
+        }
+
+        if found_link_key {
+            return Ok(Self {
+                local_zone,
+                inbound,
+                outbound,
+            });
+        }
+
+        let master = ZoneIpcToken::from_env(ZONE_IPC_TOKEN_ENV).with_context(|| {
+            format!(
+                "missing per-link keys for zone '{}' and fallback env '{}'",
+                local_zone, ZONE_IPC_TOKEN_ENV
+            )
+        })?;
+        Ok(Self::from_master_token(local_zone, &master))
+    }
+
+    pub fn local_zone(&self) -> ZoneId {
+        self.local_zone
+    }
+
+    pub fn inbound_key(&self, caller: ZoneId) -> Option<&ZoneLinkKey> {
+        self.inbound.get(&caller)
+    }
+
+    pub fn outbound_key(&self, target: ZoneId) -> Result<ZoneLinkKey> {
+        self.outbound.get(&target).cloned().with_context(|| {
+            format!(
+                "missing outbound link key {} from {} to {}",
+                link_key_env_var(self.local_zone, target),
+                self.local_zone,
+                target
+            )
+        })
+    }
+}
+
+/// 128-slot sliding replay window tracking monotonic request IDs per caller link.
+#[derive(Debug, Default, Clone)]
+pub struct ReplayWindow {
+    max_seen: u64,
+    seen_mask: u128,
+}
+
+impl ReplayWindow {
+    pub fn check_and_record(&mut self, request_id: u64) -> Result<()> {
+        if request_id == 0 {
+            bail!("zone IPC request_id must be >= 1");
+        }
+        if self.max_seen == 0 {
+            self.max_seen = request_id;
+            self.seen_mask = 1;
+            return Ok(());
+        }
+        if request_id > self.max_seen {
+            let shift = request_id - self.max_seen;
+            self.seen_mask = if shift >= REPLAY_WINDOW_SIZE {
+                1
+            } else {
+                (self.seen_mask << shift) | 1
+            };
+            self.max_seen = request_id;
+            return Ok(());
+        }
+        let offset = self.max_seen - request_id;
+        if offset >= REPLAY_WINDOW_SIZE {
+            bail!(
+                "stale zone IPC request_id {} (window max {})",
+                request_id,
+                self.max_seen
+            );
+        }
+        let bit = 1u128 << offset;
+        if (self.seen_mask & bit) != 0 {
+            bail!("replayed zone IPC request_id {}", request_id);
+        }
+        self.seen_mask |= bit;
+        Ok(())
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct AuthenticatedZoneFrame {
@@ -217,12 +536,12 @@ pub struct AuthenticatedZoneFrame {
 }
 
 impl AuthenticatedZoneFrame {
-    pub fn sign(
+    pub fn sign_with_link_key(
         sender: ZoneId,
         target: ZoneId,
         request_id: u64,
         payload: String,
-        token: &ZoneIpcToken,
+        link_key: &ZoneLinkKey,
     ) -> Result<Self> {
         if payload.len() > MAX_ZONE_FRAME_BYTES {
             bail!(
@@ -231,7 +550,7 @@ impl AuthenticatedZoneFrame {
                 MAX_ZONE_FRAME_BYTES
             );
         }
-        let mac = token.compute_mac(sender, target, request_id, payload.as_bytes());
+        let mac = link_key.compute_mac(sender, target, request_id, payload.as_bytes());
         Ok(Self {
             sender,
             target,
@@ -241,7 +560,11 @@ impl AuthenticatedZoneFrame {
         })
     }
 
-    pub fn verify(&self, token: &ZoneIpcToken, expected_target: ZoneId) -> Result<()> {
+    pub fn verify_with_link_key(
+        &self,
+        link_key: &ZoneLinkKey,
+        expected_target: ZoneId,
+    ) -> Result<()> {
         if self.target != expected_target {
             bail!(
                 "zone frame target mismatch: expected {}, got {}",
@@ -256,7 +579,7 @@ impl AuthenticatedZoneFrame {
                 MAX_ZONE_FRAME_BYTES
             );
         }
-        if !token.verify_mac(
+        if !link_key.verify_mac(
             self.sender,
             self.target,
             self.request_id,
@@ -271,12 +594,33 @@ impl AuthenticatedZoneFrame {
         }
         Ok(())
     }
+
+    pub fn sign(
+        sender: ZoneId,
+        target: ZoneId,
+        request_id: u64,
+        payload: String,
+        token: &ZoneIpcToken,
+    ) -> Result<Self> {
+        let link_key = token.derive_link_key(sender, target);
+        Self::sign_with_link_key(sender, target, request_id, payload, &link_key)
+    }
+
+    pub fn verify(&self, token: &ZoneIpcToken, expected_target: ZoneId) -> Result<()> {
+        let link_key = token.derive_link_key(self.sender, expected_target);
+        self.verify_with_link_key(&link_key, expected_target)
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "op", rename_all = "snake_case", deny_unknown_fields)]
 pub enum ZoneRequest {
     Health {},
+    Capabilities {},
+    ProbeProvider {
+        #[serde(default)]
+        provider: Option<String>,
+    },
     ForwardPublicHttp {
         method: String,
         path: String,
@@ -321,6 +665,12 @@ pub enum ZoneResponse {
     Health {
         zone: ZoneId,
         status: String,
+    },
+    Capabilities {
+        report_json: String,
+    },
+    ProviderProbeResult {
+        report_json: String,
     },
     HttpReply {
         status: u16,
@@ -492,8 +842,16 @@ enum BoundListener {
 
 pub struct ZoneIpcServer {
     local_zone: ZoneId,
-    token: ZoneIpcToken,
+    keyring: ZoneKeyring,
     listener: BoundListener,
+    #[cfg(unix)]
+    allowed_uids: Vec<u32>,
+}
+
+#[cfg(unix)]
+fn current_euid() -> u32 {
+    // SAFETY: `geteuid()` has no invariants or failure modes.
+    unsafe { libc::geteuid() }
 }
 
 impl ZoneIpcServer {
@@ -502,6 +860,22 @@ impl ZoneIpcServer {
         endpoint: ZoneEndpoint,
         token: ZoneIpcToken,
     ) -> Result<Self> {
+        let keyring = ZoneKeyring::from_master_token(local_zone, &token);
+        Self::bind_with_keyring(local_zone, endpoint, keyring).await
+    }
+
+    pub async fn bind_with_keyring(
+        local_zone: ZoneId,
+        endpoint: ZoneEndpoint,
+        keyring: ZoneKeyring,
+    ) -> Result<Self> {
+        if keyring.local_zone() != local_zone {
+            bail!(
+                "keyring belongs to zone '{}', cannot bind server for '{}'",
+                keyring.local_zone(),
+                local_zone
+            );
+        }
         let listener = match endpoint {
             ZoneEndpoint::Tcp(addr) => {
                 let tcp = TcpListener::bind(addr)
@@ -511,6 +885,16 @@ impl ZoneIpcServer {
             }
             #[cfg(unix)]
             ZoneEndpoint::Unix(path) => {
+                use std::os::unix::fs::{DirBuilderExt, PermissionsExt};
+                if let Some(parent) = path.parent().filter(|p| !p.as_os_str().is_empty()) {
+                    if !parent.exists() {
+                        std::fs::DirBuilder::new()
+                            .recursive(true)
+                            .mode(0o700)
+                            .create(parent)
+                            .with_context(|| format!("create socket dir {}", parent.display()))?;
+                    }
+                }
                 if path.exists() {
                     let _ = std::fs::remove_file(&path);
                 }
@@ -521,14 +905,26 @@ impl ZoneIpcServer {
                         path.display()
                     )
                 })?;
+                std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o600))
+                    .with_context(|| {
+                        format!("set 0600 permissions on Unix socket {}", path.display())
+                    })?;
                 BoundListener::Unix(unix, path)
             }
         };
         Ok(Self {
             local_zone,
-            token,
+            keyring,
             listener,
+            #[cfg(unix)]
+            allowed_uids: vec![current_euid()],
         })
+    }
+
+    #[cfg(unix)]
+    pub fn with_allowed_uids(mut self, uids: Vec<u32>) -> Self {
+        self.allowed_uids = uids;
+        self
     }
 
     pub fn local_endpoint(&self) -> Result<ZoneEndpoint> {
@@ -547,25 +943,52 @@ impl ZoneIpcServer {
             + 'static,
     {
         let handler = Arc::new(handler);
-        let token = Arc::new(self.token);
+        let keyring = Arc::new(self.keyring);
+        let replay_windows: Arc<Mutex<BTreeMap<ZoneId, ReplayWindow>>> =
+            Arc::new(Mutex::new(BTreeMap::new()));
         let local_zone = self.local_zone;
         loop {
             match &self.listener {
                 BoundListener::Tcp(tcp) => {
                     let (stream, _) = tcp.accept().await?;
                     let h = Arc::clone(&handler);
-                    let t = Arc::clone(&token);
+                    let k = Arc::clone(&keyring);
+                    let rw = Arc::clone(&replay_windows);
                     tokio::spawn(async move {
-                        let _ = handle_stream(stream, local_zone, t, h).await;
+                        let _ = handle_stream(stream, local_zone, k, rw, h).await;
                     });
                 }
                 #[cfg(unix)]
                 BoundListener::Unix(unix, _) => {
                     let (stream, _) = unix.accept().await?;
+                    match stream.peer_cred() {
+                        Ok(cred) => {
+                            let peer_uid = cred.uid();
+                            if !self.allowed_uids.contains(&peer_uid) {
+                                tracing::warn!(
+                                    zone = %local_zone,
+                                    peer_uid,
+                                    "rejected Unix zone-ipc connection from unauthorized UID"
+                                );
+                                drop(stream);
+                                continue;
+                            }
+                        }
+                        Err(err) => {
+                            tracing::warn!(
+                                zone = %local_zone,
+                                error = %err,
+                                "failed to read peer credentials on Unix zone-ipc socket"
+                            );
+                            drop(stream);
+                            continue;
+                        }
+                    }
                     let h = Arc::clone(&handler);
-                    let t = Arc::clone(&token);
+                    let k = Arc::clone(&keyring);
+                    let rw = Arc::clone(&replay_windows);
                     tokio::spawn(async move {
-                        let _ = handle_stream(stream, local_zone, t, h).await;
+                        let _ = handle_stream(stream, local_zone, k, rw, h).await;
                     });
                 }
             }
@@ -573,10 +996,23 @@ impl ZoneIpcServer {
     }
 }
 
+fn is_operator_request_allowed(local_zone: ZoneId, req: &ZoneRequest) -> bool {
+    match req {
+        ZoneRequest::Health {} | ZoneRequest::Capabilities {} => true,
+        ZoneRequest::ProbeProvider { .. } => local_zone == ZoneId::AgentRunner,
+        ZoneRequest::ForwardPublicHttp { .. }
+        | ZoneRequest::ForwardAdminHttp { .. }
+        | ZoneRequest::RunSandboxReplay { .. }
+        | ZoneRequest::RunAgentInvestigation { .. }
+        | ZoneRequest::GenerateIntelligenceReport { .. } => false,
+    }
+}
+
 async fn handle_stream<S, F>(
     mut stream: S,
     local_zone: ZoneId,
-    token: Arc<ZoneIpcToken>,
+    keyring: Arc<ZoneKeyring>,
+    replay_windows: Arc<Mutex<BTreeMap<ZoneId, ReplayWindow>>>,
     handler: Arc<F>,
 ) -> Result<()>
 where
@@ -587,22 +1023,56 @@ where
         + 'static,
 {
     let frame = read_frame(&mut stream).await?;
-    // Authenticate frame BEFORE deserializing ZoneRequest (fail-closed).
-    frame.verify(&token, local_zone)?;
+    // 1. Lookup per-link key for declared sender & verify MAC BEFORE parsing or updating replay state.
+    let link_key = keyring
+        .inbound_key(frame.sender)
+        .with_context(|| {
+            format!(
+                "unauthorized zone-ipc sender '{}' for target '{}'",
+                frame.sender, local_zone
+            )
+        })?
+        .clone();
+    frame.verify_with_link_key(&link_key, local_zone)?;
+
+    // 2. Enforce per-link monotonic request_id replay window.
+    {
+        let mut windows = replay_windows
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        windows
+            .entry(frame.sender)
+            .or_default()
+            .check_and_record(frame.request_id)?;
+    }
+
+    // 3. Parse request and enforce ZoneId::Operator read-only privilege boundary.
     let resp = match serde_json::from_str::<ZoneRequest>(&frame.payload) {
-        Ok(req) => handler(frame.sender, req).await,
+        Ok(req) => {
+            if frame.sender == ZoneId::Operator && !is_operator_request_allowed(local_zone, &req) {
+                ZoneResponse::Error {
+                    code: 403,
+                    message: format!(
+                        "operator zone is restricted to Health, Capabilities, and AgentRunner ProbeProvider (denied on '{}')",
+                        local_zone
+                    ),
+                }
+            } else {
+                handler(frame.sender, req).await
+            }
+        }
         Err(err) => ZoneResponse::Error {
             code: 400,
             message: format!("invalid zone request JSON: {err}"),
         },
     };
     let resp_payload = serde_json::to_string(&resp)?;
-    let reply = AuthenticatedZoneFrame::sign(
+    let reply = AuthenticatedZoneFrame::sign_with_link_key(
         local_zone,
         frame.sender,
         frame.request_id,
         resp_payload,
-        &token,
+        &link_key,
     )?;
     write_frame(&mut stream, &reply).await
 }
@@ -612,7 +1082,7 @@ pub struct ZoneIpcClient {
     sender: ZoneId,
     target: ZoneId,
     endpoint: ZoneEndpoint,
-    token: ZoneIpcToken,
+    link_key: ZoneLinkKey,
 }
 
 impl ZoneIpcClient {
@@ -622,36 +1092,46 @@ impl ZoneIpcClient {
         endpoint: ZoneEndpoint,
         token: ZoneIpcToken,
     ) -> Self {
+        let link_key = token.derive_link_key(sender, target);
+        Self::with_link_key(sender, target, endpoint, link_key)
+    }
+
+    pub fn with_link_key(
+        sender: ZoneId,
+        target: ZoneId,
+        endpoint: ZoneEndpoint,
+        link_key: ZoneLinkKey,
+    ) -> Self {
         Self {
             sender,
             target,
             endpoint,
-            token,
+            link_key,
         }
     }
 
     pub async fn call(&self, request_id: u64, request: &ZoneRequest) -> Result<ZoneResponse> {
         let payload = serde_json::to_string(request).context("serialize ZoneRequest")?;
-        let frame = AuthenticatedZoneFrame::sign(
+        let frame = AuthenticatedZoneFrame::sign_with_link_key(
             self.sender,
             self.target,
             request_id,
             payload,
-            &self.token,
+            &self.link_key,
         )?;
         match &self.endpoint {
             ZoneEndpoint::Tcp(addr) => {
                 let mut stream = TcpStream::connect(addr)
                     .await
                     .with_context(|| format!("connect TCP zone endpoint {addr}"))?;
-                send_and_recv(&mut stream, &frame, &self.token, self.sender, request_id).await
+                send_and_recv(&mut stream, &frame, &self.link_key, self.sender, request_id).await
             }
             #[cfg(unix)]
             ZoneEndpoint::Unix(path) => {
                 let mut stream = tokio::net::UnixStream::connect(path)
                     .await
                     .with_context(|| format!("connect Unix zone endpoint {}", path.display()))?;
-                send_and_recv(&mut stream, &frame, &self.token, self.sender, request_id).await
+                send_and_recv(&mut stream, &frame, &self.link_key, self.sender, request_id).await
             }
         }
     }
@@ -660,13 +1140,13 @@ impl ZoneIpcClient {
 async fn send_and_recv<S: AsyncRead + AsyncWrite + Unpin>(
     stream: &mut S,
     outgoing: &AuthenticatedZoneFrame,
-    token: &ZoneIpcToken,
+    link_key: &ZoneLinkKey,
     expected_target: ZoneId,
     expected_request_id: u64,
 ) -> Result<ZoneResponse> {
     write_frame(stream, outgoing).await?;
     let reply = read_frame(stream).await?;
-    reply.verify(token, expected_target)?;
+    reply.verify_with_link_key(link_key, expected_target)?;
     if reply.sender != outgoing.target {
         bail!(
             "unexpected zone reply sender: expected {}, got {}",
@@ -738,6 +1218,40 @@ pub fn check_forbidden_env_btree(
 mod tests {
     use super::*;
 
+    #[test]
+    fn hkdf_per_link_keys_are_distinct_and_domain_separated() {
+        let master = ZoneIpcToken::generate();
+        let gw_cons = master.derive_link_key(ZoneId::Gateway, ZoneId::Consensus);
+        let cons_agent = master.derive_link_key(ZoneId::Consensus, ZoneId::AgentRunner);
+        let op_cons = master.derive_link_key(ZoneId::Operator, ZoneId::Consensus);
+        let op_gw = master.derive_link_key(ZoneId::Operator, ZoneId::Gateway);
+
+        assert_ne!(gw_cons, cons_agent);
+        assert_ne!(gw_cons, op_cons);
+        assert_ne!(op_cons, op_gw);
+        assert_eq!(format!("{gw_cons:?}"), "ZoneLinkKey([REDACTED])");
+        assert_eq!(format!("{master:?}"), "ZoneIpcToken([REDACTED])");
+    }
+
+    #[test]
+    fn replay_window_rejects_zero_duplicates_and_stale_ids() {
+        let mut w = ReplayWindow::default();
+        assert!(w.check_and_record(0).is_err());
+        assert!(w.check_and_record(1).is_ok());
+        assert!(w.check_and_record(1).is_err());
+
+        // Out-of-order within window works once, rejects on duplicate.
+        assert!(w.check_and_record(5).is_ok());
+        assert!(w.check_and_record(3).is_ok());
+        assert!(w.check_and_record(4).is_ok());
+        assert!(w.check_and_record(3).is_err());
+
+        // Jump forward past REPLAY_WINDOW_SIZE makes earlier sequence stale.
+        assert!(w.check_and_record(200).is_ok());
+        assert!(w.check_and_record(72).is_err()); // 200 - 72 == 128 >= REPLAY_WINDOW_SIZE
+        assert!(w.check_and_record(73).is_ok());
+    }
+
     #[tokio::test]
     async fn authenticated_loopback_roundtrip_and_tamper_rejection() {
         let token = ZoneIpcToken::generate();
@@ -778,6 +1292,9 @@ mod tests {
             }
         );
 
+        // Replaying the same request_id must fail closed.
+        assert!(client.call(42, &ZoneRequest::Health {}).await.is_err());
+
         // Wrong token fails MAC check.
         let wrong_client = ZoneIpcClient::new(
             ZoneId::Gateway,
@@ -802,6 +1319,19 @@ mod tests {
             .await
             .is_err());
 
+        // Compromised Gateway link key cannot forge an Operator or AgentRunner frame.
+        let stolen_gw_key = token.derive_link_key(ZoneId::Gateway, ZoneId::Consensus);
+        let forged_operator = ZoneIpcClient::with_link_key(
+            ZoneId::Operator,
+            ZoneId::Consensus,
+            endpoint.clone(),
+            stolen_gw_key,
+        );
+        assert!(forged_operator
+            .call(45, &ZoneRequest::Capabilities {})
+            .await
+            .is_err());
+
         // Raw tampered MAC over socket is rejected.
         #[cfg(not(unix))]
         let ZoneEndpoint::Tcp(tcp_addr) = endpoint;
@@ -814,7 +1344,7 @@ mod tests {
         let mut tampered = AuthenticatedZoneFrame::sign(
             ZoneId::Gateway,
             ZoneId::Consensus,
-            45,
+            46,
             serde_json::to_string(&ZoneRequest::Health {}).unwrap(),
             &token,
         )
@@ -822,6 +1352,215 @@ mod tests {
         tampered.mac_hex = "00".repeat(32);
         write_frame(&mut raw_stream, &tampered).await.unwrap();
         assert!(read_frame(&mut raw_stream).await.is_err());
+    }
+
+    #[tokio::test]
+    async fn operator_zone_is_restricted_to_readonly_diagnostics_before_handler() {
+        let token = ZoneIpcToken::generate();
+        let addr: SocketAddr = "127.0.0.1:0".parse().unwrap();
+        let cons_srv =
+            ZoneIpcServer::bind(ZoneId::Consensus, ZoneEndpoint::Tcp(addr), token.clone())
+                .await
+                .unwrap();
+        let cons_ep = cons_srv.local_endpoint().unwrap();
+        tokio::spawn(cons_srv.serve(|_sender, req| {
+            Box::pin(async move {
+                match req {
+                    ZoneRequest::Health {} => ZoneResponse::Health {
+                        zone: ZoneId::Consensus,
+                        status: "ok".into(),
+                    },
+                    ZoneRequest::Capabilities {} => ZoneResponse::Capabilities {
+                        report_json: "{}".into(),
+                    },
+                    _ => panic!(
+                        "mutating or unauthorized op from operator should never reach handler"
+                    ),
+                }
+            })
+        }));
+
+        let op_cons =
+            ZoneIpcClient::new(ZoneId::Operator, ZoneId::Consensus, cons_ep, token.clone());
+        assert!(matches!(
+            op_cons.call(1, &ZoneRequest::Health {}).await.unwrap(),
+            ZoneResponse::Health { .. }
+        ));
+        assert!(matches!(
+            op_cons
+                .call(2, &ZoneRequest::Capabilities {})
+                .await
+                .unwrap(),
+            ZoneResponse::Capabilities { .. }
+        ));
+        assert!(matches!(
+            op_cons
+                .call(
+                    3,
+                    &ZoneRequest::ForwardAdminHttp {
+                        method: "POST".into(),
+                        path: "/v1/operator/shutdown".into(),
+                        query: None,
+                        body_b64: String::new(),
+                    },
+                )
+                .await
+                .unwrap(),
+            ZoneResponse::Error { code: 403, .. }
+        ));
+        assert!(matches!(
+            op_cons
+                .call(4, &ZoneRequest::ProbeProvider { provider: None })
+                .await
+                .unwrap(),
+            ZoneResponse::Error { code: 403, .. }
+        ));
+
+        // AgentRunner permits Operator ProbeProvider, while refusing RunAgentInvestigation.
+        let agent_srv =
+            ZoneIpcServer::bind(ZoneId::AgentRunner, ZoneEndpoint::Tcp(addr), token.clone())
+                .await
+                .unwrap();
+        let agent_ep = agent_srv.local_endpoint().unwrap();
+        tokio::spawn(agent_srv.serve(|_sender, req| {
+            Box::pin(async move {
+                match req {
+                    ZoneRequest::ProbeProvider { .. } => ZoneResponse::ProviderProbeResult {
+                        report_json: r#"{"schema_version":1,"ok":true,"providers":[]}"#.into(),
+                    },
+                    _ => panic!("non-probe op from operator should never reach handler"),
+                }
+            })
+        }));
+        let op_agent = ZoneIpcClient::new(ZoneId::Operator, ZoneId::AgentRunner, agent_ep, token);
+        assert!(matches!(
+            op_agent
+                .call(1, &ZoneRequest::ProbeProvider { provider: None })
+                .await
+                .unwrap(),
+            ZoneResponse::ProviderProbeResult { .. }
+        ));
+        assert!(matches!(
+            op_agent
+                .call(
+                    2,
+                    &ZoneRequest::GenerateIntelligenceReport {
+                        record_json: "{}".into(),
+                    },
+                )
+                .await
+                .unwrap(),
+            ZoneResponse::Error { code: 403, .. }
+        ));
+    }
+
+    #[tokio::test]
+    async fn operator_key_bundle_roundtrip_and_isolation() {
+        let dir = tempfile::tempdir().unwrap();
+        let bundle_path = dir.path().join("keys").join("operator-ipc-keys.json");
+
+        let token = ZoneIpcToken::generate();
+        let addr: SocketAddr = "127.0.0.1:0".parse().unwrap();
+        let gw_srv = ZoneIpcServer::bind(ZoneId::Gateway, ZoneEndpoint::Tcp(addr), token.clone())
+            .await
+            .unwrap();
+        let gw_ep = match gw_srv.local_endpoint().unwrap() {
+            ZoneEndpoint::Tcp(a) => a.to_string(),
+            #[cfg(unix)]
+            ZoneEndpoint::Unix(p) => format!("unix://{}", p.display()),
+        };
+        tokio::spawn(gw_srv.serve(|_, req| {
+            Box::pin(async move {
+                match req {
+                    ZoneRequest::Health {} => ZoneResponse::Health {
+                        zone: ZoneId::Gateway,
+                        status: "ok".into(),
+                    },
+                    _ => ZoneResponse::Error {
+                        code: 403,
+                        message: "forbidden".into(),
+                    },
+                }
+            })
+        }));
+
+        let bundle = OperatorIpcKeyBundleV1 {
+            schema_version: 1,
+            gateway: OperatorZoneEndpointKeyV1 {
+                endpoint: gw_ep,
+                link_key_hex: token
+                    .derive_link_key(ZoneId::Operator, ZoneId::Gateway)
+                    .to_hex(),
+            },
+            consensus: OperatorZoneEndpointKeyV1 {
+                endpoint: "127.0.0.1:19002".into(),
+                link_key_hex: token
+                    .derive_link_key(ZoneId::Operator, ZoneId::Consensus)
+                    .to_hex(),
+            },
+            sandbox: OperatorZoneEndpointKeyV1 {
+                endpoint: "127.0.0.1:19003".into(),
+                link_key_hex: token
+                    .derive_link_key(ZoneId::Operator, ZoneId::Sandbox)
+                    .to_hex(),
+            },
+            agent_runner: OperatorZoneEndpointKeyV1 {
+                endpoint: "127.0.0.1:19004".into(),
+                link_key_hex: token
+                    .derive_link_key(ZoneId::Operator, ZoneId::AgentRunner)
+                    .to_hex(),
+            },
+        };
+        bundle.write_owner_only(&bundle_path).unwrap();
+        let loaded = OperatorIpcKeyBundleV1::read_owner_only(&bundle_path).unwrap();
+        let client = loaded.client_for(ZoneId::Gateway).unwrap();
+        let resp = client.call(1, &ZoneRequest::Health {}).await.unwrap();
+        assert_eq!(
+            resp,
+            ZoneResponse::Health {
+                zone: ZoneId::Gateway,
+                status: "ok".into(),
+            }
+        );
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn unix_socket_enforces_0600_mode_and_peercred_uid_allowlist() {
+        use std::os::unix::fs::PermissionsExt;
+        let dir = tempfile::tempdir().unwrap();
+        let sock_path = dir.path().join("ipc").join("consensus.sock");
+        let token = ZoneIpcToken::generate();
+        let server = ZoneIpcServer::bind(
+            ZoneId::Consensus,
+            ZoneEndpoint::Unix(sock_path.clone()),
+            token.clone(),
+        )
+        .await
+        .unwrap()
+        .with_allowed_uids(vec![u32::MAX]);
+
+        let sock_mode = std::fs::metadata(&sock_path).unwrap().permissions().mode() & 0o777;
+        assert_eq!(sock_mode, 0o600);
+        let dir_mode = std::fs::metadata(sock_path.parent().unwrap())
+            .unwrap()
+            .permissions()
+            .mode()
+            & 0o777;
+        assert_eq!(dir_mode, 0o700);
+
+        tokio::spawn(
+            server.serve(|_, _| {
+                Box::pin(async { panic!("rejected UID should never reach handler") })
+            }),
+        );
+        let client = ZoneIpcClient::new(
+            ZoneId::Gateway,
+            ZoneId::Consensus,
+            ZoneEndpoint::Unix(sock_path),
+            token,
+        );
+        assert!(client.call(1, &ZoneRequest::Health {}).await.is_err());
     }
 
     #[tokio::test]

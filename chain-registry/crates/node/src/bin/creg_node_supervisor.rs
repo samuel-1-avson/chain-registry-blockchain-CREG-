@@ -9,7 +9,10 @@ use anyhow::{Context, Result};
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
-use zone_ipc::{ZoneIpcToken, ZONE_IPC_TOKEN_ENV};
+use zone_ipc::{
+    allowed_inbound_callers, allowed_outbound_targets, link_key_env_var, OperatorIpcKeyBundleV1,
+    OperatorZoneEndpointKeyV1, ZoneId, ZoneIpcToken, ZONE_IPC_TOKEN_ENV,
+};
 
 #[derive(Debug, Clone)]
 pub struct SupervisorConfig {
@@ -19,9 +22,11 @@ pub struct SupervisorConfig {
     pub p2p_listen: String,
     pub gateway_public_listen: String,
     pub gateway_admin_listen: String,
+    pub gateway_ipc_addr: String,
     pub consensus_ipc_addr: String,
     pub sandbox_ipc_addr: String,
     pub agent_ipc_addr: String,
+    pub operator_key_file: PathBuf,
     pub ipc_token_hex: String,
     pub admin_token: String,
 }
@@ -45,17 +50,26 @@ impl SupervisorConfig {
             .filter(|s| !s.trim().is_empty())
             .cloned()
             .unwrap_or_else(|| ZoneIpcToken::generate().to_hex());
+        let data_dir = get("CREG_DATA_DIR", "/var/lib/creg");
+        let operator_key_file = parent
+            .get(zone_ipc::OPERATOR_KEY_FILE_ENV)
+            .map(|s| s.trim())
+            .filter(|s| !s.is_empty())
+            .map(PathBuf::from)
+            .unwrap_or_else(|| PathBuf::from(&data_dir).join("operator-ipc-keys.json"));
 
         Self {
-            data_dir: get("CREG_DATA_DIR", "/var/lib/creg"),
+            data_dir,
             chain_spec: get("CREG_CHAIN_SPEC", "/etc/creg/chain-spec.json"),
             node_id: get("CREG_NODE_ID", "validator-01"),
             p2p_listen: get("CREG_P2P_LISTEN", "0.0.0.0:9000"),
             gateway_public_listen: get("CREG_GATEWAY_PUBLIC_LISTEN", "0.0.0.0:8080"),
             gateway_admin_listen: get("CREG_GATEWAY_ADMIN_LISTEN", "127.0.0.1:18080"),
+            gateway_ipc_addr: get("CREG_GATEWAY_IPC_ADDR", "127.0.0.1:19001"),
             consensus_ipc_addr: get("CREG_CONSENSUS_IPC_ADDR", "127.0.0.1:19002"),
             sandbox_ipc_addr: get("CREG_SANDBOX_IPC_ADDR", "127.0.0.1:19003"),
             agent_ipc_addr: get("CREG_AGENT_IPC_ADDR", "127.0.0.1:19004"),
+            operator_key_file,
             ipc_token_hex,
             admin_token,
         }
@@ -84,14 +98,71 @@ fn copy_allowlisted(
     }
 }
 
+fn inject_zone_link_keys(zone: ZoneId, master: &ZoneIpcToken, env: &mut BTreeMap<String, String>) {
+    for &caller in allowed_inbound_callers(zone) {
+        env.insert(
+            link_key_env_var(caller, zone),
+            master.derive_link_key(caller, zone).to_hex(),
+        );
+    }
+    for &target in allowed_outbound_targets(zone) {
+        env.insert(
+            link_key_env_var(zone, target),
+            master.derive_link_key(zone, target).to_hex(),
+        );
+    }
+}
+
+/// Build the owner-only operator key bundle holding ONLY `ZoneId::Operator -> Zone`
+/// derived link keys (`ADR-019` §4.3, `ECA-04`).
+pub fn build_operator_key_bundle(cfg: &SupervisorConfig) -> Result<OperatorIpcKeyBundleV1> {
+    let master = ZoneIpcToken::from_hex(&cfg.ipc_token_hex)
+        .context("parse supervisor master zone-ipc token")?;
+    Ok(OperatorIpcKeyBundleV1 {
+        schema_version: 1,
+        gateway: OperatorZoneEndpointKeyV1 {
+            endpoint: cfg.gateway_ipc_addr.clone(),
+            link_key_hex: master
+                .derive_link_key(ZoneId::Operator, ZoneId::Gateway)
+                .to_hex(),
+        },
+        consensus: OperatorZoneEndpointKeyV1 {
+            endpoint: cfg.consensus_ipc_addr.clone(),
+            link_key_hex: master
+                .derive_link_key(ZoneId::Operator, ZoneId::Consensus)
+                .to_hex(),
+        },
+        sandbox: OperatorZoneEndpointKeyV1 {
+            endpoint: cfg.sandbox_ipc_addr.clone(),
+            link_key_hex: master
+                .derive_link_key(ZoneId::Operator, ZoneId::Sandbox)
+                .to_hex(),
+        },
+        agent_runner: OperatorZoneEndpointKeyV1 {
+            endpoint: cfg.agent_ipc_addr.clone(),
+            link_key_hex: master
+                .derive_link_key(ZoneId::Operator, ZoneId::AgentRunner)
+                .to_hex(),
+        },
+    })
+}
+
 /// Strictly construct isolated child environments (`env_clear()` + allowlist)
-/// so no cross-zone secrets ever leak across process boundaries (`INV-01`).
+/// so no cross-zone secrets ever leak across process boundaries (`INV-01`), and
+/// each child receives ONLY its own HKDF-SHA256 per-link keys (`ECA-04`).
 pub fn build_zone_child_envs(
     parent_env: &BTreeMap<String, String>,
     cfg: &SupervisorConfig,
-) -> ZoneChildEnvs {
+) -> Result<ZoneChildEnvs> {
+    let master = ZoneIpcToken::from_hex(&cfg.ipc_token_hex)
+        .context("parse supervisor master zone-ipc token")?;
+
     let mut gateway = BTreeMap::new();
-    copy_allowlisted(parent_env, &mut gateway, &["RUST_LOG"]);
+    copy_allowlisted(
+        parent_env,
+        &mut gateway,
+        &["RUST_LOG", "CREG_GATEWAY_RATE_LIMIT_MAX"],
+    );
     gateway.insert(
         "CREG_GATEWAY_PUBLIC_LISTEN".into(),
         cfg.gateway_public_listen.clone(),
@@ -101,11 +172,12 @@ pub fn build_zone_child_envs(
         cfg.gateway_admin_listen.clone(),
     );
     gateway.insert("CREG_GATEWAY_ADMIN_TOKEN".into(), cfg.admin_token.clone());
+    gateway.insert("CREG_GATEWAY_IPC_ADDR".into(), cfg.gateway_ipc_addr.clone());
     gateway.insert(
         "CREG_CONSENSUS_IPC_ADDR".into(),
         cfg.consensus_ipc_addr.clone(),
     );
-    gateway.insert(ZONE_IPC_TOKEN_ENV.into(), cfg.ipc_token_hex.clone());
+    inject_zone_link_keys(ZoneId::Gateway, &master, &mut gateway);
 
     let mut consensusd = BTreeMap::new();
     copy_allowlisted(
@@ -113,6 +185,8 @@ pub fn build_zone_child_envs(
         &mut consensusd,
         &[
             "RUST_LOG",
+            "CREG_CHAIN_ID",
+            "CREG_VALIDATOR_ADDRESS",
             // The names the node reads (`HotKeyRole::env_var`).
             "CREG_VALIDATOR_KEY",
             "CREG_VALIDATOR_PQ_KEY",
@@ -149,7 +223,7 @@ pub fn build_zone_child_envs(
     );
     consensusd.insert("CREG_SANDBOX_IPC_ADDR".into(), cfg.sandbox_ipc_addr.clone());
     consensusd.insert("CREG_AGENT_IPC_ADDR".into(), cfg.agent_ipc_addr.clone());
-    consensusd.insert(ZONE_IPC_TOKEN_ENV.into(), cfg.ipc_token_hex.clone());
+    inject_zone_link_keys(ZoneId::Consensus, &master, &mut consensusd);
 
     let mut sandboxd = BTreeMap::new();
     copy_allowlisted(
@@ -162,10 +236,14 @@ pub fn build_zone_child_envs(
             "CREG_FIRECRACKER_BIN",
             "CREG_JAILER_BIN",
             "CREG_NSJAIL_BIN",
+            "CREG_DEV_SANDBOX",
+            "CREG_TESTNET",
+            "CREG_PUBLIC_VALIDATOR",
+            "CREG_PRODUCTION",
         ],
     );
     sandboxd.insert("CREG_SANDBOX_IPC_ADDR".into(), cfg.sandbox_ipc_addr.clone());
-    sandboxd.insert(ZONE_IPC_TOKEN_ENV.into(), cfg.ipc_token_hex.clone());
+    inject_zone_link_keys(ZoneId::Sandbox, &master, &mut sandboxd);
 
     let mut agent_runner = BTreeMap::new();
     copy_allowlisted(
@@ -174,10 +252,14 @@ pub fn build_zone_child_envs(
         &[
             "RUST_LOG",
             "CREG_AI_CONFIG",
+            "CREG_LLM_ENABLED",
+            "CREG_AI_MODE",
+            "CREG_LLM_PROVIDERS",
             "CREG_AI_API_KEY",
             "OPENAI_API_KEY",
             "ANTHROPIC_API_KEY",
             "GEMINI_API_KEY",
+            "OPENROUTER_API_KEY",
             "OLLAMA_HOST",
             // Lane C fetches committed tarballs itself (ADR-019 `ECA-03`).
             "CREG_IPFS_URL",
@@ -186,14 +268,14 @@ pub fn build_zone_child_envs(
     );
     agent_runner.insert("CREG_AGENT_IPC_ADDR".into(), cfg.agent_ipc_addr.clone());
     agent_runner.insert("CREG_SANDBOX_IPC_ADDR".into(), cfg.sandbox_ipc_addr.clone());
-    agent_runner.insert(ZONE_IPC_TOKEN_ENV.into(), cfg.ipc_token_hex.clone());
+    inject_zone_link_keys(ZoneId::AgentRunner, &master, &mut agent_runner);
 
-    ZoneChildEnvs {
+    Ok(ZoneChildEnvs {
         gateway,
         consensusd,
         sandboxd,
         agent_runner,
-    }
+    })
 }
 
 pub struct ManagedChild {
@@ -316,7 +398,9 @@ fn resolve_sibling_bin(name: &str) -> PathBuf {
 fn main() -> Result<()> {
     let parent_env: BTreeMap<String, String> = std::env::vars().collect();
     let cfg = SupervisorConfig::from_parent_env(&parent_env);
-    let envs = build_zone_child_envs(&parent_env, &cfg);
+    let operator_bundle = build_operator_key_bundle(&cfg)?;
+    operator_bundle.write_owner_only(&cfg.operator_key_file)?;
+    let envs = build_zone_child_envs(&parent_env, &cfg)?;
 
     let mut children = vec![
         spawn_contained_zone(
@@ -382,7 +466,7 @@ mod tests {
         assert_eq!(cfg.ipc_token_hex.len(), 64);
         assert_eq!(cfg.admin_token.len(), 64);
 
-        let envs = build_zone_child_envs(&parent, &cfg);
+        let envs = build_zone_child_envs(&parent, &cfg).unwrap();
 
         // Runtime INV-01 forbidden-env guards MUST pass for every single zone.
         assert!(
@@ -406,7 +490,7 @@ mod tests {
         )
         .is_ok());
 
-        // Arbitrary ambient variables never leak into any child zone.
+        // Master token must NEVER enter child envs; only per-link HKDF keys are injected.
         for map in [
             &envs.gateway,
             &envs.consensusd,
@@ -414,8 +498,51 @@ mod tests {
             &envs.agent_runner,
         ] {
             assert!(!map.contains_key("UNRELATED_AMBIENT_SECRET"));
-            assert_eq!(map.get(ZONE_IPC_TOKEN_ENV), Some(&cfg.ipc_token_hex));
+            assert!(!map.contains_key(ZONE_IPC_TOKEN_ENV));
         }
+
+        // Cross-zone link isolation: gateway never sees consensus->agent or agent->sandbox keys.
+        assert!(envs
+            .gateway
+            .contains_key(&link_key_env_var(ZoneId::Gateway, ZoneId::Consensus)));
+        assert!(envs
+            .gateway
+            .contains_key(&link_key_env_var(ZoneId::Operator, ZoneId::Gateway)));
+        assert!(!envs
+            .gateway
+            .contains_key(&link_key_env_var(ZoneId::Consensus, ZoneId::AgentRunner)));
+        assert!(!envs
+            .gateway
+            .contains_key(&link_key_env_var(ZoneId::AgentRunner, ZoneId::Sandbox)));
+        assert!(!envs
+            .sandboxd
+            .contains_key(&link_key_env_var(ZoneId::Gateway, ZoneId::Consensus)));
+        assert!(!envs
+            .agent_runner
+            .contains_key(&link_key_env_var(ZoneId::Gateway, ZoneId::Consensus)));
+
+        // Operator bundle holds ONLY Operator->Zone link keys matching each child's Operator key.
+        let bundle = build_operator_key_bundle(&cfg).unwrap();
+        assert_eq!(
+            Some(&bundle.gateway.link_key_hex),
+            envs.gateway
+                .get(&link_key_env_var(ZoneId::Operator, ZoneId::Gateway))
+        );
+        assert_eq!(
+            Some(&bundle.consensus.link_key_hex),
+            envs.consensusd
+                .get(&link_key_env_var(ZoneId::Operator, ZoneId::Consensus))
+        );
+        assert_eq!(
+            Some(&bundle.sandbox.link_key_hex),
+            envs.sandboxd
+                .get(&link_key_env_var(ZoneId::Operator, ZoneId::Sandbox))
+        );
+        assert_eq!(
+            Some(&bundle.agent_runner.link_key_hex),
+            envs.agent_runner
+                .get(&link_key_env_var(ZoneId::Operator, ZoneId::AgentRunner))
+        );
 
         // Only gateway holds admin bearer token; only consensus holds signing/vault; only agent holds LLM keys.
         assert!(envs.gateway.contains_key("CREG_GATEWAY_ADMIN_TOKEN"));
@@ -442,7 +569,7 @@ mod tests {
         parent.insert("CREG_VALIDATOR_KEY".into(), "55".repeat(32));
         parent.insert("CREG_IPFS_URL".into(), "http://127.0.0.1:5001".into());
         let cfg = SupervisorConfig::from_parent_env(&parent);
-        let envs = build_zone_child_envs(&parent, &cfg);
+        let envs = build_zone_child_envs(&parent, &cfg).unwrap();
 
         // The current name wins over the legacy alias.
         assert_eq!(

@@ -1,0 +1,19 @@
+[package]
+name = "ai-config"
+version = "0.1.0"
+edition = "2021"
+description = "Dependency-minimal Validator AI configuration, secret-ref validation, and SSRF URL guard (ADR-019 ECA-16)"
+
+[dependencies]
+anyhow = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+toml = "=0.8.23"
+url = "2.5.9"
+zeroize = "=1.8.2"
+
+[dev-dependencies]
+tempfile = "3"
+
+[lints]
+workspace = true

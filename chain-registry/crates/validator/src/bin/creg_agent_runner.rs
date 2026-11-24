@@ -5,6 +5,7 @@
 //! authenticated `zone-ipc` to Zone 3 (`creg-sandboxd`) rather than executing
 //! untrusted package payloads in Zone 4.
 
+use ai_config::{check_ai_config, validate_and_classify_provider_url};
 use anyhow::{bail, Context, Result};
 use common::{ChainRecord, Finding, PackageId, PackageIntelligenceReport, PackageManifest};
 use sha2::{Digest, Sha256};
@@ -12,16 +13,56 @@ use std::future::Future;
 use std::pin::Pin;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
+use std::time::Instant;
 use validator::ai_agent::{
-    AgentInvestigationInput, AgentRunner, LlmProxy, SandboxReplayExecutor, ValidatorAiConfig,
+    AgentInvestigationInput, AgentRunner, ChatMessage, ChatRole, LlmProxy, SandboxReplayExecutor,
+    ValidatorAiConfig,
 };
 use validator::kernel_sandbox::{KernelBehaviorGraphV1, TriggerSpecV1};
 use validator::sandbox::SandboxResult;
 use zone_ipc::{
-    decode_b64, encode_b64, enforce_zone_forbidden_env, ZoneEndpoint, ZoneId, ZoneIpcClient,
-    ZoneIpcServer, ZoneIpcToken, ZoneRequest, ZoneResponse, AGENT_RUNNER_FORBIDDEN_ENV,
-    ZONE_IPC_TOKEN_ENV,
+    decode_b64, encode_b64, enforce_zone_forbidden_env, ProviderProbeEntryV1,
+    ProviderProbeReportV1, ZoneCapabilitiesV1, ZoneCapabilityReportV1, ZoneEndpoint, ZoneId,
+    ZoneIpcClient, ZoneIpcServer, ZoneKeyring, ZoneRequest, ZoneResponse,
+    AGENT_RUNNER_FORBIDDEN_ENV,
 };
+
+const CANARY_SYSTEM_PROMPT: &str = "Connectivity probe. Respond with exact JSON only: {\"tool\":\"list_files\",\"args\":{\"max_entries\":1}}";
+const CANARY_USER_PROMPT: &str = "Return the exact canary tool-call JSON.";
+
+fn strip_markdown_fences(raw: &str) -> &str {
+    let trimmed = raw.trim();
+    if let Some(after_open) = trimmed.strip_prefix("```") {
+        let after_lang = after_open
+            .find('\n')
+            .map(|idx| &after_open[idx + 1..])
+            .unwrap_or(after_open);
+        after_lang
+            .trim()
+            .strip_suffix("```")
+            .unwrap_or(after_lang)
+            .trim()
+    } else {
+        trimmed
+    }
+}
+
+fn is_valid_canary_tool_json(raw: &str) -> bool {
+    let cleaned = strip_markdown_fences(raw);
+    let Ok(val) = serde_json::from_str::<serde_json::Value>(cleaned) else {
+        return false;
+    };
+    let direct_ok = val.get("tool").and_then(|v| v.as_str()) == Some("list_files")
+        && val
+            .get("args")
+            .and_then(|a| a.get("max_entries"))
+            .and_then(|n| n.as_u64())
+            == Some(1);
+    let envelope_ok = val.get("action").and_then(|v| v.as_str()) == Some("tool_call")
+        && val["call"]["tool"].as_str() == Some("list_files")
+        && val["call"]["args"]["max_entries"].as_u64() == Some(1);
+    direct_ok || envelope_ok
+}
 
 fn parse_package_canonical(raw: &str) -> Result<PackageId> {
     let trimmed = raw.trim();
@@ -134,6 +175,143 @@ pub async fn handle_agent_request(
             zone: ZoneId::AgentRunner,
             status: "ok".into(),
         },
+        ZoneRequest::Capabilities {} => {
+            let cfg = runner.config();
+            let check = check_ai_config(cfg, None, false);
+            let configured_providers = cfg.providers.keys().cloned().collect();
+            let ipfs_configured = std::env::var(INTELLIGENCE_IPFS_URL_ENV)
+                .ok()
+                .is_some_and(|v| !v.trim().is_empty());
+            let sandbox_ipc_configured = std::env::var("CREG_SANDBOX_IPC_ADDR")
+                .ok()
+                .is_some_and(|v| !v.trim().is_empty());
+            let report = ZoneCapabilityReportV1 {
+                schema_version: 1,
+                zone: ZoneId::AgentRunner,
+                status: "ok".into(),
+                capabilities: ZoneCapabilitiesV1::AgentRunner {
+                    ai_mode: format!("{:?}", cfg.agent.mode),
+                    configured_providers,
+                    distinct_model_families: check.distinct_model_families,
+                    diversity_warning: check.diversity_advisory,
+                    daily_budget_usd: cfg.agent.max_daily_api_spend_usd,
+                    spent_today_usd: runner.proxy().spent_today_usd(),
+                    ipfs_configured,
+                    sandbox_ipc_configured,
+                },
+            };
+            match serde_json::to_string(&report) {
+                Ok(report_json) => ZoneResponse::Capabilities { report_json },
+                Err(err) => ZoneResponse::Error {
+                    code: 500,
+                    message: format!("serialize agent capability report failed: {err}"),
+                },
+            }
+        }
+        ZoneRequest::ProbeProvider { provider } => {
+            if !matches!(sender, ZoneId::Operator | ZoneId::Consensus) {
+                return ZoneResponse::Error {
+                    code: 403,
+                    message: format!(
+                        "only operator or consensus zone may probe AI providers (got '{sender}')"
+                    ),
+                };
+            }
+            let cfg = runner.config();
+            let targets: Vec<String> = match provider {
+                Some(ref name) => {
+                    if !cfg.providers.contains_key(name) {
+                        return ZoneResponse::Error {
+                            code: 404,
+                            message: format!("unknown AI provider '{name}'"),
+                        };
+                    }
+                    vec![name.clone()]
+                }
+                None => cfg.providers.keys().cloned().collect(),
+            };
+
+            let mut entries = Vec::with_capacity(targets.len());
+            for name in targets {
+                let Some(profile) = cfg.providers.get(&name) else {
+                    continue;
+                };
+                let endpoint_class = validate_and_classify_provider_url(
+                    profile.resolved_base_url(),
+                    profile.kind,
+                    profile.allow_private_network,
+                    false,
+                )
+                .map(|(_u, cls)| cls.as_str().to_string())
+                .unwrap_or_else(|_| "unknown".to_string());
+                let kind_str = serde_json::to_value(profile.kind)
+                    .ok()
+                    .and_then(|v| v.as_str().map(str::to_string))
+                    .unwrap_or_else(|| format!("{:?}", profile.kind));
+                let model_family = profile.resolved_model_family();
+                let started = Instant::now();
+                let res = runner
+                    .proxy()
+                    .complete(
+                        &name,
+                        CANARY_SYSTEM_PROMPT,
+                        vec![ChatMessage {
+                            role: ChatRole::User,
+                            content: CANARY_USER_PROMPT.to_string(),
+                        }],
+                        64,
+                    )
+                    .await;
+                let latency_ms = started.elapsed().as_millis() as u64;
+                match res {
+                    Ok(resp) => {
+                        let valid_tool_json = is_valid_canary_tool_json(&resp.content);
+                        let error = if valid_tool_json {
+                            None
+                        } else {
+                            Some("canary response was not expected list_files tool JSON".into())
+                        };
+                        entries.push(ProviderProbeEntryV1 {
+                            provider: name,
+                            kind: kind_str,
+                            model: profile.model.clone(),
+                            model_family,
+                            endpoint_class,
+                            ok: valid_tool_json,
+                            latency_ms,
+                            valid_tool_json,
+                            error,
+                        });
+                    }
+                    Err(err) => {
+                        entries.push(ProviderProbeEntryV1 {
+                            provider: name,
+                            kind: kind_str,
+                            model: profile.model.clone(),
+                            model_family,
+                            endpoint_class,
+                            ok: false,
+                            latency_ms,
+                            valid_tool_json: false,
+                            error: Some(format!("{err:#}")),
+                        });
+                    }
+                }
+            }
+
+            let report = ProviderProbeReportV1 {
+                schema_version: 1,
+                ok: !entries.is_empty() && entries.iter().all(|e| e.ok && e.valid_tool_json),
+                providers: entries,
+            };
+            match serde_json::to_string(&report) {
+                Ok(report_json) => ZoneResponse::ProviderProbeResult { report_json },
+                Err(err) => ZoneResponse::Error {
+                    code: 500,
+                    message: format!("serialize ProviderProbeReportV1 failed: {err}"),
+                },
+            }
+        }
         ZoneRequest::GenerateIntelligenceReport { record_json } => {
             if sender != ZoneId::Consensus {
                 return ZoneResponse::Error {
@@ -280,7 +458,8 @@ async fn main() -> Result<()> {
 
     enforce_zone_forbidden_env(ZoneId::AgentRunner, AGENT_RUNNER_FORBIDDEN_ENV)?;
 
-    let token = ZoneIpcToken::from_env(ZONE_IPC_TOKEN_ENV)?;
+    let keyring = ZoneKeyring::from_env_for_zone(ZoneId::AgentRunner)?;
+    let sandbox_link_key = keyring.outbound_key(ZoneId::Sandbox)?;
     let bind_addr =
         std::env::var("CREG_AGENT_IPC_ADDR").unwrap_or_else(|_| "127.0.0.1:19004".into());
     let sandbox_addr =
@@ -291,16 +470,16 @@ async fn main() -> Result<()> {
 
     let ai_cfg = ValidatorAiConfig::from_env_or_file()?;
     let proxy = Arc::new(LlmProxy::new_http(ai_cfg));
-    let sandbox_client = ZoneIpcClient::new(
+    let sandbox_client = ZoneIpcClient::with_link_key(
         ZoneId::AgentRunner,
         ZoneId::Sandbox,
         sandbox_ep,
-        token.clone(),
+        sandbox_link_key,
     );
     let replay_exec = Arc::new(ZoneIpcReplayExecutor::new(sandbox_client));
     let runner = Arc::new(AgentRunner::with_replay_executor(proxy, replay_exec));
 
-    let server = ZoneIpcServer::bind(ZoneId::AgentRunner, endpoint, token).await?;
+    let server = ZoneIpcServer::bind_with_keyring(ZoneId::AgentRunner, endpoint, keyring).await?;
     tracing::info!(
         ipc = %bind_addr,
         sandbox_ipc = %sandbox_addr,
@@ -317,9 +496,13 @@ async fn main() -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use chain_registry_secrets::SecretString;
+    use std::collections::VecDeque;
     use std::net::SocketAddr;
+    use std::sync::Mutex;
+    use validator::ai_agent::{LlmRequest, LlmResponse, LlmTransport};
     use validator::sandbox::SandboxMetrics;
-    use zone_ipc::check_forbidden_env_map;
+    use zone_ipc::{check_forbidden_env_map, ZoneIpcToken};
 
     #[test]
     fn inv_01_agent_runner_blocks_consensus_keys() {
@@ -442,5 +625,151 @@ mod tests {
             .unwrap();
         assert_eq!(res.metrics.engine_used, "zone3-mock-firecracker");
         assert_eq!(res.observed_network_hosts, vec!["198.51.100.77"]);
+    }
+
+    struct MockProbeTransport {
+        responses: Mutex<VecDeque<Result<String>>>,
+    }
+
+    impl LlmTransport for MockProbeTransport {
+        fn complete<'a>(
+            &'a self,
+            request: &'a LlmRequest,
+            _api_key: Option<&'a SecretString>,
+        ) -> Pin<Box<dyn Future<Output = Result<LlmResponse>> + Send + 'a>> {
+            Box::pin(async move {
+                let next = self
+                    .responses
+                    .lock()
+                    .unwrap()
+                    .pop_front()
+                    .unwrap_or_else(|| Err(anyhow::anyhow!("no mock response")));
+                let content = next?;
+                Ok(LlmResponse {
+                    content,
+                    model: request.profile.model.clone(),
+                    model_family: request.profile.resolved_model_family(),
+                    input_tokens: 12,
+                    output_tokens: 8,
+                })
+            })
+        }
+    }
+
+    #[tokio::test]
+    async fn agent_capabilities_and_provider_probe_behave_as_specified() {
+        let single_cfg = ValidatorAiConfig::from_toml_str(
+            r#"
+[agent]
+mode = "hybrid_escalate"
+
+[providers.local_qwen]
+kind = "ollama"
+model = "qwen2.5-coder:14b"
+
+[routing]
+tier_fast = "local_qwen"
+"#,
+        )
+        .unwrap();
+        let transport = Arc::new(MockProbeTransport {
+            responses: Mutex::new(VecDeque::from([
+                Ok(r#"{"tool":"list_files","args":{"max_entries":1}}"#.to_string()),
+                Ok("not valid json".to_string()),
+            ])),
+        });
+        let runner = Arc::new(AgentRunner::new(Arc::new(LlmProxy::new(
+            single_cfg,
+            transport.clone(),
+        ))));
+
+        // Capabilities reports 1 distinct model family + diversity warning.
+        let cap = handle_agent_request(
+            ZoneId::Operator,
+            ZoneRequest::Capabilities {},
+            Arc::clone(&runner),
+        )
+        .await;
+        match cap {
+            ZoneResponse::Capabilities { report_json } => {
+                let parsed: ZoneCapabilityReportV1 = serde_json::from_str(&report_json).unwrap();
+                assert_eq!(parsed.zone, ZoneId::AgentRunner);
+                match parsed.capabilities {
+                    ZoneCapabilitiesV1::AgentRunner {
+                        distinct_model_families,
+                        diversity_warning,
+                        configured_providers,
+                        ..
+                    } => {
+                        assert_eq!(distinct_model_families, 1);
+                        assert!(diversity_warning.is_some());
+                        assert_eq!(configured_providers, vec!["local_qwen"]);
+                    }
+                    other => panic!("unexpected capabilities: {other:?}"),
+                }
+            }
+            other => panic!("unexpected response: {other:?}"),
+        }
+
+        // Gateway cannot probe AI providers.
+        let denied = handle_agent_request(
+            ZoneId::Gateway,
+            ZoneRequest::ProbeProvider { provider: None },
+            Arc::clone(&runner),
+        )
+        .await;
+        assert!(matches!(denied, ZoneResponse::Error { code: 403, .. }));
+
+        // Unknown provider name yields 404.
+        let missing = handle_agent_request(
+            ZoneId::Operator,
+            ZoneRequest::ProbeProvider {
+                provider: Some("nonexistent".into()),
+            },
+            Arc::clone(&runner),
+        )
+        .await;
+        assert!(matches!(missing, ZoneResponse::Error { code: 404, .. }));
+
+        // 1st probe returns valid canary tool JSON -> ok: true.
+        let ok_probe = handle_agent_request(
+            ZoneId::Operator,
+            ZoneRequest::ProbeProvider {
+                provider: Some("local_qwen".into()),
+            },
+            Arc::clone(&runner),
+        )
+        .await;
+        match ok_probe {
+            ZoneResponse::ProviderProbeResult { report_json } => {
+                let rep: ProviderProbeReportV1 = serde_json::from_str(&report_json).unwrap();
+                assert!(rep.ok);
+                assert_eq!(rep.providers.len(), 1);
+                assert!(rep.providers[0].ok);
+                assert!(rep.providers[0].valid_tool_json);
+                assert_eq!(rep.providers[0].endpoint_class, "loopback");
+            }
+            other => panic!("unexpected response: {other:?}"),
+        }
+
+        // 2nd probe returns malformed output -> ok: false, valid_tool_json: false.
+        let bad_probe = handle_agent_request(
+            ZoneId::Operator,
+            ZoneRequest::ProbeProvider {
+                provider: Some("local_qwen".into()),
+            },
+            Arc::clone(&runner),
+        )
+        .await;
+        match bad_probe {
+            ZoneResponse::ProviderProbeResult { report_json } => {
+                let rep: ProviderProbeReportV1 = serde_json::from_str(&report_json).unwrap();
+                assert!(!rep.ok);
+                assert_eq!(rep.providers.len(), 1);
+                assert!(!rep.providers[0].ok);
+                assert!(!rep.providers[0].valid_tool_json);
+            }
+            other => panic!("unexpected response: {other:?}"),
+        }
     }
 }

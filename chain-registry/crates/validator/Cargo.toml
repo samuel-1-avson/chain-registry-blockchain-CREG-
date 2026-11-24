@@ -15,6 +15,7 @@ path = "src/bin/creg_agent_runner.rs"
 common     = { path = "../common" }
 chain-registry-secrets = { path = "../secrets" }
 zone-ipc   = { path = "../zone-ipc" }
+ai-config  = { path = "../ai-config" }
 tokio      = { workspace = true }
 serde      = { workspace = true }
 serde_json = { workspace = true }

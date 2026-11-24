@@ -363,6 +363,10 @@ impl AgentRunner {
         self.proxy.config()
     }
 
+    pub fn proxy(&self) -> &LlmProxy {
+        &self.proxy
+    }
+
     pub async fn investigate(
         &self,
         input: AgentInvestigationInput<'_>,

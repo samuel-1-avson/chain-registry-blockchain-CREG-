@@ -342,7 +342,10 @@ pub(crate) fn extract_vault_field(data: &serde_json::Value, role: HotKeyRole) ->
 enum SecretRefTarget<'a> {
     Env(&'a str),
     Vault { path: &'a str, field: &'a str },
+    File(&'a str),
 }
+
+const MAX_SECRET_FILE_BYTES: u64 = 4_096;
 
 fn validate_secret_ref_format(secret_ref: &str) -> Result<SecretRefTarget<'_>> {
     let trimmed = secret_ref.trim();
@@ -381,13 +384,79 @@ fn validate_secret_ref_format(secret_ref: &str) -> Result<SecretRefTarget<'_>> {
         }
         return Ok(SecretRefTarget::Vault { path, field });
     }
-    bail!("inline plaintext secrets are forbidden; use 'env:<VAR_NAME>' or 'vault:<path>#<field>'")
+    if let Some(raw_path) = trimmed.strip_prefix("file:") {
+        let path = std::path::Path::new(raw_path);
+        if raw_path.is_empty()
+            || !path.is_absolute()
+            || path
+                .components()
+                .any(|c| matches!(c, std::path::Component::ParentDir))
+        {
+            bail!("invalid file: secret reference '{trimmed}' (must be an absolute path without '..')");
+        }
+        return Ok(SecretRefTarget::File(raw_path));
+    }
+    bail!("inline plaintext secrets are forbidden; use 'env:<VAR_NAME>', 'vault:<path>#<field>', or 'file:<abs_path>'")
+}
+
+fn read_owner_only_secret_file(path: &std::path::Path) -> Result<SecretString> {
+    let meta = std::fs::symlink_metadata(path)
+        .with_context(|| format!("stat secret file '{}'", path.display()))?;
+    let file_type = meta.file_type();
+    if file_type.is_symlink() || !file_type.is_file() {
+        bail!(
+            "secret file '{}' must be a regular non-symlink file",
+            path.display()
+        );
+    }
+    if meta.len() == 0 {
+        bail!("secret file '{}' is empty", path.display());
+    }
+    if meta.len() > MAX_SECRET_FILE_BYTES {
+        bail!(
+            "secret file '{}' is {} bytes, exceeding {} byte limit",
+            path.display(),
+            meta.len(),
+            MAX_SECRET_FILE_BYTES
+        );
+    }
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let mode = meta.permissions().mode() & 0o777;
+        if (mode & 0o077) != 0 {
+            bail!(
+                "secret file '{}' has mode {:04o}; owner-only permissions (0600 or 0400) required",
+                path.display(),
+                mode
+            );
+        }
+    }
+    let raw = zeroize::Zeroizing::new(
+        std::fs::read(path).with_context(|| format!("read secret file '{}'", path.display()))?,
+    );
+    if raw.len() as u64 > MAX_SECRET_FILE_BYTES {
+        bail!(
+            "secret file '{}' exceeded {} byte limit during read",
+            path.display(),
+            MAX_SECRET_FILE_BYTES
+        );
+    }
+    let text = zeroize::Zeroizing::new(
+        String::from_utf8(raw.to_vec())
+            .with_context(|| format!("secret file '{}' must be valid UTF-8", path.display()))?,
+    );
+    let trimmed = text.trim();
+    if trimmed.is_empty() {
+        bail!("secret file '{}' is empty", path.display());
+    }
+    Ok(SecretString::new(trimmed))
 }
 
 impl SecretsProvider {
-    /// Resolve an operator secret reference (`env:<VAR>` or `vault:<path>#<field>`)
-    /// into a zeroizing [`SecretString`] (`VNA-32`). Inline secret values are
-    /// always rejected.
+    /// Resolve an operator secret reference (`env:<VAR>`, `vault:<path>#<field>`,
+    /// or `file:<abs_path>`) into a zeroizing [`SecretString`] (`VNA-32`). Inline
+    /// secret values are always rejected.
     pub async fn resolve_secret_ref(&self, secret_ref: &str) -> Result<SecretString> {
         match validate_secret_ref_format(secret_ref)? {
             SecretRefTarget::Env(var_name) => {
@@ -412,6 +481,9 @@ impl SecretsProvider {
                     )
                 })?;
                 vault.read_kv2_field(path, field).await
+            }
+            SecretRefTarget::File(raw_path) => {
+                read_owner_only_secret_file(std::path::Path::new(raw_path))
             }
         }
     }
@@ -526,5 +598,43 @@ mod tests {
         assert!(rt
             .block_on(provider.resolve_secret_ref("vault:secret/data/creg/llm#gemini_api_key"))
             .is_err());
+
+        // file: scheme enforces absolute path, no traversal, size <= 4096, owner-only permissions.
+        let pid = std::process::id();
+        let dir = std::env::temp_dir().join(format!("creg-secrets-file-test-{pid}"));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let key_path = dir.join("llm.key");
+        std::fs::write(&key_path, "  file-secret-value\n").unwrap();
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            std::fs::set_permissions(&key_path, std::fs::Permissions::from_mode(0o644)).unwrap();
+            assert!(rt
+                .block_on(provider.resolve_secret_ref(&format!("file:{}", key_path.display())))
+                .is_err());
+            std::fs::set_permissions(&key_path, std::fs::Permissions::from_mode(0o600)).unwrap();
+        }
+        let resolved_file = rt
+            .block_on(provider.resolve_secret_ref(&format!("file:{}", key_path.display())))
+            .unwrap();
+        assert_eq!(resolved_file.expose_secret(), "file-secret-value");
+
+        let big_path = dir.join("too-big.key");
+        std::fs::write(&big_path, vec![b'x'; (MAX_SECRET_FILE_BYTES as usize) + 1]).unwrap();
+        assert!(rt
+            .block_on(provider.resolve_secret_ref(&format!("file:{}", big_path.display())))
+            .is_err());
+
+        assert!(rt
+            .block_on(provider.resolve_secret_ref("file:relative/path.key"))
+            .is_err());
+        assert!(rt
+            .block_on(
+                provider
+                    .resolve_secret_ref(&format!("file:{}", dir.join("..").join("x").display()))
+            )
+            .is_err());
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }

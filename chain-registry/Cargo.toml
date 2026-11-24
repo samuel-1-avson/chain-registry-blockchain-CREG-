@@ -17,6 +17,7 @@ members = [
     "crates/secrets",
     "crates/unpack",
     "crates/zone-ipc",
+    "crates/ai-config",
     "crates/gateway",
     "crates/l1-tx",
     "crates/registry-view",

@@ -95,6 +95,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "ai-config"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "toml",
+ "url",
+ "zeroize",
+]
+
+[[package]]
 name = "allocator-api2"
 version = "0.2.21"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -9744,6 +9757,7 @@ dependencies = [
 name = "validator"
 version = "0.1.0"
 dependencies = [
+ "ai-config",
  "anyhow",
  "base64 0.22.1",
  "bytes",
@@ -11103,13 +11117,18 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "hex",
+ "hkdf",
+ "hmac 0.12.1",
+ "libc",
  "rand 0.8.8",
  "serde",
  "serde_json",
  "sha2 0.10.9",
  "subtle",
+ "tempfile",
  "tokio",
  "tracing",
+ "zeroize",
 ]
 
 [[package]]

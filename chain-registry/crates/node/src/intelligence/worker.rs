@@ -11,10 +11,7 @@ use anyhow::{bail, Context};
 use common::{ChainRecord, IntelligenceStatus, PackageIntelligenceReport};
 use tokio::sync::Semaphore;
 use tracing::{info, warn};
-use zone_ipc::{
-    ZoneEndpoint, ZoneId, ZoneIpcClient, ZoneIpcToken, ZoneRequest, ZoneResponse,
-    ZONE_IPC_TOKEN_ENV,
-};
+use zone_ipc::{ZoneEndpoint, ZoneId, ZoneIpcClient, ZoneKeyring, ZoneRequest, ZoneResponse};
 
 use super::IntelligenceStore;
 
@@ -98,20 +95,22 @@ pub async fn generate_and_store(
     Ok(report)
 }
 
-/// Client for Zone 4 from `CREG_AGENT_IPC_ADDR` and `CREG_ZONE_IPC_TOKEN`.
+/// Client for Zone 4 from `CREG_AGENT_IPC_ADDR` and `ZoneKeyring` per-link keys
+/// (falling back to `CREG_ZONE_IPC_TOKEN` when per-link env vars are unset).
 pub fn agent_runner_client() -> anyhow::Result<ZoneIpcClient> {
-    let token = ZoneIpcToken::from_env(ZONE_IPC_TOKEN_ENV)
-        .context("Lane C needs CREG_ZONE_IPC_TOKEN to reach creg-agent-runner")?;
+    let keyring = ZoneKeyring::from_env_for_zone(ZoneId::Consensus)
+        .context("Lane C needs per-link or master zone-ipc key to reach creg-agent-runner")?;
+    let link_key = keyring.outbound_key(ZoneId::AgentRunner)?;
     let addr = std::env::var(AGENT_IPC_ADDR_ENV)
         .ok()
         .filter(|value| !value.trim().is_empty())
         .unwrap_or_else(|| DEFAULT_AGENT_IPC_ADDR.to_string());
     let endpoint = ZoneEndpoint::parse(&addr)?;
-    Ok(ZoneIpcClient::new(
+    Ok(ZoneIpcClient::with_link_key(
         ZoneId::Consensus,
         ZoneId::AgentRunner,
         endpoint,
-        token,
+        link_key,
     ))
 }
 
@@ -151,7 +150,7 @@ pub async fn request_report(
 mod tests {
     use super::*;
     use std::net::SocketAddr;
-    use zone_ipc::ZoneIpcServer;
+    use zone_ipc::{ZoneIpcServer, ZoneIpcToken};
 
     async fn agent_stub(answer: fn(&ChainRecord) -> ZoneResponse) -> ZoneIpcClient {
         let token = ZoneIpcToken::generate();

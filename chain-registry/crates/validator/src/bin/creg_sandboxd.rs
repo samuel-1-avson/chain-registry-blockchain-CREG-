@@ -8,8 +8,9 @@ use common::{PackageId, PackageManifest};
 use std::time::Duration;
 use validator::kernel_sandbox::TriggerSpecV1;
 use zone_ipc::{
-    decode_b64, enforce_zone_forbidden_env, ZoneEndpoint, ZoneId, ZoneIpcServer, ZoneIpcToken,
-    ZoneRequest, ZoneResponse, SANDBOX_FORBIDDEN_ENV, ZONE_IPC_TOKEN_ENV,
+    decode_b64, enforce_zone_forbidden_env, ZoneCapabilitiesV1, ZoneCapabilityReportV1,
+    ZoneEndpoint, ZoneId, ZoneIpcServer, ZoneKeyring, ZoneRequest, ZoneResponse,
+    SANDBOX_FORBIDDEN_ENV,
 };
 
 pub fn parse_package_canonical(raw: &str) -> Result<PackageId> {
@@ -32,6 +33,41 @@ pub async fn handle_sandbox_request(sender: ZoneId, req: ZoneRequest) -> ZoneRes
             zone: ZoneId::Sandbox,
             status: "ok".into(),
         },
+        ZoneRequest::Capabilities {} => {
+            let status = validator::sandbox::engine_status().await;
+            let mut available_engines = Vec::new();
+            if validator::kernel_sandbox::detect_firecracker_ready().await {
+                available_engines.push("firecracker".into());
+            }
+            if validator::kernel_sandbox::detect_nsjail_ready(None, None).await {
+                available_engines.push("nsjail".into());
+            }
+            if status.dev_bypass {
+                available_engines.push("dev-bypass".into());
+            }
+            let rootfs_configured = std::env::var("CREG_SANDBOX_ROOTFS")
+                .ok()
+                .is_some_and(|v| !v.trim().is_empty());
+            let report = ZoneCapabilityReportV1 {
+                schema_version: 1,
+                zone: ZoneId::Sandbox,
+                status: "ok".into(),
+                capabilities: ZoneCapabilitiesV1::Sandbox {
+                    selected_engine: status.engine,
+                    available_engines,
+                    fallback_active: !status.isolated,
+                    rootfs_configured,
+                    max_timeout_secs: 10,
+                },
+            };
+            match serde_json::to_string(&report) {
+                Ok(report_json) => ZoneResponse::Capabilities { report_json },
+                Err(err) => ZoneResponse::Error {
+                    code: 500,
+                    message: format!("serialize sandbox capability report failed: {err}"),
+                },
+            }
+        }
         ZoneRequest::RunSandboxReplay {
             package_canonical,
             content_hash: _,
@@ -127,11 +163,11 @@ async fn main() -> Result<()> {
 
     enforce_zone_forbidden_env(ZoneId::Sandbox, SANDBOX_FORBIDDEN_ENV)?;
 
-    let token = ZoneIpcToken::from_env(ZONE_IPC_TOKEN_ENV)?;
+    let keyring = ZoneKeyring::from_env_for_zone(ZoneId::Sandbox)?;
     let bind_addr =
         std::env::var("CREG_SANDBOX_IPC_ADDR").unwrap_or_else(|_| "127.0.0.1:19003".into());
     let endpoint = ZoneEndpoint::parse(&bind_addr)?;
-    let server = ZoneIpcServer::bind(ZoneId::Sandbox, endpoint, token).await?;
+    let server = ZoneIpcServer::bind_with_keyring(ZoneId::Sandbox, endpoint, keyring).await?;
 
     tracing::info!(ipc = %bind_addr, "Zone 3 creg-sandboxd online (INV-01 enforced)");
     server
@@ -195,5 +231,21 @@ mod tests {
         )
         .await;
         assert!(matches!(denied, ZoneResponse::Error { code: 403, .. }));
+
+        let cap = handle_sandbox_request(ZoneId::Operator, ZoneRequest::Capabilities {}).await;
+        match cap {
+            ZoneResponse::Capabilities { report_json } => {
+                let parsed: ZoneCapabilityReportV1 = serde_json::from_str(&report_json).unwrap();
+                assert_eq!(parsed.zone, ZoneId::Sandbox);
+                assert!(matches!(
+                    parsed.capabilities,
+                    ZoneCapabilitiesV1::Sandbox {
+                        max_timeout_secs: 10,
+                        ..
+                    }
+                ));
+            }
+            other => panic!("unexpected response: {other:?}"),
+        }
     }
 }

@@ -8,6 +8,7 @@
 //! - Atomic UTC daily USD spend circuit breaker + per-provider concurrency semaphore
 
 use super::config::{ProviderKind, ProviderProfile, ValidatorAiConfig};
+pub use ai_config::validate_provider_url;
 use anyhow::{bail, Context, Result};
 use chain_registry_secrets::{SecretString, SecretsProvider};
 use chrono::Datelike;
@@ -16,7 +17,6 @@ use serde::{Deserialize, Serialize};
 use serde_json::json;
 use std::collections::BTreeMap;
 use std::future::Future;
-use std::net::IpAddr;
 use std::pin::Pin;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
@@ -61,128 +61,6 @@ pub trait LlmTransport: Send + Sync {
         request: &'a LlmRequest,
         api_key: Option<&'a SecretString>,
     ) -> Pin<Box<dyn Future<Output = Result<LlmResponse>> + Send + 'a>>;
-}
-
-fn is_metadata_host(host: &str) -> bool {
-    let h = host.trim_end_matches('.').to_ascii_lowercase();
-    matches!(
-        h.as_str(),
-        "metadata.google.internal" | "metadata.goog" | "metadata" | "instance-data"
-    )
-}
-
-fn is_metadata_ip(ip: IpAddr) -> bool {
-    match ip {
-        IpAddr::V4(v4) => {
-            let o = v4.octets();
-            o[0] == 169 && o[1] == 254
-        }
-        IpAddr::V6(v6) => {
-            if let Some(v4) = v6.to_ipv4_mapped() {
-                let o = v4.octets();
-                return o[0] == 169 && o[1] == 254;
-            }
-            let s = v6.segments();
-            // Link-local fe80::/10 or AWS IPv6 metadata fd00:ec2::254
-            (s[0] & 0xffc0) == 0xfe80 || s == [0xfd00, 0x0ec2, 0, 0, 0, 0, 0, 0x0254]
-        }
-    }
-}
-
-fn is_private_or_special_ip(ip: IpAddr) -> bool {
-    match ip {
-        IpAddr::V4(v4) => {
-            let o = v4.octets();
-            v4.is_private()
-                || v4.is_link_local()
-                || v4.is_unspecified()
-                || v4.is_multicast()
-                || (o[0] == 100 && (64..=127).contains(&o[1]))
-        }
-        IpAddr::V6(v6) => {
-            if let Some(v4) = v6.to_ipv4_mapped() {
-                return v4.is_private()
-                    || v4.is_link_local()
-                    || v4.is_unspecified()
-                    || v4.is_multicast()
-                    || (v4.octets()[0] == 100 && (64..=127).contains(&v4.octets()[1]));
-            }
-            v6.is_unspecified() || v6.is_multicast() || ((v6.segments()[0] & 0xfe00) == 0xfc00)
-        }
-    }
-}
-
-fn is_internal_creg_port(port: u16) -> bool {
-    if port == 50051 {
-        return true;
-    }
-    for env_key in ["CREG_PORT", "CREG_ADMIN_PORT", "CREG_GRPC_PORT"] {
-        if let Ok(raw) = std::env::var(env_key) {
-            if raw.trim().parse::<u16>().ok() == Some(port) {
-                return true;
-            }
-        }
-    }
-    false
-}
-
-/// Strict SSRF guard for operator-configured LLM endpoints.
-pub fn validate_provider_url(
-    raw_url: &str,
-    kind: ProviderKind,
-    allow_private_network: bool,
-    allow_test_http: bool,
-) -> Result<reqwest::Url> {
-    let url = reqwest::Url::parse(raw_url.trim())
-        .with_context(|| format!("invalid provider base_url '{raw_url}'"))?;
-    if !url.username().is_empty() || url.password().is_some() {
-        bail!("provider base_url must not embed credentials");
-    }
-    let scheme = url.scheme();
-    if scheme != "http" && scheme != "https" {
-        bail!("unsupported provider URL scheme '{scheme}'");
-    }
-    let host_raw = url
-        .host_str()
-        .context("provider base_url missing host")?
-        .trim_start_matches('[')
-        .trim_end_matches(']');
-
-    if is_metadata_host(host_raw) {
-        bail!("provider base_url targets blocked cloud metadata host '{host_raw}'");
-    }
-
-    let port = url.port_or_known_default().unwrap_or(0);
-    if is_internal_creg_port(port) {
-        bail!("provider base_url targets blocked internal Chain Registry port {port}");
-    }
-
-    let is_localhost_name = host_raw.eq_ignore_ascii_case("localhost")
-        || host_raw.to_ascii_lowercase().ends_with(".localhost");
-
-    if let Ok(ip) = host_raw.parse::<IpAddr>() {
-        if is_metadata_ip(ip) {
-            bail!("provider base_url targets blocked link-local/metadata IP {ip}");
-        }
-        let is_loopback = ip.is_loopback();
-        if !kind.is_local() && !allow_test_http && (is_loopback || is_private_or_special_ip(ip)) {
-            bail!("cloud provider base_url cannot target private or loopback IP {ip}");
-        }
-        if kind.is_local() && !is_loopback && is_private_or_special_ip(ip) && !allow_private_network
-        {
-            bail!(
-                "local provider base_url targeting RFC1918/private IP {ip} requires allow_private_network = true"
-            );
-        }
-    } else if !kind.is_local() && !allow_test_http && is_localhost_name {
-        bail!("cloud provider base_url cannot target localhost");
-    }
-
-    if !kind.is_local() && !allow_test_http && scheme != "https" {
-        bail!("cloud LLM provider requires HTTPS base_url");
-    }
-
-    Ok(url)
 }
 
 fn current_utc_day_key() -> u32 {
@@ -620,11 +498,16 @@ impl LlmProxy {
         if let Some(cached) = self.resolved_keys.read().await.get(name) {
             return Ok(Some(cached.clone()));
         }
-        let secrets = self
-            .secrets
-            .as_ref()
-            .context("SecretsProvider unavailable to resolve api_key_secret_ref")?;
-        let key = secrets.resolve_secret_ref(secret_ref).await?;
+        let key = match self.secrets.as_ref() {
+            Some(secrets) => secrets.resolve_secret_ref(secret_ref).await?,
+            None => match ai_config::parse_secret_ref(secret_ref)? {
+                ai_config::SecretRefKind::File(path) => {
+                    let s = ai_config::read_secret_file_zeroized(&path)?;
+                    SecretString::new(s.as_str())
+                }
+                _ => bail!("SecretsProvider unavailable to resolve api_key_secret_ref"),
+            },
+        };
         self.resolved_keys
             .write()
             .await
