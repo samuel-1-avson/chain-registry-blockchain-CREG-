@@ -1,11 +1,14 @@
 // crates/cli/src/install.rs
 // Resolves trust verdict, then either proceeds or blocks the install.
 
+use crate::evidence_panel;
 use crate::output;
 use crate::retry;
 use anyhow::{bail, Result};
+use chrono::Utc;
 use colored::Colorize;
 use common::{PackageId, VerdictStatus};
+use resolver::light_client::VerifyOptions;
 use std::time::Duration;
 
 pub async fn run(
@@ -13,6 +16,23 @@ pub async fn run(
     ecosystem_hint: Option<&str>,
     allow_unverified: bool,
     node_url: Option<&str>,
+) -> Result<()> {
+    run_with_options(
+        raw_package,
+        ecosystem_hint,
+        allow_unverified,
+        node_url,
+        &VerifyOptions::from_env(),
+    )
+    .await
+}
+
+pub async fn run_with_options(
+    raw_package: &str,
+    ecosystem_hint: Option<&str>,
+    allow_unverified: bool,
+    node_url: Option<&str>,
+    verify_opts: &VerifyOptions,
 ) -> Result<()> {
     // ── 1. Parse "name@version" or plain "name" ───────────────────────────────
     let (name, version) = parse_package_arg(raw_package);
@@ -34,9 +54,17 @@ pub async fn run(
         .or(Some(cfg.node.url.clone()));
     let effective_node_ref = effective_node_url.as_deref();
 
-    println!("{} Resolving {} ...", "→".cyan(), pkg_id.canonical().bold());
+    println!(
+        "{} Resolving {} ...",
+        "→".cyan(),
+        evidence_panel::safe_text(&pkg_id.canonical()).bold()
+    );
     let verdict = match retry::with_retry("resolve package", 3, Duration::from_millis(500), || {
-        resolver::install_gate::resolve_id_for_install(&pkg_id, effective_node_ref)
+        resolver::install_gate::resolve_id_for_install_with_options(
+            &pkg_id,
+            effective_node_ref,
+            verify_opts,
+        )
     })
     .await
     {
@@ -50,7 +78,7 @@ pub async fn run(
             common::TrustVerdict {
                 package: pkg_id.clone(),
                 status: VerdictStatus::Unknown,
-                resolved_at: chrono::Utc::now(),
+                resolved_at: Utc::now(),
                 source: common::VerdictSource::Chain {
                     node_url: effective_node_url
                         .clone()
@@ -156,6 +184,28 @@ pub async fn run(
             );
         }
         resolver::install_gate::InstallDecision::Block { message, .. } => {
+            let base_url = effective_node_ref.unwrap_or("http://localhost:8080");
+            let (view_opt, witnesses) = evidence_panel::fetch_v4_evidence(
+                &reqwest::Client::new(),
+                base_url,
+                &pkg_id.canonical(),
+            )
+            .await;
+            if let Some(view) = view_opt {
+                let findings: &[common::Finding] = match &verdict.status {
+                    VerdictStatus::Revoked { findings, .. } => findings,
+                    _ => &[],
+                };
+                let panel = evidence_panel::render_evidence_panel_from_view(
+                    &view,
+                    &witnesses,
+                    None,
+                    &[],
+                    findings,
+                    Utc::now().timestamp(),
+                );
+                evidence_panel::print_panel_lines(&panel);
+            }
             bail!("{} {message}", "✗".red().bold());
         }
     }

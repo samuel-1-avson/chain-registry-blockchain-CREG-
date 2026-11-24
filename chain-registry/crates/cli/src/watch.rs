@@ -1,15 +1,12 @@
 // crates/cli/src/watch.rs
-// `creg watch` — streams live registry events from the SSE endpoint
-// and renders them as formatted terminal output.
-//
-// Usage:
-//   creg watch                      — all events
-//   creg watch --filter verified    — only verified packages
-//   creg watch --filter pkg:express — only events for a specific package
+// `creg watch` — streams live registry events from SSE v2 (`/v1/public/v4/events`,
+// falling back to `/v1/public/events` on 404) with `Last-Event-ID` resume and renders
+// them with `DisplayText` sanitization (`ADR-019` §4.2, `ECA-18`, `ECA-17`).
 
 use anyhow::Result;
 use colored::Colorize;
 use common::DisplayText;
+use registry_view::SseEnvelopeV2;
 
 /// ECA-18 / eco-adv-08: the most bytes of one not-yet-terminated SSE frame we
 /// hold. A stream that exceeds it without a frame separator is dropped.
@@ -45,15 +42,16 @@ fn push_chunk(buffer: &mut Vec<u8>, chunk: &[u8]) -> Result<Vec<String>, FrameOv
 }
 
 pub async fn run(filter: Option<&str>, node_url: Option<&str>, ci_mode: bool) -> Result<()> {
-    let url = format!(
-        "{}/v1/public/events",
-        node_url
-            .map(String::from)
-            .unwrap_or_else(|| {
-                std::env::var("CREG_NODE_URL").unwrap_or_else(|_| "http://localhost:8080".into())
-            })
-            .trim_end_matches('/')
-    );
+    let base = node_url
+        .map(String::from)
+        .unwrap_or_else(|| {
+            std::env::var("CREG_NODE_URL").unwrap_or_else(|_| "http://localhost:8080".into())
+        })
+        .trim_end_matches('/')
+        .to_string();
+    let v4_url = format!("{base}/v1/public/v4/events");
+    let legacy_url = format!("{base}/v1/public/events");
+    let mut active_url = v4_url.clone();
 
     if ci_mode {
         println!(
@@ -64,7 +62,7 @@ pub async fn run(filter: Option<&str>, node_url: Option<&str>, ci_mode: bool) ->
     println!(
         "{} Connecting to event stream at {}",
         "→".cyan(),
-        url.dimmed()
+        active_url.dimmed()
     );
     if let Some(f) = filter {
         println!("{} Filter: {}", "→".cyan(), f.yellow());
@@ -77,17 +75,29 @@ pub async fn run(filter: Option<&str>, node_url: Option<&str>, ci_mode: bool) ->
 
     let mut retry_count = 0u32;
     let max_retries = 10u32;
+    let mut last_event_id: Option<String> = None;
 
     'reconnect: loop {
-        let mut response = match client
-            .get(&url)
-            .header("Accept", "text/event-stream")
-            .send()
-            .await
-        {
+        let mut req = client
+            .get(&active_url)
+            .header("Accept", "text/event-stream");
+        if let Some(ref event_id) = last_event_id {
+            req = req.header("Last-Event-ID", event_id);
+        }
+
+        let mut response = match req.send().await {
             Ok(r) if r.status().is_success() => {
                 retry_count = 0;
                 r
+            }
+            Ok(r) if r.status() == reqwest::StatusCode::NOT_FOUND && active_url == v4_url => {
+                active_url = legacy_url.clone();
+                eprintln!(
+                    "{} SSE v2 endpoint returned 404; falling back to legacy stream {}",
+                    "↻".yellow(),
+                    active_url.dimmed()
+                );
+                continue 'reconnect;
             }
             Ok(r) => {
                 eprintln!("{} Server returned {}", "✗".red(), r.status());
@@ -188,6 +198,9 @@ pub async fn run(filter: Option<&str>, node_url: Option<&str>, ci_mode: bool) ->
 
             for message in &frames {
                 if let Some(event) = parse_sse(message) {
+                    if let Some(ref eid) = event.id {
+                        last_event_id = Some(eid.clone());
+                    }
                     if should_display(&event, filter) {
                         render_event(&event);
                         if ci_mode && is_critical_event(&event) {
@@ -224,16 +237,23 @@ fn sse_frame_end(buffer: &[u8]) -> Option<(usize, usize)> {
 
 #[derive(Debug)]
 struct SseEvent {
+    id: Option<String>,
     kind: String,
     data: serde_json::Value,
 }
 
 fn parse_sse(raw: &str) -> Option<SseEvent> {
+    let mut event_id: Option<String> = None;
     let mut event_name = String::new();
     let mut data = String::new();
 
     for line in raw.lines() {
-        if let Some(rest) = line.strip_prefix("event:") {
+        if let Some(rest) = line.strip_prefix("id:") {
+            let trimmed = rest.trim();
+            if !trimmed.is_empty() {
+                event_id = Some(trimmed.to_string());
+            }
+        } else if let Some(rest) = line.strip_prefix("event:") {
             event_name = rest.trim().to_string();
         } else if let Some(rest) = line.strip_prefix("data:") {
             if !data.is_empty() {
@@ -249,6 +269,31 @@ fn parse_sse(raw: &str) -> Option<SseEvent> {
         return None;
     }
 
+    // Prefer typed SSE v2 envelopes when the payload decodes as SseEnvelopeV2.
+    if let Ok(v2) = serde_json::from_str::<SseEnvelopeV2>(&data) {
+        let mut merged = match v2.data {
+            serde_json::Value::Object(map) => map,
+            other => {
+                let mut map = serde_json::Map::new();
+                map.insert("value".to_string(), other);
+                map
+            }
+        };
+        merged.insert("height".to_string(), serde_json::json!(v2.height));
+        merged.insert("tx_index".to_string(), serde_json::json!(v2.tx_index));
+        if let Some(canonical) = v2.canonical {
+            merged.insert(
+                "canonical".to_string(),
+                serde_json::Value::String(canonical.into_string()),
+            );
+        }
+        return Some(SseEvent {
+            id: event_id.or(Some(v2.id)),
+            kind: v2.kind.as_str().to_string(),
+            data: serde_json::Value::Object(merged),
+        });
+    }
+
     let envelope: serde_json::Value = serde_json::from_str(&data).ok()?;
     let kind = envelope
         .get("kind")
@@ -259,6 +304,13 @@ fn parse_sse(raw: &str) -> Option<SseEvent> {
     if kind.is_empty() {
         return None;
     }
+
+    let id = event_id.or_else(|| {
+        envelope
+            .get("id")
+            .and_then(serde_json::Value::as_str)
+            .map(str::to_string)
+    });
 
     // The node sends { kind, ts, payload }, while the terminal renderer and
     // package filter consume the event fields directly. Flatten the envelope
@@ -277,6 +329,7 @@ fn parse_sse(raw: &str) -> Option<SseEvent> {
     };
 
     Some(SseEvent {
+        id,
         kind,
         data: event_data,
     })
@@ -284,12 +337,16 @@ fn parse_sse(raw: &str) -> Option<SseEvent> {
 
 fn is_critical_event(event: &SseEvent) -> bool {
     // In CI mode, any rejection, revocation (v1 or v2), quarantine, quarantine
-    // expiry or certified sandbox witness is critical (ECA-18).
+    // expiry, or committed/verified sandbox witness is critical (ECA-18).
     let kind = event.kind.as_str();
     kind.starts_with("package_revoked")
         || matches!(
             kind,
-            "package_rejected" | "package_quarantined" | "quarantine_expired" | "witness_verified"
+            "package_rejected"
+                | "package_quarantined"
+                | "quarantine_expired"
+                | "witness_verified"
+                | "witness_committed"
         )
 }
 
@@ -316,8 +373,10 @@ fn should_display(event: &SseEvent, filter: Option<&str>) -> bool {
     }
     match f.to_ascii_lowercase().as_str() {
         "" | "all" => return true,
-        "packages" => return event.kind.starts_with("package_"),
-        "blocks" => return event.kind == "block_produced",
+        "packages" => {
+            return event.kind.starts_with("package_") || event.kind.starts_with("quarantine_")
+        }
+        "blocks" => return matches!(event.kind.as_str(), "block_produced" | "block_committed"),
         "votes" => return event.kind == "validator_voted",
         _ => {}
     }
@@ -326,17 +385,19 @@ fn should_display(event: &SseEvent, filter: Option<&str>) -> bool {
 }
 
 fn render_event(event: &SseEvent) {
-    let ts = DisplayText::bounded(
-        event
-            .data
-            .get("ts")
-            .and_then(|v| v.as_str())
-            .and_then(|s| s.get(11..19)) // HH:MM:SS
-            .unwrap_or("?"),
-        8,
-    )
-    .into_string();
-    let ts = ts.as_str();
+    let height_badge = event
+        .data
+        .get("height")
+        .and_then(|v| v.as_u64())
+        .map(|h| format!("#{h}"));
+    let ts_raw = event
+        .data
+        .get("ts")
+        .and_then(|v| v.as_str())
+        .and_then(|s| s.get(11..19));
+    let prefix =
+        DisplayText::bounded(ts_raw.or(height_badge.as_deref()).unwrap_or("?"), 16).into_string();
+    let ts = prefix.as_str();
 
     let canonical = text_field(event, "canonical", "");
     let canonical = canonical.as_str();
@@ -411,7 +472,44 @@ fn render_event(event: &SseEvent) {
             );
         }
 
-        "block_produced" => {
+        "quarantine_resolved" => {
+            let outcome = text_field(event, "outcome", "resolved");
+            println!(
+                "{} {} {} {}",
+                ts.dimmed(),
+                "✓ RESOLVED ".green(),
+                canonical.white().bold(),
+                format!("({outcome})").dimmed(),
+            );
+        }
+
+        "witness_committed" | "witness_verified" => {
+            let digest = text_field(event, "witness_digest", "?");
+            println!(
+                "{} {} {} {}",
+                ts.dimmed(),
+                "⚡ WITNESS  ".red().bold(),
+                canonical.white().bold(),
+                format!("digest={digest}").dimmed(),
+            );
+        }
+
+        "bounty_awarded" => {
+            let amount = event
+                .data
+                .get("amount")
+                .and_then(|v| v.as_u64())
+                .unwrap_or(0);
+            println!(
+                "{} {} {} {}",
+                ts.dimmed(),
+                "★ BOUNTY   ".yellow(),
+                canonical.white(),
+                format!("amount={amount}").dimmed(),
+            );
+        }
+
+        "block_produced" | "block_committed" => {
             let height = event
                 .data
                 .get("height")
@@ -452,8 +550,6 @@ fn render_event(event: &SseEvent) {
         }
 
         other => {
-            // `Debug` of a JSON value escapes control characters; the kind is
-            // a raw string and is sanitised explicitly.
             let kind = DisplayText::bounded(other, 48);
             let data = DisplayText::bounded(&format!("{:?}", event.data), 512);
             println!("{} {} {}", ts.dimmed(), kind.to_string().dimmed(), data);
@@ -464,6 +560,7 @@ fn render_event(event: &SseEvent) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use registry_view::SseEventKindV2;
 
     #[test]
     fn eco_adv_08_unterminated_stream_is_dropped_at_cap() {
@@ -502,13 +599,14 @@ mod tests {
 
     fn event(kind: &str) -> SseEvent {
         SseEvent {
+            id: None,
             kind: kind.into(),
             data: serde_json::json!({}),
         }
     }
 
     #[test]
-    fn ci_mode_fails_on_v4_kinds() {
+    fn ci_mode_fails_on_witness_committed_and_v4_kinds() {
         for kind in [
             "package_rejected",
             "package_revoked",
@@ -516,12 +614,44 @@ mod tests {
             "package_quarantined",
             "quarantine_expired",
             "witness_verified",
+            "witness_committed",
         ] {
             assert!(is_critical_event(&event(kind)), "{kind}");
         }
-        for kind in ["package_verified", "block_produced", "validator_voted"] {
+        for kind in [
+            "package_verified",
+            "quarantine_resolved",
+            "block_produced",
+            "block_committed",
+            "bounty_awarded",
+            "validator_voted",
+        ] {
             assert!(!is_critical_event(&event(kind)), "{kind}");
         }
+    }
+
+    #[test]
+    fn parse_sse_decodes_v2_envelope_and_last_event_id() {
+        let envelope = SseEnvelopeV2::new(
+            SseEventKindV2::WitnessCommitted,
+            48_211,
+            2,
+            Some("npm:bad@1.0.0"),
+            serde_json::json!({ "witness_digest": "abcd" }),
+        );
+        let frame = envelope.to_sse_frame();
+        let parsed = parse_sse(frame.trim_end_matches('\n')).expect("sse v2 frame");
+        assert_eq!(parsed.id.as_deref(), Some("48211.2"));
+        assert_eq!(parsed.kind, "witness_committed");
+        assert_eq!(
+            parsed.data.get("canonical").and_then(|v| v.as_str()),
+            Some("npm:bad@1.0.0")
+        );
+        assert_eq!(
+            parsed.data.get("height").and_then(|v| v.as_u64()),
+            Some(48_211)
+        );
+        assert!(is_critical_event(&parsed));
     }
 
     #[test]

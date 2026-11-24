@@ -23,25 +23,47 @@ use anyhow::Result;
 use chrono::Utc;
 use common::{PackageId, TrustVerdict, VerdictSource, VerdictStatus};
 
+/// Resolve "name@version" or "name" in the given ecosystem using explicit
+/// [`light_client::VerifyOptions`].
+pub async fn resolve_with_options(
+    raw: &str,
+    ecosystem: Option<&str>,
+    node_url: Option<&str>,
+    options: &light_client::VerifyOptions,
+) -> Result<TrustVerdict> {
+    let (name, version) = parse_pkg(raw);
+    let eco = ecosystem.unwrap_or("npm");
+    let id = PackageId::new(eco, name, version.as_deref().unwrap_or("latest"));
+    resolve_id_with_options(&id, node_url, options).await
+}
+
 /// Resolve "name@version" or "name" in the given ecosystem.
 pub async fn resolve(
     raw: &str,
     ecosystem: Option<&str>,
     node_url: Option<&str>,
 ) -> Result<TrustVerdict> {
-    let (name, version) = parse_pkg(raw);
-    let eco = ecosystem.unwrap_or("npm");
-    let id = PackageId::new(eco, name, version.as_deref().unwrap_or("latest"));
-    resolve_id(&id, node_url).await
+    resolve_with_options(
+        raw,
+        ecosystem,
+        node_url,
+        &light_client::VerifyOptions::from_env(),
+    )
+    .await
 }
 
-/// Resolve a fully-formed PackageId through the install-grade path.
+/// Resolve a fully-formed PackageId through the install-grade path using
+/// explicit [`light_client::VerifyOptions`].
 ///
 /// An unreachable node, or (in phase-C builds) a node that cannot prove a
 /// verified record, yields `Unknown`; that observation is never cached, so a
 /// transient failure cannot mask a later revocation.
-pub async fn resolve_id(id: &PackageId, node_url: Option<&str>) -> Result<TrustVerdict> {
-    match install_gate::resolve_id_for_install(id, node_url).await {
+pub async fn resolve_id_with_options(
+    id: &PackageId,
+    node_url: Option<&str>,
+    options: &light_client::VerifyOptions,
+) -> Result<TrustVerdict> {
+    match install_gate::resolve_id_for_install_with_options(id, node_url, options).await {
         Ok(verdict) => Ok(verdict),
         Err(e) => {
             let url = node_url.map(String::from).unwrap_or_else(default_node_url);
@@ -63,6 +85,15 @@ pub async fn resolve_id(id: &PackageId, node_url: Option<&str>) -> Result<TrustV
             })
         }
     }
+}
+
+/// Resolve a fully-formed PackageId through the install-grade path.
+///
+/// An unreachable node, or (in phase-C builds) a node that cannot prove a
+/// verified record, yields `Unknown`; that observation is never cached, so a
+/// transient failure cannot mask a later revocation.
+pub async fn resolve_id(id: &PackageId, node_url: Option<&str>) -> Result<TrustVerdict> {
+    resolve_id_with_options(id, node_url, &light_client::VerifyOptions::from_env()).await
 }
 
 pub(crate) fn parse_pkg(raw: &str) -> (String, Option<String>) {

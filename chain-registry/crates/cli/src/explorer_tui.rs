@@ -378,6 +378,9 @@ enum View {
     Faucet,
     Help,
     Bridge,
+    Quarantine,
+    Evidence,
+    Diversity,
     Metrics,
 }
 
@@ -473,6 +476,21 @@ fn palette_commands() -> &'static [PaletteCommand] {
             hint: ":",
         },
         PaletteCommand {
+            id: "quarantine",
+            label: "Go to Quarantine queue",
+            hint: "u",
+        },
+        PaletteCommand {
+            id: "evidence",
+            label: "Go to Evidence panel",
+            hint: "e",
+        },
+        PaletteCommand {
+            id: "diversity",
+            label: "Go to Committee diversity",
+            hint: "D",
+        },
+        PaletteCommand {
             id: "metrics",
             label: "Go to Metrics",
             hint: "m",
@@ -549,6 +567,9 @@ fn console_tabs() -> &'static [(View, &'static str, &'static str)] {
         (View::Faucet, "Faucet", "0"),
         (View::Preflight, "Ready", "p"),
         (View::Bridge, "Bridge", "-"),
+        (View::Quarantine, "Quar", "u"),
+        (View::Evidence, "Evid", "e"),
+        (View::Diversity, "Div", "d"),
         (View::Metrics, "Metrics", "m"),
     ]
 }
@@ -751,6 +772,13 @@ struct App {
     bridge_anchors: Vec<serde_json::Value>,
     metrics_history: Vec<serde_json::Value>,
     metrics_history_status: String,
+
+    // v4 Evidence & Operator Diagnostics state (ECA-21)
+    quarantine_queue: Vec<registry_view::PackageViewV4>,
+    selected_quarantine: usize,
+    evidence_view: Option<registry_view::PackageViewV4>,
+    evidence_witnesses: Vec<registry_view::WitnessViewV1>,
+    operator_doctor: Option<crate::validator_ops::ValidatorDoctorReportV1>,
 }
 
 #[derive(Debug)]
@@ -802,6 +830,15 @@ enum DataUpdate {
     FaucetDripProgress(String),
     /// A generic faucet-pane error (balance fetch, etc.). Renders as FaucetStatus::Failed.
     FaucetError(String),
+    /// v4 Class C quarantine queue snapshot.
+    QuarantineQueue(Vec<registry_view::PackageViewV4>),
+    /// v4 status & witness snapshot for the highlighted package/quarantine item.
+    EvidenceSnapshot {
+        view: Option<registry_view::PackageViewV4>,
+        witnesses: Vec<registry_view::WitnessViewV1>,
+    },
+    /// Live four-zone operator diagnostic capabilities over ZoneId::Operator IPC.
+    OperatorDoctor(crate::validator_ops::ValidatorDoctorReportV1),
 }
 
 impl App {
@@ -889,6 +926,11 @@ impl App {
             bridge_anchors: Vec::new(),
             metrics_history: Vec::new(),
             metrics_history_status: "waiting for the metrics collector".into(),
+            quarantine_queue: Vec::new(),
+            selected_quarantine: 0,
+            evidence_view: None,
+            evidence_witnesses: Vec::new(),
+            operator_doctor: None,
         }
     }
 
@@ -1187,6 +1229,56 @@ async fn data_fetcher_loop(app: Arc<RwLock<App>>, api_base: String, tx: mpsc::Se
             // Fetch consensus state (best-effort — node may not expose this endpoint)
             if let Ok(cs) = fetch_consensus_state(&client, &api_base).await {
                 let _ = tx.send(DataUpdate::Consensus(cs)).await;
+            }
+
+            // Fetch v4 quarantine queue & highlighted evidence snapshot (ECA-21)
+            let q_url = format!(
+                "{}/v1/public/v4/quarantine?limit=100",
+                api_base.trim_end_matches('/')
+            );
+            let mut target_canon = {
+                let guard = app.read().await;
+                guard
+                    .quarantine_queue
+                    .get(guard.selected_quarantine)
+                    .map(|p| p.canonical.to_string())
+                    .or_else(|| {
+                        guard
+                            .selected_package()
+                            .map(|p| format!("{}:{}@{}", p.ecosystem, p.name, p.version))
+                    })
+            };
+            if let Ok(resp) = client
+                .get(&q_url)
+                .timeout(Duration::from_secs(5))
+                .send()
+                .await
+            {
+                if resp.status().is_success() {
+                    if let Ok(list) = resp.json::<registry_view::QuarantineListV1>().await {
+                        if target_canon.is_none() {
+                            target_canon = list.packages.first().map(|p| p.canonical.to_string());
+                        }
+                        let _ = tx.send(DataUpdate::QuarantineQueue(list.packages)).await;
+                    }
+                }
+            }
+            if let Some(ref canon) = target_canon {
+                let (view, witnesses) =
+                    crate::evidence_panel::fetch_v4_evidence(&client, &api_base, canon).await;
+                if view.is_some() || !witnesses.is_empty() {
+                    let _ = tx
+                        .send(DataUpdate::EvidenceSnapshot { view, witnesses })
+                        .await;
+                }
+            }
+
+            // Poll four-zone operator capabilities when the owner-only operator bundle exists.
+            let op_key_file = crate::ai_ops::default_operator_key_file();
+            if op_key_file.exists() {
+                let doc =
+                    crate::validator_ops::collect_validator_doctor_report(&op_key_file, None).await;
+                let _ = tx.send(DataUpdate::OperatorDoctor(doc)).await;
             }
 
             // Poll faucet health (best-effort; faucet may be offline).
@@ -2136,6 +2228,21 @@ fn apply_data_update(app: &mut App, update: DataUpdate) {
         DataUpdate::ApiError(error) => {
             app.last_api_error = Some(error);
         }
+        DataUpdate::QuarantineQueue(queue) => {
+            app.quarantine_queue = queue;
+            if app.quarantine_queue.is_empty() {
+                app.selected_quarantine = 0;
+            } else if app.selected_quarantine >= app.quarantine_queue.len() {
+                app.selected_quarantine = app.quarantine_queue.len() - 1;
+            }
+        }
+        DataUpdate::EvidenceSnapshot { view, witnesses } => {
+            app.evidence_view = view;
+            app.evidence_witnesses = witnesses;
+        }
+        DataUpdate::OperatorDoctor(report) => {
+            app.operator_doctor = Some(report);
+        }
     }
     refresh_preflight(app);
 }
@@ -2423,6 +2530,9 @@ fn execute_palette_id(app: &mut App, id: &str) -> bool {
         "faucet" => app.current_view = View::Faucet,
         "preflight" => app.current_view = View::Preflight,
         "bridge" => app.current_view = View::Bridge,
+        "quarantine" => app.current_view = View::Quarantine,
+        "evidence" => app.current_view = View::Evidence,
+        "diversity" => app.current_view = View::Diversity,
         "metrics" => app.current_view = View::Metrics,
         "search" => {
             app.is_searching = true;
@@ -2602,6 +2712,27 @@ async fn handle_key(app: &mut App, key: KeyEvent) -> bool {
         KeyCode::Char('0') | KeyCode::Char('F') => {
             app.current_view = View::Faucet;
         }
+        KeyCode::Char('u') if app.current_view != View::Faucet => {
+            app.current_view = View::Quarantine;
+            return false;
+        }
+        KeyCode::Char('e') if app.current_view != View::Faucet => {
+            app.current_view = View::Evidence;
+            return false;
+        }
+        KeyCode::Char('D') if app.current_view != View::Faucet => {
+            app.current_view = View::Diversity;
+            return false;
+        }
+        KeyCode::Char('d')
+            if !matches!(
+                app.current_view,
+                View::Faucet | View::Blocks | View::Overview | View::Validators | View::Packages
+            ) =>
+        {
+            app.current_view = View::Diversity;
+            return false;
+        }
         KeyCode::Char('m') => app.current_view = View::Metrics,
         KeyCode::Tab | KeyCode::Char('l') | KeyCode::Char(']') => {
             app.current_view = cycle_tab(app.current_view, 1);
@@ -2721,6 +2852,30 @@ async fn handle_key(app: &mut App, key: KeyEvent) -> bool {
             }
             KeyCode::Up | KeyCode::Char('k') if app.selected_event > 0 => {
                 app.selected_event -= 1;
+            }
+            _ => {}
+        },
+        View::Quarantine => match code {
+            KeyCode::Down | KeyCode::Char('j') => {
+                if app.selected_quarantine < app.quarantine_queue.len().saturating_sub(1) {
+                    app.selected_quarantine += 1;
+                }
+            }
+            KeyCode::Up | KeyCode::Char('k') if app.selected_quarantine > 0 => {
+                app.selected_quarantine -= 1;
+            }
+            KeyCode::Home | KeyCode::Char('g') => {
+                app.selected_quarantine = 0;
+            }
+            KeyCode::End | KeyCode::Char('G') => {
+                app.selected_quarantine = app.quarantine_queue.len().saturating_sub(1);
+            }
+            KeyCode::Enter => {
+                if let Some(selected) = app.quarantine_queue.get(app.selected_quarantine).cloned() {
+                    app.evidence_view = Some(selected);
+                    app.previous_view = Some(app.current_view);
+                    app.current_view = View::Evidence;
+                }
             }
             _ => {}
         },
@@ -3229,6 +3384,9 @@ fn draw_main_content(f: &mut Frame, app: &App, area: Rect) {
         View::Consensus => draw_consensus(f, app, area),
         View::Faucet => draw_faucet(f, app, area),
         View::Bridge => draw_bridge(f, app, area),
+        View::Quarantine => draw_quarantine(f, app, area),
+        View::Evidence => draw_evidence(f, app, area),
+        View::Diversity => draw_diversity(f, app, area),
         View::Metrics => draw_metrics(f, app, area),
         View::Help => draw_help(f, app, area),
     }
@@ -3244,7 +3402,10 @@ fn draw_footer(f: &mut Frame, app: &App, area: Rect) {
         View::Validators => " j/k  ·  Enter detail  ·  y copy key  ·  / filter  ·  ? help ",
         View::Packages => " j/k  ·  Enter detail  ·  y copy digest  ·  / filter  ·  ? help ",
         View::Events => " j/k scroll  ·  / filter  ·  : palette  ·  ? help ",
-        View::Operator => " read-only operator surface  ·  x export  ·  : palette  ·  ? help ",
+        View::Operator => " read-only operator zones  ·  u quar  ·  e evid  ·  D div  ·  x export  ·  ? help ",
+        View::Quarantine => " j/k hold  ·  Enter inspect evidence  ·  e evid  ·  D div  ·  Tab views  ·  ? help ",
+        View::Evidence => " u quarantine queue  ·  D committee diversity  ·  Tab views  ·  ? help ",
+        View::Diversity => " committee model-family & hybrid signer mix  ·  u quar  ·  e evid  ·  ? help ",
         View::Consensus => " r refresh  ·  9 PBFT  ·  : palette  ·  ? help ",
         View::Faucet => " e edit  ·  d drip  ·  b balance  ·  a clear  ·  Esc stop editing  ·  q quit ",
         View::BlockDetail | View::ValidatorDetail | View::PackageDetail => {
@@ -4593,19 +4754,68 @@ fn draw_operator(f: &mut Frame, app: &App, area: Rect) {
     .wrap(Wrap { trim: true });
     f.render_widget(commands, chunks[2]);
 
-    let workflow = Paragraph::new(vec![
-        Line::from("This console is the operator surface for validator monitoring."),
-        Line::from("Use it to inspect blocks, validator health, packages, peers, and live events."),
-        Line::from("No private key is accepted, stored, or displayed by the console."),
-    ])
-    .block(
-        Block::default()
-            .borders(Borders::ALL)
-            .title(" Operator Workflow "),
-    )
-    .style(Style::default().fg(Theme::text()))
-    .wrap(Wrap { trim: true });
-    f.render_widget(workflow, chunks[3]);
+    let zone_lines: Vec<Line> = format_operator_zone_lines(app.operator_doctor.as_ref())
+        .into_iter()
+        .map(Line::from)
+        .collect();
+    let zones = Paragraph::new(zone_lines)
+        .block(
+            Block::default()
+                .borders(Borders::ALL)
+                .title(" Four-Zone Operator Link (ECA-04 / §4.3) "),
+        )
+        .style(Style::default().fg(Theme::text()))
+        .wrap(Wrap { trim: true });
+    f.render_widget(zones, chunks[3]);
+}
+
+fn format_operator_zone_lines(
+    report: Option<&crate::validator_ops::ValidatorDoctorReportV1>,
+) -> Vec<String> {
+    let Some(doc) = report else {
+        let default_key = crate::ai_ops::default_operator_key_file();
+        return vec![
+            "Zone IPC capabilities not loaded (read-only operator bundle not detected)."
+                .to_string(),
+            format!("Expected bundle: {}", default_key.display()),
+            "Run `creg validator doctor --zones --json` on the validator host to inspect zones."
+                .to_string(),
+        ];
+    };
+    let mut lines = Vec::with_capacity(doc.zones.len() + 2);
+    lines.push(format!(
+        "Operator link: {} (bundle: {})",
+        if doc.ok { "PASS" } else { "DEGRADED" },
+        doc.operator_key_file.as_deref().unwrap_or("<default>")
+    ));
+    for z in &doc.zones {
+        let state = if z.reachable && z.healthy {
+            "healthy"
+        } else if z.reachable {
+            "unhealthy"
+        } else {
+            "unreachable"
+        };
+        let ep = if z.endpoint.is_empty() {
+            "<unset>"
+        } else {
+            z.endpoint.as_str()
+        };
+        let err_note = z
+            .error
+            .as_deref()
+            .map(|e| format!(" — {}", common::sanitize_for_terminal(e, 72)))
+            .unwrap_or_default();
+        lines.push(format!(
+            "  {:<12} [{}] {} ({}){}",
+            z.zone.as_str(),
+            state,
+            common::sanitize_for_terminal(z.status.as_deref().unwrap_or("-"), 24),
+            common::sanitize_for_terminal(ep, 40),
+            err_note
+        ));
+    }
+    lines
 }
 
 // ============================================================================
@@ -5198,6 +5408,327 @@ fn draw_metrics(f: &mut Frame, app: &App, area: Rect) {
     f.render_widget(tx_sparkline, chunks[2]);
 }
 
+// ============================================================================
+// VIEW: QUARANTINE QUEUE / EVIDENCE / COMMITTEE DIVERSITY (ADR-019 §4.2, ECA-21)
+// ============================================================================
+
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+struct CommitteeDiversitySummary {
+    packages_observed: usize,
+    total_approvals: u32,
+    total_quarantine_reviews: u32,
+    total_rejections: u32,
+    total_abstentions: u32,
+    hybrid_signers: u32,
+    classical_signers: u32,
+    model_families: std::collections::BTreeMap<String, u32>,
+    agent_runner_families: Option<usize>,
+    diversity_warning: Option<String>,
+}
+
+fn aggregate_committee_diversity(
+    quarantine: &[registry_view::PackageViewV4],
+    evidence: Option<&registry_view::PackageViewV4>,
+    doctor: Option<&crate::validator_ops::ValidatorDoctorReportV1>,
+) -> CommitteeDiversitySummary {
+    use registry_view::PackageStatusViewV1;
+    use std::collections::BTreeSet;
+
+    let mut summary = CommitteeDiversitySummary::default();
+    let mut seen_canonicals: BTreeSet<String> = BTreeSet::new();
+
+    for view in quarantine.iter().chain(evidence) {
+        let canon = view.canonical.to_string();
+        if !seen_canonicals.insert(canon) {
+            continue;
+        }
+        let committee = match &view.status {
+            PackageStatusViewV1::Quarantined {
+                committee: Some(c), ..
+            } => Some(c),
+            _ => view.committee.as_ref(),
+        };
+        if let Some(c) = committee {
+            summary.packages_observed += 1;
+            summary.total_approvals = summary.total_approvals.saturating_add(c.approvals);
+            summary.total_quarantine_reviews = summary
+                .total_quarantine_reviews
+                .saturating_add(c.quarantine_reviews);
+            summary.total_rejections = summary.total_rejections.saturating_add(c.rejections);
+            summary.total_abstentions = summary.total_abstentions.saturating_add(c.abstentions);
+            summary.hybrid_signers = summary.hybrid_signers.saturating_add(c.hybrid_signers);
+            summary.classical_signers = summary
+                .classical_signers
+                .saturating_add(c.classical_signers);
+            for (fam, count) in &c.model_families {
+                let clean = common::sanitize_for_terminal(fam, 48);
+                let entry = summary.model_families.entry(clean).or_insert(0);
+                *entry = entry.saturating_add(*count);
+            }
+        }
+    }
+
+    if let Some(doc) = doctor {
+        for zone_probe in &doc.zones {
+            if let Some(ref cap) = zone_probe.capabilities {
+                if let zone_ipc::ZoneCapabilitiesV1::AgentRunner {
+                    distinct_model_families,
+                    diversity_warning,
+                    ..
+                } = &cap.capabilities
+                {
+                    summary.agent_runner_families = Some(*distinct_model_families);
+                    summary.diversity_warning = diversity_warning.clone();
+                }
+            }
+        }
+        if summary.diversity_warning.is_none() {
+            summary.diversity_warning = doc
+                .ai_config
+                .as_ref()
+                .and_then(|ai| ai.diversity_advisory.clone());
+        }
+    }
+
+    summary
+}
+
+fn draw_quarantine(f: &mut Frame, app: &App, area: Rect) {
+    let now_unix = chrono::Utc::now().timestamp();
+    let chunks = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([Constraint::Length(4), Constraint::Min(6)])
+        .split(area);
+
+    let header = Paragraph::new(vec![
+        Line::from(format!(
+            "Active Class C holds: {}  ·  rule: fails closed to REVOKED after 72h expiry (override: none / ECO-INV-02)",
+            app.quarantine_queue.len()
+        )),
+        Line::from(Span::styled(
+            "Use j/k to select a quarantined version and press Enter to open its Evidence panel.",
+            Style::default().fg(Theme::text_dim()),
+        )),
+    ])
+    .block(rounded_block(" quarantine queue (/v1/public/v4/quarantine) ", true))
+    .style(Style::default().fg(Theme::text()));
+    f.render_widget(header, chunks[0]);
+
+    if app.quarantine_queue.is_empty() {
+        let empty = Paragraph::new(vec![
+            Line::from(""),
+            Line::from("No versions are currently held in Class C quarantine."),
+            Line::from(Span::styled(
+                "When an analysis committee fails quorum diversity or issues quarantine_review, holds appear here earliest-deadline first.",
+                Style::default().fg(Theme::text_dim()),
+            )),
+        ])
+        .block(rounded_block(" held versions ", false))
+        .style(Style::default().fg(Theme::text_dim()))
+        .alignment(Alignment::Center);
+        f.render_widget(empty, chunks[1]);
+        return;
+    }
+
+    let rows: Vec<Row> = app
+        .quarantine_queue
+        .iter()
+        .enumerate()
+        .map(|(idx, view)| {
+            let selected = idx == app.selected_quarantine;
+            let (deadline, reason_code, committee_note) = match &view.status {
+                registry_view::PackageStatusViewV1::Quarantined {
+                    expires_at_unix,
+                    reason_code,
+                    committee,
+                    ..
+                } => {
+                    let rem = expires_at_unix.saturating_sub(now_unix);
+                    let dl = crate::evidence_panel::format_relative_duration(rem);
+                    let c_str = committee
+                        .as_ref()
+                        .or(view.committee.as_ref())
+                        .map(|c| {
+                            format!(
+                                "{}q/{}a/{}r",
+                                c.quarantine_reviews, c.approvals, c.rejections
+                            )
+                        })
+                        .unwrap_or_else(|| "-".to_string());
+                    (
+                        dl,
+                        crate::evidence_panel::category_label(*reason_code).to_string(),
+                        c_str,
+                    )
+                }
+                _ => ("-".to_string(), "other".to_string(), "-".to_string()),
+            };
+            let style = if selected {
+                Style::default()
+                    .fg(Theme::primary())
+                    .add_modifier(Modifier::BOLD)
+            } else {
+                Style::default().fg(Theme::text())
+            };
+            Row::new(vec![
+                Cell::from(if selected { ">" } else { " " }),
+                Cell::from(common::sanitize_for_terminal(view.canonical.as_ref(), 42)),
+                Cell::from(reason_code),
+                Cell::from(deadline),
+                Cell::from(committee_note),
+                Cell::from(crate::evidence_panel::quorum_label_str(view.quorum)),
+            ])
+            .style(style)
+        })
+        .collect();
+
+    let table = Table::new(
+        rows,
+        [
+            Constraint::Length(2),
+            Constraint::Min(26),
+            Constraint::Length(24),
+            Constraint::Length(14),
+            Constraint::Length(12),
+            Constraint::Length(18),
+        ],
+    )
+    .header(
+        Row::new([
+            "",
+            "Canonical",
+            "Category",
+            "Expires",
+            "Committee",
+            "Quorum",
+        ])
+        .style(
+            Style::default()
+                .fg(Theme::accent())
+                .add_modifier(Modifier::BOLD),
+        ),
+    )
+    .block(rounded_block(
+        " held versions (earliest deadline first) ",
+        false,
+    ));
+    f.render_widget(table, chunks[1]);
+}
+
+fn draw_evidence(f: &mut Frame, app: &App, area: Rect) {
+    let now_unix = chrono::Utc::now().timestamp();
+    let lines: Vec<Line> = match &app.evidence_view {
+        Some(view) => crate::evidence_panel::render_evidence_panel_from_view(
+            view,
+            &app.evidence_witnesses,
+            None,
+            &[],
+            &[],
+            now_unix,
+        )
+        .into_iter()
+        .map(Line::from)
+        .collect(),
+        None => vec![
+            Line::from("No v4 evidence panel loaded yet."),
+            Line::from(""),
+            Line::from("Select a quarantined item in the Quar tab (`u`) and press Enter,"),
+            Line::from(
+                "or highlight a package in the Packages tab (`4`) and press `r` to refresh.",
+            ),
+        ],
+    };
+
+    let title = app
+        .evidence_view
+        .as_ref()
+        .map(|v| {
+            format!(
+                " Evidence Panel: {} ",
+                common::sanitize_for_terminal(v.canonical.as_ref(), 48)
+            )
+        })
+        .unwrap_or_else(|| " Evidence Panel (Class A / B / C) ".to_string());
+
+    let panel = Paragraph::new(lines)
+        .block(rounded_block(&title, true))
+        .style(Style::default().fg(Theme::text()))
+        .wrap(Wrap { trim: false });
+    f.render_widget(panel, area);
+}
+
+fn draw_diversity(f: &mut Frame, app: &App, area: Rect) {
+    let summary = aggregate_committee_diversity(
+        &app.quarantine_queue,
+        app.evidence_view.as_ref(),
+        app.operator_doctor.as_ref(),
+    );
+    let chunks = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([Constraint::Length(7), Constraint::Min(6)])
+        .split(area);
+
+    let total_signers = summary
+        .hybrid_signers
+        .saturating_add(summary.classical_signers);
+    let mut overview_lines = vec![
+        Line::from(format!(
+            "Observed committee snapshots: {}  ·  distinct model families seen: {}",
+            summary.packages_observed,
+            summary.model_families.len()
+        )),
+        Line::from(format!(
+            "Votes: {} approve · {} quarantine_review · {} reject · {} abstain",
+            summary.total_approvals,
+            summary.total_quarantine_reviews,
+            summary.total_rejections,
+            summary.total_abstentions
+        )),
+        Line::from(format!(
+            "Signer schemes: {} hybrid / {} classical (total {} votes)",
+            summary.hybrid_signers, summary.classical_signers, total_signers
+        )),
+    ];
+    if let Some(runner_fams) = summary.agent_runner_families {
+        overview_lines.push(Line::from(format!(
+            "Local Zone 4 agent-runner distinct model families: {runner_fams}"
+        )));
+    }
+    if let Some(ref warn) = summary.diversity_warning {
+        overview_lines.push(Line::from(Span::styled(
+            format!("Advisory: {}", common::sanitize_for_terminal(warn, 120)),
+            Style::default().fg(Theme::warning()),
+        )));
+    }
+
+    let summary_widget = Paragraph::new(overview_lines)
+        .block(rounded_block(
+            " committee diversity & hybrid signer posture ",
+            true,
+        ))
+        .style(Style::default().fg(Theme::text()))
+        .wrap(Wrap { trim: true });
+    f.render_widget(summary_widget, chunks[0]);
+
+    let fam_lines: Vec<Line> = if summary.model_families.is_empty() {
+        vec![Line::from(Span::styled(
+            "No semantic-vote model families recorded in currently sampled v4 records.",
+            Style::default().fg(Theme::text_dim()),
+        ))]
+    } else {
+        summary
+            .model_families
+            .iter()
+            .map(|(fam, count)| Line::from(format!("  {:<28} ×{}", fam, count)))
+            .collect()
+    };
+    let fam_widget = Paragraph::new(fam_lines)
+        .block(rounded_block(" model family vote breakdown ", false))
+        .style(Style::default().fg(Theme::text()))
+        .wrap(Wrap { trim: false });
+    f.render_widget(fam_widget, chunks[1]);
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -5711,5 +6242,126 @@ font-family:\"Cascadia Code\",\"JetBrains Mono\",Consolas,ui-monospace,monospace
         assert!(!summary.contains('\r'));
         assert!(!summary.contains('\u{202e}'));
         assert_eq!(summary, "evil]52;c;cHduZWQ= pub");
+    }
+
+    #[test]
+    fn v4_tabs_present_in_console_tabs_and_palette() {
+        let tabs = console_tabs();
+        assert_eq!(tabs.first().map(|t| t.0), Some(View::Overview));
+        assert_eq!(tabs.last().map(|t| t.0), Some(View::Metrics));
+        for expected in [View::Quarantine, View::Evidence, View::Diversity] {
+            assert!(tabs.iter().any(|(v, _, _)| *v == expected), "{expected:?}");
+        }
+        for cmd_id in ["quarantine", "evidence", "diversity"] {
+            assert!(
+                palette_commands().iter().any(|c| c.id == cmd_id),
+                "missing palette command {cmd_id}"
+            );
+        }
+    }
+
+    #[test]
+    fn committee_diversity_aggregation_counts_families_and_signers() {
+        use common::{CregFindingCategoryV1, DisplayText};
+        use registry_view::{
+            CommitteeSummaryV1, PackageStatusViewV1, PackageViewV4, QuorumLabelV1,
+            PACKAGE_VIEW_SCHEMA,
+        };
+        use std::collections::BTreeMap;
+
+        let mut fam1 = BTreeMap::new();
+        fam1.insert("qwen".to_string(), 2);
+        fam1.insert("gemini".to_string(), 1);
+        let mut fam2 = BTreeMap::new();
+        fam2.insert("claude".to_string(), 1);
+
+        let v1 = PackageViewV4 {
+            schema: PACKAGE_VIEW_SCHEMA.to_string(),
+            canonical: DisplayText::for_terminal("npm:q1@1.0.0"),
+            package: DisplayText::for_terminal("npm:q1"),
+            version: DisplayText::for_terminal("1.0.0"),
+            content_hash: "aa".repeat(32),
+            status: PackageStatusViewV1::Quarantined {
+                height: 100,
+                expires_at_unix: 1_800_000_000,
+                reason_code: CregFindingCategoryV1::Backdoor,
+                committee: Some(CommitteeSummaryV1 {
+                    effective_size: 4,
+                    approvals: 1,
+                    quarantine_reviews: 2,
+                    rejections: 0,
+                    abstentions: 1,
+                    model_families: fam1,
+                    hybrid_signers: 3,
+                    classical_signers: 0,
+                }),
+            },
+            quorum: QuorumLabelV1::V4Quorum,
+            committee: None,
+            witness_digests: Vec::new(),
+        };
+
+        let v2 = PackageViewV4 {
+            schema: PACKAGE_VIEW_SCHEMA.to_string(),
+            canonical: DisplayText::for_terminal("npm:q2@2.0.0"),
+            package: DisplayText::for_terminal("npm:q2"),
+            version: DisplayText::for_terminal("2.0.0"),
+            content_hash: "bb".repeat(32),
+            status: PackageStatusViewV1::Verified {
+                height: 101,
+                block_hash: "cc".repeat(32),
+            },
+            quorum: QuorumLabelV1::LegacyV3Quorum,
+            committee: Some(CommitteeSummaryV1 {
+                effective_size: 2,
+                approvals: 2,
+                quarantine_reviews: 0,
+                rejections: 0,
+                abstentions: 0,
+                model_families: fam2,
+                hybrid_signers: 0,
+                classical_signers: 2,
+            }),
+            witness_digests: Vec::new(),
+        };
+
+        // Pass v1 in both quarantine and evidence_view to verify deduplication.
+        let agg = aggregate_committee_diversity(&[v1.clone(), v2], Some(&v1), None);
+        assert_eq!(agg.packages_observed, 2);
+        assert_eq!(agg.total_approvals, 3);
+        assert_eq!(agg.total_quarantine_reviews, 2);
+        assert_eq!(agg.hybrid_signers, 3);
+        assert_eq!(agg.classical_signers, 2);
+        assert_eq!(agg.model_families.get("qwen").copied(), Some(2));
+        assert_eq!(agg.model_families.get("gemini").copied(), Some(1));
+        assert_eq!(agg.model_families.get("claude").copied(), Some(1));
+    }
+
+    #[test]
+    fn operator_doctor_panel_formats_zone_statuses_cleanly() {
+        let missing = format_operator_zone_lines(None);
+        assert!(missing.iter().any(|l| l.contains("creg validator doctor")));
+
+        let report = crate::validator_ops::ValidatorDoctorReportV1 {
+            schema_version: 1,
+            ok: true,
+            operator_key_file: Some("/var/lib/creg/operator-ipc-keys.json".to_string()),
+            zones: vec![crate::validator_ops::ValidatorZoneProbeV1 {
+                zone: zone_ipc::ZoneId::Gateway,
+                endpoint: "tcp://127.0.0.1:19001".to_string(),
+                reachable: true,
+                healthy: true,
+                status: Some("ok".to_string()),
+                capabilities: None,
+                error: None,
+            }],
+            ai_config: None,
+            errors: Vec::new(),
+            warnings: Vec::new(),
+        };
+        let rendered = format_operator_zone_lines(Some(&report)).join("\n");
+        assert!(rendered.contains("Operator link: PASS"));
+        assert!(rendered.contains("gateway"));
+        assert!(rendered.contains("[healthy] ok"));
     }
 }

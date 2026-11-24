@@ -8,16 +8,21 @@
 //   cargo:     Cargo.lock
 //   rubygems:  Gemfile.lock
 //
-// Exits with code 0 if all packages are verified,
-//                  1 if any packages are revoked or quarantined,
-//                  2 if any packages are unverified/unknown (use --strict).
+// Exits with code (ADR-019 §4.2, ECO-INV-02):
+//   0 — all packages verified
+//   2 — quarantined package(s) present (no revoked)
+//   3 — revoked package(s) present
+//   4 — unproven/unknown package(s) present (no revoked/quarantined)
 //
 // Every package is resolved through the install-grade path (ECA-13); a
 // revoked package can no longer read VERIFIED from a 24h cache entry.
 
+use crate::evidence_panel;
 use anyhow::{Context, Result};
+use chrono::Utc;
 use colored::Colorize;
 use common::{DisplayText, PackageId, VerdictStatus};
+use resolver::light_client::VerifyOptions;
 use serde::Deserialize;
 use std::{collections::HashMap, path::Path};
 
@@ -31,11 +36,26 @@ pub struct AuditSummary {
     pub total: usize,
 }
 
+/// Exit code precedence from the `ECO-INV-02` lattice (ADR-019 §4.2):
+/// `3` revoked present > `2` quarantined present > `4` unproven/unknown > `0` all verified.
+pub fn audit_exit_code(summary: &AuditSummary) -> i32 {
+    if summary.revoked > 0 {
+        3
+    } else if summary.quarantined > 0 {
+        2
+    } else if summary.unverified > 0 || summary.unknown > 0 {
+        4
+    } else {
+        0
+    }
+}
+
 pub async fn run(
     ecosystem: Option<&str>,
     node_url: Option<&str>,
-    strict: bool,
+    _strict: bool,
     json_out: bool,
+    verify_opts: &VerifyOptions,
 ) -> Result<i32> {
     // Detect ecosystem from cwd if not specified.
     let eco = ecosystem.map(String::from).unwrap_or_else(detect_ecosystem);
@@ -57,6 +77,9 @@ pub async fn run(
     };
 
     if packages.is_empty() {
+        if json_out {
+            return print_json_report(&[]);
+        }
         println!("No installed packages found for ecosystem '{}'.", eco);
         return Ok(0);
     }
@@ -73,6 +96,7 @@ pub async fn run(
     // Resolve all packages concurrently (limited concurrency to avoid flooding node).
     let semaphore = std::sync::Arc::new(tokio::sync::Semaphore::new(10));
     let mut handles = Vec::new();
+    let opts = *verify_opts;
 
     for pkg in packages {
         let sem = std::sync::Arc::clone(&semaphore);
@@ -82,7 +106,7 @@ pub async fn run(
         handles.push(tokio::spawn(async move {
             let _permit = sem.acquire().await.expect("semaphore closed");
             let id = PackageId::new(&eco_c, &pkg.name, &pkg.version);
-            let verdict = resolver::resolve_id(&id, url.as_deref()).await;
+            let verdict = resolver::resolve_id_with_options(&id, url.as_deref(), &opts).await;
             (pkg, verdict)
         }));
     }
@@ -94,7 +118,7 @@ pub async fn run(
         }
     }
 
-    // Sort: revoked first, then unverified, then unknown, then verified.
+    // Sort: revoked/quarantined first, then unverified, then unknown, then verified.
     results.sort_by_key(|(_, v)| match v {
         Err(_) => 0,
         Ok(v) if v.status.is_blocked() => 1,
@@ -115,6 +139,11 @@ pub async fn run(
         unknown: 0,
         total: results.len(),
     };
+    let effective_node = node_url.map(String::from).unwrap_or_else(|| {
+        std::env::var("CREG_NODE_URL").unwrap_or_else(|_| "http://localhost:8080".into())
+    });
+    let evidence_client = reqwest::Client::new();
+    let now_unix = Utc::now().timestamp();
 
     for (pkg, verdict) in &results {
         match verdict {
@@ -124,7 +153,7 @@ pub async fn run(
                     "  {} {:50} {}",
                     "?".dimmed(),
                     pkg.canonical(),
-                    e.to_string().dimmed()
+                    evidence_panel::safe_text(&e.to_string()).dimmed()
                 );
             }
             Ok(v) => match &v.status {
@@ -168,19 +197,68 @@ pub async fn run(
                         )
                         .red()
                     );
+                    let (view_opt, witnesses) = evidence_panel::fetch_v4_evidence(
+                        &evidence_client,
+                        &effective_node,
+                        &v.package.canonical(),
+                    )
+                    .await;
+                    if let Some(view) = view_opt {
+                        let panel = evidence_panel::render_evidence_panel_from_view(
+                            &view,
+                            &witnesses,
+                            None,
+                            &[],
+                            findings,
+                            now_unix,
+                        );
+                        evidence_panel::print_panel_lines(&panel);
+                    }
                 }
-                VerdictStatus::Quarantined { reason, .. } => {
+                VerdictStatus::Quarantined {
+                    reason,
+                    expires_at_unix,
+                    ..
+                } => {
                     summary.quarantined += 1;
+                    let deadline_note = expires_at_unix
+                        .map(|exp| {
+                            format!(
+                                "fails closed in {}",
+                                evidence_panel::format_relative_duration(
+                                    exp.saturating_sub(now_unix)
+                                )
+                            )
+                        })
+                        .unwrap_or_else(|| "fails closed at expiry".to_string());
                     println!(
                         "  {} {:50} {}",
                         "✗".magenta().bold(),
                         pkg.canonical().magenta().bold(),
                         format!(
-                            "QUARANTINED — {} (no override)",
-                            DisplayText::for_terminal(reason)
+                            "QUARANTINED — {} ({}; override: none (ECO-INV-02))",
+                            DisplayText::for_terminal(reason),
+                            deadline_note
                         )
                         .magenta()
                     );
+                    let (view_opt, witnesses) = evidence_panel::fetch_v4_evidence(
+                        &evidence_client,
+                        &effective_node,
+                        &v.package.canonical(),
+                    )
+                    .await;
+                    if let Some(view) = view_opt {
+                        let panel = evidence_panel::render_evidence_panel_from_view(
+                            &view,
+                            &witnesses,
+                            None,
+                            &[],
+                            &[],
+                            now_unix,
+                        );
+                        evidence_panel::print_panel_lines(&panel);
+                    }
                 }
                 VerdictStatus::Unknown => {
                     summary.unknown += 1;
@@ -217,26 +295,26 @@ pub async fn run(
     );
     println!("  {} total packages audited\n", summary.total);
 
-    // ── Exit code ─────────────────────────────────────────────────────────────
-    if summary.revoked > 0 || summary.quarantined > 0 {
-        println!(
-            "  {} {} revoked and {} quarantined package(s) found — remove them immediately!",
+    let code = audit_exit_code(&summary);
+    match code {
+        3 => println!(
+            "  {} {} revoked package(s) found — remove them immediately! (exit 3)",
             "✗".red().bold(),
             summary.revoked,
-            summary.quarantined
-        );
-        return Ok(1);
-    }
-    if strict && (summary.unverified > 0 || summary.unknown > 0) {
-        println!(
-            "  {} {} unverified/unknown package(s) (--strict mode)",
+        ),
+        2 => println!(
+            "  {} {} quarantined package(s) held out of Verified — remove or wait for resolution (exit 2)",
+            "✗".magenta().bold(),
+            summary.quarantined,
+        ),
+        4 => println!(
+            "  {} {} unproven/unknown package(s) present (exit 4)",
             "⚠".yellow(),
             summary.unverified + summary.unknown
-        );
-        return Ok(2);
+        ),
+        _ => println!("  {} All audited packages verified.", "✓".green().bold()),
     }
-    println!("  {} No revoked packages found.", "✓".green().bold());
-    Ok(0)
+    Ok(code)
 }
 
 fn print_json_report(
@@ -245,13 +323,26 @@ fn print_json_report(
         Result<common::TrustVerdict, anyhow::Error>,
     )],
 ) -> Result<i32> {
-    let entries: Vec<_> = results.iter().map(|(pkg, verdict)| {
-        serde_json::json!({
-            "canonical": pkg.canonical(),
-            "status": match verdict {
-                Err(_) => serde_json::json!({ "status": "error" }),
+    let mut summary = AuditSummary {
+        verified: 0,
+        unverified: 0,
+        revoked: 0,
+        quarantined: 0,
+        unknown: 0,
+        total: results.len(),
+    };
+
+    let entries: Vec<_> = results
+        .iter()
+        .map(|(pkg, verdict)| {
+            let status_json = match verdict {
+                Err(_) => {
+                    summary.unknown += 1;
+                    serde_json::json!({ "status": "unknown" })
+                }
                 Ok(v) => match &v.status {
                     VerdictStatus::Verified { findings, .. } => {
+                        summary.verified += 1;
                         serde_json::json!({
                             "status": "verified",
                             "finding_count": findings.len(),
@@ -259,47 +350,56 @@ fn print_json_report(
                         })
                     }
                     VerdictStatus::Revoked { reason, findings } => {
+                        summary.revoked += 1;
                         serde_json::json!({
                             "status": "revoked",
-                            "reason": reason,
+                            "reason": DisplayText::for_terminal(reason),
                             "finding_count": findings.len()
                         })
                     }
-                    VerdictStatus::Quarantined { reason, expires_at_unix, .. } => {
+                    VerdictStatus::Quarantined {
+                        reason,
+                        expires_at_unix,
+                        ..
+                    } => {
+                        summary.quarantined += 1;
                         serde_json::json!({
                             "status": "quarantined",
                             "reason": DisplayText::for_terminal(reason),
                             "expires_at_unix": expires_at_unix,
                         })
                     }
-                    VerdictStatus::Unverified => serde_json::json!({ "status": "unverified" }),
-                    VerdictStatus::Unknown => serde_json::json!({ "status": "unknown" }),
+                    VerdictStatus::Unverified => {
+                        summary.unverified += 1;
+                        serde_json::json!({ "status": "unverified" })
+                    }
+                    VerdictStatus::Unknown => {
+                        summary.unknown += 1;
+                        serde_json::json!({ "status": "unknown" })
+                    }
                 },
-            },
+            };
+            serde_json::json!({
+                "canonical": pkg.canonical(),
+                "status": status_json,
+            })
         })
-    }).collect();
-
-    // `status` is the nested object built above; read its `status` field.
-    let count_status = |wanted: &str| {
-        entries
-            .iter()
-            .filter(|e| e["status"]["status"] == wanted)
-            .count()
-    };
-    let revoked = count_status("revoked");
-    let quarantined = count_status("quarantined");
+        .collect();
 
     println!(
         "{}",
         serde_json::to_string_pretty(&serde_json::json!({
-            "total": entries.len(),
-            "revoked": revoked,
-            "quarantined": quarantined,
+            "total": summary.total,
+            "verified": summary.verified,
+            "unverified": summary.unverified,
+            "revoked": summary.revoked,
+            "quarantined": summary.quarantined,
+            "unknown": summary.unknown,
             "packages": entries,
         }))?
     );
 
-    Ok(if revoked > 0 || quarantined > 0 { 1 } else { 0 })
+    Ok(audit_exit_code(&summary))
 }
 
 // ─── Lockfile readers ─────────────────────────────────────────────────────────
@@ -477,7 +577,11 @@ fn read_gem_packages() -> Result<Vec<InstalledPackage>> {
 /// `creg audit --fix` — attempt to auto-remediate audit findings.
 /// For each revoked package: removes it from package.json/requirements.txt
 /// and suggests a replacement from chain-verified alternatives.
-pub async fn run_fix(ecosystem: Option<&str>, node_url: Option<&str>) -> Result<i32> {
+pub async fn run_fix(
+    ecosystem: Option<&str>,
+    node_url: Option<&str>,
+    verify_opts: &VerifyOptions,
+) -> Result<i32> {
     let eco = ecosystem.map(String::from).unwrap_or_else(detect_ecosystem);
     let packages = match eco.as_str() {
         "npm" => read_npm_packages()?,
@@ -496,6 +600,7 @@ pub async fn run_fix(ecosystem: Option<&str>, node_url: Option<&str>) -> Result<
 
     let semaphore = std::sync::Arc::new(tokio::sync::Semaphore::new(8));
     let mut handles = Vec::new();
+    let opts = *verify_opts;
 
     for pkg in packages {
         let sem = std::sync::Arc::clone(&semaphore);
@@ -504,7 +609,7 @@ pub async fn run_fix(ecosystem: Option<&str>, node_url: Option<&str>) -> Result<
         handles.push(tokio::spawn(async move {
             let _permit = sem.acquire().await.expect("semaphore closed");
             let id = PackageId::new(&eco_c, &pkg.name, &pkg.version);
-            let verdict = resolver::resolve_id(&id, url.as_deref()).await;
+            let verdict = resolver::resolve_id_with_options(&id, url.as_deref(), &opts).await;
             (pkg, verdict)
         }));
     }
@@ -599,4 +704,36 @@ fn detect_ecosystem() -> String {
         return "rubygems".into();
     }
     "unknown".into()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn summary(
+        verified: usize,
+        unverified: usize,
+        revoked: usize,
+        quarantined: usize,
+        unknown: usize,
+    ) -> AuditSummary {
+        AuditSummary {
+            verified,
+            unverified,
+            revoked,
+            quarantined,
+            unknown,
+            total: verified + unverified + revoked + quarantined + unknown,
+        }
+    }
+
+    #[test]
+    fn audit_exit_code_enforces_adr_4_2_lattice_precedence() {
+        assert_eq!(audit_exit_code(&summary(5, 0, 0, 0, 0)), 0);
+        assert_eq!(audit_exit_code(&summary(4, 1, 0, 0, 0)), 4);
+        assert_eq!(audit_exit_code(&summary(4, 0, 0, 0, 1)), 4);
+        assert_eq!(audit_exit_code(&summary(3, 1, 0, 1, 1)), 2);
+        assert_eq!(audit_exit_code(&summary(2, 1, 1, 1, 1)), 3);
+        assert_eq!(audit_exit_code(&summary(0, 0, 1, 0, 0)), 3);
+    }
 }

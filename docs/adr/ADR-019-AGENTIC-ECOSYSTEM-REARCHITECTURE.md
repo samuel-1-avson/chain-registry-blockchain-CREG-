@@ -1174,3 +1174,32 @@ No consensus wire type, signed message, block or header format changed; `Cargo.l
 | `cargo test --locked -p chain-registry-cli --no-fail-fast` | 113/113 passed, 1 ignored (pre-existing `explorer_tui::tests::render_console_preview_html`), 0 failed (plus 5 shims, 0 tests each; includes 10 new Part 5c tests) |
 | `cargo test --locked -p common --test consensus_golden_vectors --no-fail-fast` (frozen) | 10/10 |
 | `cargo test --locked -p consensus --test signed_message_formats --no-fail-fast` (frozen) | 6/6 |
+
+### Increment 4, part 5d — `--require-v4-quorum`, shared Class A/B/C evidence panels (`ECA-17`), v4 CLI commands (`ECA-13`, `ECA-18`, `ECO-INV-02`/`03`), and `creg console` tabs (`ECA-21`) (implemented 2026-11-24)
+
+No consensus wire type, signed message, block or header format changed; `Cargo.lock` and the frozen test files are untouched.
+
+| Area | What shipped | Where |
+| --- | --- | --- |
+| `--require-v4-quorum` propagation | Added `resolve_id_with_options` and `resolve_with_options` (with `resolve_id` and `resolve` delegating) in `resolver`, and wired global `--require-v4-quorum` (`CREG_REQUIRE_V4_QUORUM`, via `verify_options_from_cli`) into `Commands::{Install, Status, Audit, Verify}` plus `main.rs` CLI parse coverage. | `crates/resolver/src/lib.rs`, `crates/cli/src/main.rs` |
+| Shared Class A/B/C evidence panels (`ECA-17`) | Created `crates/cli/src/evidence_panel.rs` rendering bounded Class A deterministic findings, Class B trigger witness provenance (with static category dictionary & sanitized trigger fields), and Class C quarantine panels (countdown, committee signatures, and non-overridable notice) via `DisplayText::for_terminal` / `DisplayText::bounded`, plus 3 unit tests. | `crates/cli/src/evidence_panel.rs` |
+| Proof-carrying `verify`, `audit`, `install`, `info`, `diff` (`ECA-13`, `ECO-INV-02`) | Removed the cached `resolve_id` pre-check in `verify.rs` and added `ProofCarryingVerdict` JSON + fail-closed panel output; updated `audit.rs` (`run`/`run_fix`, `audit_exit_code` enforcing `3 > 2 > 4 > 0`, sanitized `Revoked` JSON reasons, empty lockfile `--json`, and blocked panels); added `install::run_with_options` rendering v4 evidence panels before `InstallDecision::Block`; updated `info.rs` to concurrently fetch v4 status/witnesses/proof-bundle and display `Consensus Evidence (v4)`; added sanitized `ManifestPermissionDelta` and `EvidenceDelta` to `diff.rs`, with 5 new unit tests across `verify`, `audit`, `info`, and `diff`. | `crates/cli/src/{verify,audit,install,info,diff}.rs` |
+| `creg watch` v4 stream & `creg evidence verify-witness` (`ECA-18`, `ECO-INV-03`) | Updated `watch.rs` to default to `/v1/public/v4/events` with `404` fallback to `/v1/public/events`, track `Last-Event-ID`, decode `SseEnvelopeV2`, and treat `witness_committed` as critical under `--ci` (2 new unit tests). Added `Commands::Evidence` (`EvidenceCommands::VerifyWitness`) in `crates/cli/src/{evidence,main}.rs` (`WitnessVerifyReportV1`, `verify_witness_offline_with_verification` checking wire budget, signed `ChainSpec`, `AuthorityTimeline::from_spec_and_history(..., height)`, `Validator::verifying_key(require_hybrid)`, and `TriggerWitnessV1::verify`, keeping `creg witness` untouched), with 4 offline unit tests. | `crates/cli/src/{watch,evidence,main}.rs` |
+| `creg console` v4 tabs & Operator zone panel (`ECA-21`) | Added `View::{Quarantine, Evidence, Diversity}` tabs (`console_tabs()` before `View::Metrics`) and command palette dispatch, guarded `'u'`/`'e'`/`'D'`/`'d'` and `Quarantine` selection bindings, background polling of `/v1/public/v4/quarantine?limit=100`, v4 evidence, and four-zone `validator_ops::collect_validator_doctor_report` into `format_operator_zone_lines`, plus `CommitteeDiversitySummary`/`aggregate_committee_diversity` and 3 TUI unit tests. | `crates/cli/src/explorer_tui.rs` |
+
+**`ECO-INV-06` dependency check (`cargo tree --locked -p chain-registry-cli -e normal`):** zero matches for `validator`, `ml-validator`, `wasm-sandbox`, `wasmtime`, `yara-x`, `ark-*`, `ethers`, `sled`, `libp2p`, `rocksdb`, or `pgp`.
+
+**Verification (local, 2026-11-24, rustc 1.98.1, `CARGO_BUILD_JOBS=2`, `CARGO_INCREMENTAL=0`, `CARGO_PROFILE_DEV_DEBUG=0`).** All 10 gates in `stage5d-gates.bat` exited `0`:
+- `cargo fmt --all -- --check`
+- `cargo clippy --locked --workspace --all-targets -- -D warnings`
+- `cargo clippy --locked -p chain-registry-node --features phase-c-real-fleet --all-targets -- -D warnings`
+- `cargo deny --workspace check advisories bans sources`: `advisories ok, bans ok, sources ok`
+- `cargo tree --locked -p chain-registry-cli -e normal`: clean (`ECO-INV-06`)
+- `cargo build --locked -p chain-registry-cli --bin creg`
+
+| Test run | Passed |
+| --- | --- |
+| `cargo test --locked -p resolver --no-fail-fast` | 75/75 passed, 0 failed (plus 0 doc-tests) |
+| `cargo test --locked -p chain-registry-cli --no-fail-fast` | 129/129 passed, 1 ignored (pre-existing `explorer_tui::tests::render_console_preview_html`), 0 failed (plus 5 shims, 0 tests each) |
+| `cargo test --locked -p common --test consensus_golden_vectors --no-fail-fast` (frozen) | 10/10 |
+| `cargo test --locked -p consensus --test signed_message_formats --no-fail-fast` (frozen) | 6/6 |

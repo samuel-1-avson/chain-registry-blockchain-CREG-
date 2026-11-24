@@ -13,6 +13,8 @@ mod config_file;
 mod diff;
 mod doctor;
 mod error_help;
+mod evidence;
+mod evidence_panel;
 mod explorer_tui;
 mod faucet_client;
 mod graph;
@@ -79,6 +81,18 @@ struct Cli {
     /// Output format: text (default) or json.
     #[arg(long, global = true, default_value = "text", value_name = "FORMAT")]
     output: OutputFormat,
+
+    /// Require v4 quorum certificates even for packages published below hybrid activation.
+    #[arg(long, global = true, env = "CREG_REQUIRE_V4_QUORUM")]
+    require_v4_quorum: bool,
+}
+
+fn verify_options_from_cli(cli: &Cli) -> resolver::light_client::VerifyOptions {
+    let mut opts = resolver::light_client::VerifyOptions::from_env();
+    if cli.require_v4_quorum {
+        opts.require_v4_quorum = true;
+    }
+    opts
 }
 
 #[derive(Debug, Clone, clap::ValueEnum)]
@@ -265,6 +279,12 @@ enum Commands {
     Witness {
         #[command(subcommand)]
         command: WitnessCommands,
+    },
+
+    /// Offline verification of proof-carrying evidence (`ECO-INV-03`).
+    Evidence {
+        #[command(subcommand)]
+        command: EvidenceCommands,
     },
 
     /// Stream real-time events from the chain node (SSE).
@@ -647,6 +667,33 @@ enum WitnessCommands {
     },
 }
 
+#[derive(Subcommand, Debug, Clone)]
+enum EvidenceCommands {
+    /// Offline `TriggerWitnessV1::verify` + wire budget + prover membership check (no replay/LLM).
+    VerifyWitness {
+        /// Witness JSON file path or 64-char hex digest (with `--package`).
+        target: String,
+        /// Signed chain spec path (or CREG_CHAIN_SPEC_PATH).
+        #[arg(long, value_name = "PATH", env = "CREG_CHAIN_SPEC_PATH")]
+        spec: Option<std::path::PathBuf>,
+        /// Chain spec signature file path (defaults to `<spec>.sig`).
+        #[arg(long, value_name = "PATH", env = "CREG_CHAIN_SPEC_SIG_PATH")]
+        spec_sig: Option<std::path::PathBuf>,
+        /// Expected chain-spec signer Ed25519 public key (hex).
+        #[arg(long, value_name = "HEX", env = "CREG_SPEC_SIGNING_PUBKEY")]
+        spec_pubkey: Option<String>,
+        /// Canonical package ID when verifying by witness digest (e.g. npm:pkg@1.0.0).
+        #[arg(long, value_name = "CANONICAL")]
+        package: Option<String>,
+        /// Block height at which to evaluate active prover membership and hybrid activation.
+        #[arg(long)]
+        height: Option<u64>,
+        /// Emit machine-readable WitnessVerifyReportV1 JSON.
+        #[arg(long)]
+        json: bool,
+    },
+}
+
 #[derive(Subcommand)]
 enum ConfigCommands {
     /// Initialize a new configuration file
@@ -905,6 +952,7 @@ async fn async_main() -> Result<()> {
 
 async fn run(cli: Cli) -> Result<()> {
     let json_out = matches!(cli.output, OutputFormat::Json);
+    let verify_opts = verify_options_from_cli(&cli);
 
     match cli.command {
         Commands::Install {
@@ -913,11 +961,12 @@ async fn run(cli: Cli) -> Result<()> {
             unverified,
         } => {
             let allow_unverified = unverified || cli.unverified;
-            install::run(
+            install::run_with_options(
                 &package,
                 ecosystem.as_deref(),
                 allow_unverified,
                 cli.node_url.as_deref(),
+                &verify_opts,
             )
             .await?;
         }
@@ -926,8 +975,13 @@ async fn run(cli: Cli) -> Result<()> {
             ecosystem,
             json,
         } => {
-            let verdict =
-                resolver::resolve(&package, ecosystem.as_deref(), cli.node_url.as_deref()).await?;
+            let verdict = resolver::resolve_with_options(
+                &package,
+                ecosystem.as_deref(),
+                cli.node_url.as_deref(),
+                &verify_opts,
+            )
+            .await?;
             if json || json_out {
                 println!("{}", serde_json::to_string_pretty(&verdict)?);
             } else {
@@ -1331,7 +1385,9 @@ async fn run(cli: Cli) -> Result<()> {
             fix,
         } => {
             if fix {
-                let code = audit::run_fix(ecosystem.as_deref(), cli.node_url.as_deref()).await?;
+                let code =
+                    audit::run_fix(ecosystem.as_deref(), cli.node_url.as_deref(), &verify_opts)
+                        .await?;
                 std::process::exit(code);
             } else {
                 let code = audit::run(
@@ -1339,6 +1395,7 @@ async fn run(cli: Cli) -> Result<()> {
                     cli.node_url.as_deref(),
                     strict,
                     json || json_out,
+                    &verify_opts,
                 )
                 .await?;
                 std::process::exit(code);
@@ -1358,6 +1415,7 @@ async fn run(cli: Cli) -> Result<()> {
                     .as_ref()
                     .and_then(|p: &std::path::PathBuf| p.to_str()),
                 json || json_out,
+                &verify_opts,
             )
             .await?;
         }
@@ -1387,6 +1445,29 @@ async fn run(cli: Cli) -> Result<()> {
                     out_path: out_path.unwrap_or_else(witness::default_out_path),
                     once,
                     interval_secs,
+                })
+                .await?;
+            }
+        },
+        Commands::Evidence { command } => match command {
+            EvidenceCommands::VerifyWitness {
+                target,
+                spec,
+                spec_sig,
+                spec_pubkey,
+                package,
+                height,
+                json,
+            } => {
+                evidence::run_verify_witness(evidence::VerifyWitnessArgs {
+                    target: &target,
+                    spec_path: spec.as_deref(),
+                    spec_sig_path: spec_sig.as_deref(),
+                    spec_pubkey: spec_pubkey.as_deref(),
+                    package: package.as_deref(),
+                    height,
+                    node_url: cli.node_url.as_deref(),
+                    json: json || json_out,
                 })
                 .await?;
             }
@@ -1766,6 +1847,43 @@ mod tests {
                 token: Some(_),
                 publisher_key_file: Some(_),
                 ..
+            }
+        ));
+
+        let v4_verify = Cli::try_parse_from([
+            "creg",
+            "--require-v4-quorum",
+            "verify",
+            "npm:express@4.18.0",
+            "--json",
+        ])
+        .unwrap();
+        assert!(v4_verify.require_v4_quorum);
+        assert!(matches!(
+            v4_verify.command,
+            Commands::Verify { json: true, .. }
+        ));
+
+        let ev_witness = Cli::try_parse_from([
+            "creg",
+            "evidence",
+            "verify-witness",
+            "/tmp/witness.json",
+            "--spec",
+            "/tmp/chain-spec.json",
+            "--height",
+            "10",
+            "--json",
+        ])
+        .unwrap();
+        assert!(matches!(
+            ev_witness.command,
+            Commands::Evidence {
+                command: EvidenceCommands::VerifyWitness {
+                    height: Some(10),
+                    json: true,
+                    ..
+                }
             }
         ));
     }
