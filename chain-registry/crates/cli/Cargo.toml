@@ -29,12 +29,12 @@ name = "mvn"          # PATH shim — intercepts `mvn` dependency resolution
 path = "src/shims/mvn.rs"
 
 [dependencies]
-common       = { path = "../common" }
-resolver     = { path = "../resolver" }
-validator    = { path = "../validator" }
-ml-validator = { path = "../ml-validator" }
-wasm-sandbox = { path = "../wasm-sandbox" }
-consensus    = { path = "../consensus" }
+common        = { path = "../common" }
+resolver      = { path = "../resolver" }
+consensus     = { path = "../consensus" }
+registry-view = { path = "../registry-view" }
+ai-config     = { path = "../ai-config" }
+zone-ipc      = { path = "../zone-ipc" }
 tokio      = { workspace = true }
 serde      = { workspace = true }
 serde_json = { workspace = true }

@@ -1866,6 +1866,7 @@ name = "chain-registry-cli"
 version = "0.1.0"
 dependencies = [
  "aes-gcm",
+ "ai-config",
  "anyhow",
  "arboard",
  "base64 0.22.1",
@@ -1886,9 +1887,9 @@ dependencies = [
  "hmac 0.12.1",
  "indicatif",
  "k256",
- "ml-validator",
  "rand 0.8.8",
  "ratatui",
+ "registry-view",
  "reqwest",
  "resolver",
  "scrypt",
@@ -1905,12 +1906,11 @@ dependencies = [
  "tracing",
  "tracing-subscriber",
  "urlencoding",
- "validator",
- "wasm-sandbox",
  "which",
  "whoami",
  "x25519-dalek",
  "zip 9.1.2",
+ "zone-ipc",
 ]
 
 [[package]]
@@ -2571,6 +2571,29 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "2b929dd2a135771f40afabd1073f85eed59c800b7c61901e5c254270497dad64"
 dependencies = [
  "cfg-if",
+]
+
+[[package]]
+name = "creg-dev"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "chrono",
+ "clap",
+ "colored",
+ "common",
+ "consensus",
+ "dirs",
+ "ed25519-dalek",
+ "hex",
+ "ml-validator",
+ "rand 0.8.8",
+ "serde",
+ "serde_json",
+ "tokio",
+ "tracing",
+ "tracing-subscriber",
+ "wasm-sandbox",
 ]
 
 [[package]]

@@ -1,0 +1,31 @@
+[package]
+name = "creg-dev"
+version = "0.1.0"
+edition = "2021"
+description = "Developer & validator operator utility CLI for local ML/WASM checks, OSV snapshots, and stress benchmarks (ADR-019 ECA-16)"
+
+[[bin]]
+name = "creg-dev"
+path = "src/main.rs"
+
+[dependencies]
+common       = { path = "../common" }
+consensus    = { path = "../consensus" }
+ml-validator = { path = "../ml-validator" }
+wasm-sandbox = { path = "../wasm-sandbox" }
+tokio        = { workspace = true }
+serde        = { workspace = true }
+serde_json   = { workspace = true }
+anyhow       = { workspace = true }
+clap         = { version = "4", features = ["derive", "env", "cargo"] }
+chrono       = { workspace = true }
+colored      = "2"
+dirs         = "5"
+ed25519-dalek = { workspace = true }
+hex          = { workspace = true }
+rand         = { workspace = true }
+tracing      = { workspace = true }
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+
+[lints]
+workspace = true

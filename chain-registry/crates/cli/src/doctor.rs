@@ -148,50 +148,87 @@ pub struct FaucetDripOutcome {
     pub balance_after: u128,
 }
 
+const MAX_YARA_WALK_DEPTH: usize = 4;
+
+fn has_yara_rules_in_dir(dir: &std::path::Path, depth: usize) -> bool {
+    if depth > MAX_YARA_WALK_DEPTH || !dir.is_dir() {
+        return false;
+    }
+    let Ok(entries) = std::fs::read_dir(dir) else {
+        return false;
+    };
+    for entry in entries.flatten() {
+        let Ok(ft) = entry.file_type() else {
+            continue;
+        };
+        let path = entry.path();
+        if ft.is_file() {
+            if let Some(ext) = path.extension().and_then(|e| e.to_str()) {
+                if ext.eq_ignore_ascii_case("yar") || ext.eq_ignore_ascii_case("yara") {
+                    return true;
+                }
+            }
+        } else if ft.is_dir() && has_yara_rules_in_dir(&path, depth + 1) {
+            return true;
+        }
+    }
+    false
+}
+
 fn append_fleet_consensus_checks(checks: &mut Vec<DoctorCheck>) {
     let yara_dir = std::env::var("CREG_YARA_RULES_DIR").unwrap_or_else(|_| "rules".to_string());
-    checks.push(if ml_validator::yara_scanner::rules_available() {
-        DoctorCheck::pass(
-            "YARA rules directory",
-            false,
-            format!("{yara_dir} has compiled .yar/.yara rules"),
-        )
-    } else {
-        DoctorCheck::fail(
-            "YARA rules directory",
-            is_validator_host(),
-            format!(
-                "CREG_YARA_RULES_DIR={yara_dir} has no usable .yar/.yara rules — votes would be degraded-yara-missing"
-            ),
-        )
-    });
+    checks.push(
+        if has_yara_rules_in_dir(std::path::Path::new(&yara_dir), 0) {
+            DoctorCheck::pass(
+                "YARA rules directory",
+                false,
+                format!("{yara_dir} has .yar/.yara rules (use `creg validator doctor` for engine runtime verification)"),
+            )
+        } else {
+            DoctorCheck::fail(
+                "YARA rules directory",
+                is_validator_host(),
+                format!(
+                    "CREG_YARA_RULES_DIR={yara_dir} has no .yar/.yara rules — votes would be degraded-yara-missing"
+                ),
+            )
+        },
+    );
 
-    let bundles = validator::bundle::AnalysisBundleSet::current();
-    let refs = bundles.to_refs();
-    let scanner_version = ml_validator::DeepScanner::default().model_version();
-    if scanner_version.starts_with("degraded") {
-        checks.push(DoctorCheck::fail(
-            "Scanner version",
-            true,
-            format!("degraded scanner profile: {scanner_version}"),
-        ));
-    } else if refs.is_consensus_complete() {
-        let digest = common::scanner_profile_digest(&scanner_version, &refs);
-        checks.push(DoctorCheck::pass(
-            "Scanner profile bundles",
+    let osv_epoch = std::env::var("CREG_OSV_SNAPSHOT_EPOCH")
+        .ok()
+        .map(|v| v.trim().to_string())
+        .filter(|v| !v.is_empty())
+        .unwrap_or_else(|| "osv-off".to_string());
+    let osv_path = std::env::var("CREG_OSV_SNAPSHOT_PATH")
+        .ok()
+        .map(|v| v.trim().to_string())
+        .filter(|v| !v.is_empty());
+    match osv_path {
+        Some(path) => {
+            if std::path::Path::new(&path).is_file() {
+                checks.push(DoctorCheck::pass(
+                    "OSV snapshot profile",
+                    false,
+                    format!(
+                        "osv_epoch={osv_epoch} snapshot={path} (deep scanner profile verified by `creg validator doctor`)"
+                    ),
+                ));
+            } else {
+                checks.push(DoctorCheck::fail(
+                    "OSV snapshot profile",
+                    is_validator_host(),
+                    format!("CREG_OSV_SNAPSHOT_PATH='{path}' does not exist"),
+                ));
+            }
+        }
+        None => checks.push(DoctorCheck::pass(
+            "OSV snapshot profile",
             false,
             format!(
-                "scanner={scanner_version} digest={}… osv_epoch={}",
-                &digest[..digest.len().min(16)],
-                refs.osv_snapshot_epoch
+                "osv_epoch={osv_epoch} (use `creg validator doctor` on a validator host to probe runtime analysis bundles)"
             ),
-        ));
-    } else {
-        checks.push(DoctorCheck::fail(
-            "Scanner profile bundles",
-            true,
-            "analysis bundle env vars are incomplete — votes may be excluded from quorum",
-        ));
+        )),
     }
 
     let llm_enabled = std::env::var("CREG_LLM_ENABLED")
@@ -1346,5 +1383,56 @@ fn check_config_file() -> (bool, String) {
                 cfg_path.display()
             ),
         )
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::sync::Mutex;
+
+    static ENV_LOCK: Mutex<()> = Mutex::new(());
+
+    #[test]
+    fn has_yara_rules_detects_yar_and_yara_within_depth() {
+        let dir = tempfile::tempdir().unwrap();
+        assert!(!has_yara_rules_in_dir(dir.path(), 0));
+
+        let nested = dir.path().join("a").join("b");
+        std::fs::create_dir_all(&nested).unwrap();
+        std::fs::write(nested.join("sample.yar"), b"rule x { condition: false }").unwrap();
+        assert!(has_yara_rules_in_dir(dir.path(), 0));
+    }
+
+    #[test]
+    fn lightweight_fleet_checks_report_yara_and_osv_snapshot_without_validator_crates() {
+        let _guard = ENV_LOCK.lock().unwrap();
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join("test.yara"), b"rule t { condition: true }").unwrap();
+        let snap = dir.path().join("osv.json");
+        std::fs::write(&snap, b"{}").unwrap();
+
+        std::env::set_var("CREG_YARA_RULES_DIR", dir.path());
+        std::env::set_var("CREG_OSV_SNAPSHOT_EPOCH", "osv-2026-11-24");
+        std::env::set_var("CREG_OSV_SNAPSHOT_PATH", &snap);
+
+        let mut checks = Vec::new();
+        append_fleet_consensus_checks(&mut checks);
+
+        std::env::remove_var("CREG_YARA_RULES_DIR");
+        std::env::remove_var("CREG_OSV_SNAPSHOT_EPOCH");
+        std::env::remove_var("CREG_OSV_SNAPSHOT_PATH");
+
+        let yara = checks
+            .iter()
+            .find(|c| c.name == "YARA rules directory")
+            .unwrap();
+        assert_eq!(yara.status, "pass");
+        let osv = checks
+            .iter()
+            .find(|c| c.name == "OSV snapshot profile")
+            .unwrap();
+        assert_eq!(osv.status, "pass");
+        assert!(osv.message.contains("osv-2026-11-24"));
     }
 }

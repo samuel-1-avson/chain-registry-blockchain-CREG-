@@ -1121,3 +1121,30 @@ No consensus wire type, signed message, block or header format changed; the froz
 | `cargo test --locked -p chain-registry-node --lib intelligence::worker --no-fail-fast` | 1/1 filtered (`329 filtered out`) |
 | `cargo test --locked -p common --test consensus_golden_vectors --no-fail-fast` (frozen) | 10/10 |
 | `cargo test --locked -p consensus --test signed_message_formats --no-fail-fast` (frozen) | 6/6 |
+
+### Increment 4, part 5b — CLI crate dependency diet (`ECA-16`, `ECO-INV-06`) and `creg-dev` extraction (implemented 2026-11-24)
+
+No consensus wire type, signed message, block or header format changed; the frozen test files are untouched. Maintainer decision applied: extracted the heavy developer/benchmark commands into a dedicated `crates/dev-cli` (`creg-dev`) workspace binary rather than deleting them, keeping `chain-registry-cli` slim while preserving `osv-snapshot build`, `stress`, and `advanced`.
+
+| Area | What shipped | Where |
+| --- | --- | --- |
+| Heavy command extraction (`crates/dev-cli`) | Created `crates/dev-cli` (`creg-dev` binary) registered in `[workspace].members`, moved `advanced.rs`, `osv_snapshot.rs`, and `stress_test.rs` out of `crates/cli/src/`, exposed `advanced { ml-verify | wasm-validate | full-validate }`, `osv-snapshot build`, and `stress` with `--output json` support, updated `stress_test.rs` summary to report `total_packages_generated` and `successful_verifications`, and added CLI parsing tests. | `Cargo.toml`, `crates/dev-cli/{Cargo.toml,src/{main,advanced,osv_snapshot,stress_test}.rs}` |
+| `chain-registry-cli` dependency diet (`ECA-16`, `ECO-INV-06`) | Removed `validator`, `ml-validator`, and `wasm-sandbox` from `crates/cli/Cargo.toml`; added lightweight `registry-view`, `ai-config`, and `zone-ipc` for Parts 5c–5d. Removed `Commands::Advanced`, `Commands::OsvSnapshot`, and `TestnetCommands::Stress` from `crates/cli/src/main.rs`. Replaced `ml_validator` / `validator` calls in `crates/cli/src/doctor.rs` (`append_fleet_consensus_checks`) with bounded local `has_yara_rules_in_dir` walking and lightweight `CREG_OSV_SNAPSHOT_EPOCH` / `CREG_OSV_SNAPSHOT_PATH` checks plus two unit tests. | `Cargo.lock`, `crates/cli/Cargo.toml`, `crates/cli/src/{main,doctor}.rs` |
+
+**`ECO-INV-06` dependency check (`cargo tree --locked -p chain-registry-cli -e normal`):** zero matches for `validator`, `ml-validator`, `wasm-sandbox`, `wasmtime`, `yara-x`, `ark-*`, `ethers`, `sled`, `libp2p`, `rocksdb`, or `pgp`.
+
+**Verification (local, 2026-11-24, rustc 1.98.1, `CARGO_BUILD_JOBS=2`, `CARGO_INCREMENTAL=0`, `CARGO_PROFILE_DEV_DEBUG=0`).** All 11 gates in `stage5b-gates.bat` exited `0`:
+- `cargo fmt --all -- --check`
+- `cargo clippy --locked --workspace --all-targets -- -D warnings`
+- `cargo clippy --locked -p chain-registry-node --features phase-c-real-fleet --all-targets -- -D warnings`
+- `cargo deny --workspace check advisories bans sources`: `advisories ok, bans ok, sources ok`
+- `cargo tree --locked -p chain-registry-cli -e normal`: clean (`ECO-INV-06`)
+- `cargo build --locked -p chain-registry-cli --bin creg`
+- `cargo build --locked -p creg-dev --bin creg-dev`
+
+| Test run | Passed |
+| --- | --- |
+| `cargo test --locked -p chain-registry-cli --no-fail-fast` | 106/106 passed, 1 ignored (pre-existing `explorer_tui::tests::render_console_preview_html`), 0 failed (plus 5 shims, 0 tests each) |
+| `cargo test --locked -p creg-dev --no-fail-fast` | 5/5 passed (4 moved + 1 new CLI parser test) |
+| `cargo test --locked -p common --test consensus_golden_vectors --no-fail-fast` (frozen) | 10/10 |
+| `cargo test --locked -p consensus --test signed_message_formats --no-fail-fast` (frozen) | 6/6 |

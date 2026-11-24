@@ -240,8 +240,10 @@ pub async fn run_stress_test(config: StressTestConfig) -> Result<StressTestRepor
         "================================================================================".green()
     );
     println!(
-        "  Total Processed:         {} packages",
-        report.total_packages_processed.to_string().bold().green()
+        "  Total Processed:         {} / {} generated ({} verified)",
+        report.total_packages_processed.to_string().bold().green(),
+        report.total_packages_generated,
+        report.successful_verifications
     );
     println!(
         "  Success Rate:            {}",
