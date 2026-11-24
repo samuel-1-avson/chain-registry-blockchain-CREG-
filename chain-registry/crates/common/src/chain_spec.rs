@@ -239,21 +239,44 @@ impl ChainSpec {
     /// Reject a signed spec that this build cannot safely interpret. Genesis
     /// must match the embedded declaration even when no environment pin exists.
     pub fn validate_consensus_identity(&self) -> anyhow::Result<()> {
+        self.validate_consensus_identity_inner(true)
+    }
+
+    /// Reject a signed spec that a client cannot safely interpret, without
+    /// requiring the binary's compile-time `phase-c-canonical-transactions`
+    /// feature to match the spec (`ECA-08`).
+    pub fn validate_consensus_identity_for_client(&self) -> anyhow::Result<()> {
+        self.validate_consensus_identity_inner(false)
+    }
+
+    fn validate_consensus_identity_inner(
+        &self,
+        require_compiled_match: bool,
+    ) -> anyhow::Result<()> {
         if self.spec_version != CURRENT_SPEC_VERSION {
             anyhow::bail!(
                 "unsupported chain-spec schema version {}",
                 self.spec_version
             );
         }
-        if self.consensus_params.consensus_encoding.as_deref()
-            != crate::compiled_consensus_encoding()
-        {
-            anyhow::bail!(
-                "signed consensus encoding {:?} does not match this build {:?}",
-                self.consensus_params.consensus_encoding,
-                crate::compiled_consensus_encoding()
-            );
-        }
+        let phase_c = if require_compiled_match {
+            if self.consensus_params.consensus_encoding.as_deref()
+                != crate::compiled_consensus_encoding()
+            {
+                anyhow::bail!(
+                    "signed consensus encoding {:?} does not match this build {:?}",
+                    self.consensus_params.consensus_encoding,
+                    crate::compiled_consensus_encoding()
+                );
+            }
+            crate::compiled_consensus_encoding().is_some()
+        } else {
+            match self.consensus_params.consensus_encoding.as_deref() {
+                None => false,
+                Some(crate::PHASE_C_CONSENSUS_ENCODING) => true,
+                Some(other) => anyhow::bail!("unsupported signed consensus encoding {other:?}"),
+            }
+        };
         if !crate::is_canonical_single_line(&self.chain_id) || self.chain_id.is_empty() {
             anyhow::bail!("signed chain ID is not canonical");
         }
@@ -262,7 +285,7 @@ impl ChainSpec {
         }
         let bootstrap = self.to_runtime_validator_set();
         crate::validate_validator_identities(&bootstrap).map_err(anyhow::Error::msg)?;
-        if crate::compiled_consensus_encoding().is_some()
+        if phase_c
             && bootstrap
                 .validators
                 .iter()
@@ -272,7 +295,7 @@ impl ChainSpec {
         {
             anyhow::bail!("Phase C requires at least four distinct active validator identities");
         }
-        if crate::compiled_consensus_encoding().is_some() {
+        if phase_c {
             let mut addresses = std::collections::HashSet::new();
             for validator in &bootstrap.validators {
                 let address = validator.eth_address.to_ascii_lowercase();
@@ -295,6 +318,17 @@ impl ChainSpec {
     /// Derive the real block-zero value after the caller authenticates this spec.
     pub fn canonical_genesis_block(&self) -> anyhow::Result<crate::Block> {
         self.validate_consensus_identity()?;
+        if self.consensus_params.consensus_encoding.is_some() {
+            crate::Block::genesis_for_phase_c(&self.genesis_hash)
+        } else {
+            Ok(crate::Block::genesis())
+        }
+    }
+
+    /// Derive the real block-zero value for a standalone client without gating on
+    /// `phase-c-canonical-transactions`.
+    pub fn canonical_genesis_block_for_client(&self) -> anyhow::Result<crate::Block> {
+        self.validate_consensus_identity_for_client()?;
         if self.consensus_params.consensus_encoding.is_some() {
             crate::Block::genesis_for_phase_c(&self.genesis_hash)
         } else {
@@ -747,6 +781,36 @@ mod tests {
         assert!(err
             .to_string()
             .contains("unsupported spec signature algorithm"));
+    }
+
+    #[test]
+    fn validate_consensus_identity_for_client_accepts_phase_c_and_rejects_unknown() {
+        let mut spec = test_spec();
+        spec.consensus_params.consensus_encoding =
+            Some(crate::PHASE_C_CONSENSUS_ENCODING.to_string());
+        spec.validator_set.validators = (0..4)
+            .map(|i| {
+                let sk = crate::crypto::SigningKey::from_ed25519_seed(&[i as u8 + 10; 32]);
+                ValidatorSpecEntry {
+                    id: format!("val-{i}"),
+                    alias: format!("val-{i}"),
+                    pubkey: sk.public_key().to_hex(),
+                    eth_address: format!("0x{:040x}", i + 1),
+                    stake: 100,
+                    reputation: 100,
+                    status: "active".into(),
+                    pq_pubkey: None,
+                }
+            })
+            .collect();
+        spec.genesis_hash = spec.compute_genesis_hash().unwrap();
+        spec.validate_consensus_identity_for_client()
+            .expect("client validation should accept Phase C spec even without compile flag");
+        let genesis = spec.canonical_genesis_block_for_client().unwrap();
+        assert_eq!(genesis.header.proposer_id, "genesis-phase-c-sorted-json-v1");
+
+        spec.consensus_params.consensus_encoding = Some("unknown-encoding-v99".into());
+        assert!(spec.validate_consensus_identity_for_client().is_err());
     }
 
     // ── Sepolia chain-spec ↔ on-chain Staking.sol drift guard ────────────────

@@ -426,6 +426,18 @@ pub fn transaction_hash(tx: &Transaction) -> String {
     )
 }
 
+/// Transaction leaf hash parameterized by the signed chain spec's
+/// `consensus_encoding` so standalone clients without
+/// `phase-c-canonical-transactions` verify Phase C Merkle inclusion proofs.
+pub fn transaction_hash_for_encoding(
+    tx: &Transaction,
+    encoding: Option<&str>,
+) -> anyhow::Result<String> {
+    Ok(sha256_hex(
+        crate::consensus_json_bytes_for_encoding(tx, encoding)?.as_slice(),
+    ))
+}
+
 /// Hashes for every transaction in a block (same encoding as [`merkle_root`]).
 pub fn block_transaction_hashes(block: &Block) -> Vec<String> {
     block.transactions.iter().map(transaction_hash).collect()

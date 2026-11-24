@@ -1052,5 +1052,41 @@ Maintainer decision applied: extend `ProofBundleV2` directly so `/v1/public/v4/p
 | `cargo test --locked -p chain-registry-node --features phase-c-real-fleet --lib --no-fail-fast` | 329/329 (1 ignored, pre-existing `sync::tests::aggregated_votes_pass_sync_only_with_canonical_payload`; includes `proof_bundle_carries_status_transactions_and_authority_history` and `v4_routes_and_registry_view_schemas_are_published`) |
 | `cargo test --locked -p chain-registry-node --test integration --no-fail-fast` | 11/11 |
 
-**Remaining in Stage 4 (part 4c):**
-- Remove the phase-C bypass in `resolver`, add `CREG_SPEC_SIGNING_PUBKEY` build tracking (`resolver/build.rs`), verify hybrid PBFT commits + committee QCs + `StatusProofV2` + tip freshness (`3600` s) + `require_v4_quorum` option + `ECO-INV-02` install lattice (`eco-adv-03..06`), and record part 4c in §13.
+### Increment 3, part 4c — proof-carrying resolver verification spine (implemented 2026-11-24)
+
+Stage 4 (Increment 3) is complete. No consensus wire format or frozen golden-vector test file changed (`consensus_golden_vectors.rs` and `signed_message_formats.rs` untouched).
+
+| Area | What shipped | Where |
+| --- | --- | --- |
+| Standalone client canonical encoding (`ECA-08`) | Added encoding-parameterized canonical JSON and status-leaf helpers (`consensus_json_bytes_for_encoding`, `transaction_hash_for_encoding`, `ChainSpec::validate_consensus_identity_for_client`, `ChainSpec::canonical_genesis_block_for_client`, `StatusLeafV1::value_hash_for_encoding`, `StatusProofV2::verify_for_encoding`, `StatusTree::{root_for_encoding, prove_for_encoding}`) so standalone clients without `phase-c-canonical-transactions` verify Phase C transaction hashes, chain specs, and `StatusProofV2` against Phase C nodes. | `common/src/{consensus_encoding,block,chain_spec,status_tree}.rs` |
+| Binary key pinning & verifier linkage | Added `resolver/build.rs` (`rerun-if-env-changed=CREG_SPEC_SIGNING_PUBKEY`, 32-byte hex normalization/validation) and added `consensus` + `registry-view` dependencies to `resolver/Cargo.toml` and `Cargo.lock` without introducing new external crates. | `resolver/Cargo.toml`, `resolver/build.rs`, `Cargo.lock` |
+| Proof-carrying `ProofBundleV2` verifier (`ECA-02`, `ECA-08`–`ECA-10`, `ECA-12`, `ECO-INV-01`, `ECO-INV-03`, `ECO-INV-04`) | Deleted every `compiled_consensus_encoding()` compile-time bypass and `CREG_PBFT_ALLOW_SMALL_CLUSTER_QUORUM` fallback. Added `VerifyOptions` (`DEFAULT_MAX_TIP_AGE_SECS = 3600`, `DEFAULT_MAX_TIP_FUTURE_SKEW_SECS = 300`, `CREG_REQUIRE_V4_QUORUM` / `require_v4_quorum` for decision #7), `AuthorityTimeline` (authenticated transitions from signed genesis), `verify_pbft_consensus_with_params` (using `consensus::vote_v4::verify_pbft_phase_signature_at_height`, tolerating invalid signatures), `verify_revocation_transaction`, `verify_proof_bundle` (tip freshness, Merkle inclusion, approval/quarantine/resolution/revocation QCs via `consensus::vote_v4::verify_committee_qc_for_record`, `StatusProofV2` via `verify_for_encoding`), `fetch_proof_bundle` (`/v1/public/v4/packages/:name/:version/proof-bundle`), `verify_package_with_options`, `verify_verdict_detailed`, and `verify_verdict_with_options`. | `resolver/src/light_client.rs` |
+| `ECO-INV-02` install lattice & Journal v2 wiring | Removed both `compiled_consensus_encoding()` bypasses in `resolve_id_for_install`, added `resolve_id_for_install_with_options` (updating monotonic `tip_height`), added `LatticeOutcome`, `reconcile_verdict_with_proof`, and `evaluate_lattice_at` (`revoked_certified` > `quarantine_expired`/`quarantined` > `{unproven_status, unverified, unknown}` > `Verified`, blocking `--unverified` on `Unproven`), and added `admit_with_freshness_certified` (`ECO-INV-04` certified stickiness + tip-height rollback check). | `resolver/src/install_gate.rs`, `resolver/src/freshness.rs` |
+
+**Adversarial & regression coverage added:**
+- `eco-adv-03`: `install_gate::tests::eco_adv_03_rest_verified_with_revoked_or_missing_proof_blocks_fail_closed` + end-to-end join inside `light_client::tests::eco_adv_05_single_validator_revoke_v2_without_qc_post_activation_is_rejected_and_uncertified` (lying REST `"verified"` with revoked/missing/tampered SMT proof yields `revoked_certified` / `unproven_status` and cannot be bypassed).
+- `eco-adv-04`: `light_client::tests::eco_adv_04_post_activation_ed25519_only_commit_qc_is_rejected` (post-activation commit signatures without `pq_signature` fail; an invalid signature does not veto an honest hybrid quorum).
+- `eco-adv-05`: `light_client::tests::eco_adv_05_single_validator_revoke_v2_without_qc_post_activation_is_rejected_and_uncertified` + `install_gate::tests::eco_adv_05_uncertified_revocation_is_not_sticky_and_tip_rollback_blocks` (post-activation single-validator `RevokeV2` without QC cannot certify and is non-sticky in Journal v2, while owner self-revocations and `CommitteeQuorumCertificateV1` revocations are certified and sticky).
+- `eco-adv-06`: `freshness::tests::eco_adv_06_different_content_hash_at_later_timestamp_blocks_as_mix_and_match` (carried forward from part 4a, green).
+- Standalone Phase C `ProofBundleV2` verification (`standalone_phase_c_proof_bundle_verifies_without_compile_feature`), decision #7 pre-activation `legacy_v3_quorum` vs `require_v4_quorum` (`pre_activation_legacy_v3_quorum_honors_require_v4_quorum_option`), `3600` s / `300` s tip freshness (`tip_freshness_enforces_3600s_staleness_and_future_skew_bounds`), validator rotation (`authority_history_transition_updates_signing_authority_and_rejects_forgery`), quarantine QC + deterministic expiry + release QC (`quarantine_qc_expiry_and_certified_release_verify`), `StatusProofV2` omission/tampering (`status_proof_tampering_or_omission_post_activation_fails`), and `ECO-INV-02` lattice joins (`eco_inv_02_lattice_ordering_and_break_glass_rules`).
+
+**Verification (local, 2026-11-24, rustc 1.98.1, `CARGO_BUILD_JOBS=2`).** These all passed (`stage4c-gates.bat`):
+- `cargo fmt --all -- --check`
+- `cargo clippy --locked --workspace --all-targets -- -D warnings`
+- `cargo clippy --locked -p chain-registry-node --features phase-c-real-fleet --all-targets -- -D warnings`
+- `cargo deny --workspace check advisories bans sources`: `advisories ok, bans ok, sources ok`
+- `cargo tree --locked -i sled`: matches no packages (`error: package ID specification 'sled' did not match any packages`)
+- `cargo build --locked -p chain-registry-cli --bin creg`: standalone client binary builds with zero warnings
+
+| Test run | Passed |
+| --- | --- |
+| `cargo test --locked -p common --no-fail-fast` | 103/103 lib (3 new) + `consensus_golden_vectors` 10/10 (frozen) + `hybrid_differential_corpus` 2/2 (1 ignored, pre-existing) + `mldsa44_acvp` 3/3 |
+| `cargo test --locked -p consensus --no-fail-fast` | 79/79 lib + `signed_message_formats` 6/6 (frozen) + `vote_v4_hybrid_convergence` 5/5 |
+| `cargo test --locked -p resolver --no-fail-fast` | 75/75 (11 new in `light_client` and `install_gate`) |
+| `cargo test --locked -p chain-registry-cli --no-fail-fast` | 108/108 (1 ignored, pre-existing) + 5 shims (0 tests each) |
+| `cargo test --locked -p chain-registry-node --test integration --no-fail-fast` | 11/11 |
+
+**Deferred / follow-up notes after Stage 4:**
+- Delegated namespace-controller `RevokeV2` offline proofs without a committee QC remain a follow-up (`ProofBundleV2` does not yet carry namespace lifecycle proof ancestry, so clients fail closed as `unproven_status` rather than trusting unauthenticated non-owner signers).
+- Pre-activation `k`-of-`n` observer agreement (open decision #8) remains deferred per maintainer guidance.
+- Stage 5 (Increment 4) exposes `--require-v4-quorum` on the CLI, renders v4 evidence panels, and executes the CLI crate dependency diet.

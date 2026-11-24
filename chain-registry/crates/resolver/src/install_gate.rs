@@ -10,10 +10,13 @@
 // quarantine (ECA-07, ADR-019 open decision #2) or anti-rollback.
 
 use crate::chain_client;
+use crate::light_client::{VerifiedProofBundle, VerifyOptions};
 use crate::{cache, parse_pkg};
 use anyhow::{bail, Result};
 use chrono::{DateTime, Duration, Utc};
-use common::{DisplayText, FindingSeverity, PackageId, TrustVerdict, VerdictSource, VerdictStatus};
+use common::{
+    DisplayText, Finding, FindingSeverity, PackageId, TrustVerdict, VerdictSource, VerdictStatus,
+};
 
 pub const ALLOW_UNVERIFIED_ENV: &str = "CREG_ALLOW_UNVERIFIED";
 pub const INSTALL_CACHE_MAX_AGE: Duration = Duration::minutes(5);
@@ -28,6 +31,156 @@ pub enum InstallDecision {
 impl InstallDecision {
     pub fn is_blocked(&self) -> bool {
         matches!(self, Self::Block { .. })
+    }
+}
+
+/// Client install-decision lattice (`ECO-INV-02`):
+/// `Revoked` ⊐ `Quarantined` ⊐ {`Unproven`, `Pending`, `Unknown`} ⊐ `Verified`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum LatticeOutcome {
+    Verified {
+        findings: Vec<Finding>,
+    },
+    Pending,
+    Unknown,
+    Unproven {
+        reason: String,
+    },
+    Quarantined {
+        reason: String,
+        content_hash: String,
+        expires_at_unix: Option<i64>,
+        certified: bool,
+        height: u64,
+    },
+    Revoked {
+        reason: String,
+        certified: bool,
+        height: u64,
+    },
+}
+
+impl LatticeOutcome {
+    /// Fail-closed dominance level (`Revoked` or expired `Quarantined` = 4,
+    /// active `Quarantined` = 3, `{Unproven, Pending, Unknown}` = 2,
+    /// `Verified` = 1).
+    pub fn severity(&self, now_unix: i64) -> u8 {
+        match self {
+            Self::Revoked { .. } => 4,
+            Self::Quarantined {
+                expires_at_unix: Some(deadline),
+                ..
+            } if now_unix >= *deadline => 4,
+            Self::Quarantined { .. } => 3,
+            Self::Unproven { .. } | Self::Pending | Self::Unknown => 2,
+            Self::Verified { .. } => 1,
+        }
+    }
+
+    fn is_certified(&self) -> bool {
+        match self {
+            Self::Quarantined { certified, .. } | Self::Revoked { certified, .. } => *certified,
+            Self::Verified { .. } => true,
+            Self::Pending | Self::Unknown | Self::Unproven { .. } => false,
+        }
+    }
+
+    /// Least upper bound on the fail-closed status lattice (`ECO-INV-02`).
+    pub fn join(self, other: Self, now_unix: i64) -> Self {
+        match self.severity(now_unix).cmp(&other.severity(now_unix)) {
+            std::cmp::Ordering::Greater => self,
+            std::cmp::Ordering::Less => other,
+            std::cmp::Ordering::Equal => match (&self, &other) {
+                (Self::Unproven { .. }, _) => self,
+                (_, Self::Unproven { .. }) => other,
+                (Self::Pending, Self::Unknown) => self,
+                (Self::Unknown, Self::Pending) => other,
+                _ if !self.is_certified() && other.is_certified() => other,
+                _ => self,
+            },
+        }
+    }
+
+    /// Project a resolved [`TrustVerdict`] onto the lattice.
+    pub fn from_verdict(verdict: &TrustVerdict, certified: bool, height: u64) -> Self {
+        match &verdict.status {
+            VerdictStatus::Verified { findings, .. } => Self::Verified {
+                findings: findings.clone(),
+            },
+            VerdictStatus::Unverified => Self::Pending,
+            VerdictStatus::Unknown => Self::Unknown,
+            VerdictStatus::Quarantined {
+                reason,
+                content_hash,
+                expires_at_unix,
+            } => Self::Quarantined {
+                reason: reason.clone(),
+                content_hash: content_hash.clone(),
+                expires_at_unix: *expires_at_unix,
+                certified,
+                height,
+            },
+            VerdictStatus::Revoked { reason, .. } => Self::Revoked {
+                reason: reason.clone(),
+                certified,
+                height,
+            },
+        }
+    }
+
+    /// Project a cryptographically verified [`VerifiedProofBundle`] onto the
+    /// lattice.
+    pub fn from_verified_proof(proof: &VerifiedProofBundle) -> Self {
+        match &proof.status {
+            VerdictStatus::Verified { findings, .. } => Self::Verified {
+                findings: findings.clone(),
+            },
+            VerdictStatus::Unverified => Self::Pending,
+            VerdictStatus::Unknown => Self::Unknown,
+            VerdictStatus::Quarantined {
+                reason,
+                content_hash,
+                expires_at_unix,
+            } => Self::Quarantined {
+                reason: reason.clone(),
+                content_hash: content_hash.clone(),
+                expires_at_unix: *expires_at_unix,
+                certified: proof.certified,
+                height: proof.status_height,
+            },
+            VerdictStatus::Revoked { reason, .. } => Self::Revoked {
+                reason: reason.clone(),
+                certified: proof.certified,
+                height: proof.status_height,
+            },
+        }
+    }
+}
+
+/// Reconcile an untrusted REST verdict with local cryptographic proof
+/// verification (`ECO-INV-01`, `ECO-INV-02`, `eco-adv-03`).
+///
+/// An unproven claim of `Verified` is never left installable (not even under
+/// `--unverified`); it becomes [`LatticeOutcome::Unproven`].
+pub fn reconcile_verdict_with_proof(
+    rest_verdict: &TrustVerdict,
+    proof: std::result::Result<&VerifiedProofBundle, &str>,
+    now: DateTime<Utc>,
+) -> LatticeOutcome {
+    match proof {
+        Ok(verified) => LatticeOutcome::from_verdict(rest_verdict, false, 0).join(
+            LatticeOutcome::from_verified_proof(verified),
+            now.timestamp(),
+        ),
+        Err(reason) => {
+            if rest_verdict.status.is_safe() {
+                LatticeOutcome::Unproven {
+                    reason: reason.to_string(),
+                }
+            } else {
+                LatticeOutcome::from_verdict(rest_verdict, false, 0)
+            }
+        }
     }
 }
 
@@ -102,34 +255,39 @@ pub fn evaluate_install(verdict: &TrustVerdict, allow_unverified: bool) -> Insta
     evaluate_install_at(verdict, allow_unverified, Utc::now())
 }
 
-/// SHIM-301 status rules evaluated at `now`.
-pub fn evaluate_install_at(
-    verdict: &TrustVerdict,
+/// Evaluate an [`ECO-INV-02`](LatticeOutcome) decision at `now`.
+pub fn evaluate_lattice_at(
+    canonical: &str,
+    outcome: &LatticeOutcome,
     allow_unverified: bool,
     now: DateTime<Utc>,
 ) -> InstallDecision {
-    match &verdict.status {
-        VerdictStatus::Revoked { reason, .. } => InstallDecision::Block {
-            code: "revoked",
+    match outcome {
+        LatticeOutcome::Revoked {
+            reason, certified, ..
+        } => InstallDecision::Block {
+            code: if *certified {
+                "revoked_certified"
+            } else {
+                "revoked"
+            },
             message: format!(
                 "Package '{}' is REVOKED and cannot be installed. Reason: {}",
-                verdict.package.canonical(),
+                canonical,
                 DisplayText::for_terminal(reason)
             ),
         },
-        // eco-adv-01: no `allow_unverified` branch. A committee hold is not an
-        // "unqualified package"; it is an explicit refusal.
-        status @ VerdictStatus::Quarantined {
+        LatticeOutcome::Quarantined {
             reason,
             expires_at_unix,
             ..
         } => {
-            if status.quarantine_expired(now.timestamp()) {
+            if expires_at_unix.is_some_and(|deadline| now.timestamp() >= deadline) {
                 InstallDecision::Block {
                     code: "quarantine_expired",
                     message: format!(
                         "Package '{}' was QUARANTINED and the hold expired at {}; it fails closed to REVOKED and cannot be installed. Reason: {}",
-                        verdict.package.canonical(),
+                        canonical,
                         format_unix(*expires_at_unix),
                         DisplayText::for_terminal(reason)
                     ),
@@ -146,13 +304,21 @@ pub fn evaluate_install_at(
                     code: "quarantined",
                     message: format!(
                         "Package '{}' is QUARANTINED for committee review and cannot be installed; --unverified and {ALLOW_UNVERIFIED_ENV} do not override a quarantine ({deadline}). Reason: {}",
-                        verdict.package.canonical(),
+                        canonical,
                         DisplayText::for_terminal(reason)
                     ),
                 }
             }
         }
-        VerdictStatus::Verified { findings, .. } => {
+        LatticeOutcome::Unproven { reason } => InstallDecision::Block {
+            code: "unproven_status",
+            message: format!(
+                "Package '{}' has an UNPROVEN status and cannot be installed; --unverified and {ALLOW_UNVERIFIED_ENV} do not bypass proof verification. Reason: {}",
+                canonical,
+                DisplayText::for_terminal(reason)
+            ),
+        },
+        LatticeOutcome::Verified { findings } => {
             let has_severe = findings.iter().any(|finding| {
                 matches!(
                     finding.severity,
@@ -164,7 +330,7 @@ pub fn evaluate_install_at(
                     code: "high_severity",
                     message: format!(
                         "Package '{}' has high-severity security findings. Refusing installation; use --unverified or {ALLOW_UNVERIFIED_ENV}=true only as an explicit break-glass exception.",
-                        verdict.package.canonical()
+                        canonical
                     ),
                 }
             } else if has_severe {
@@ -173,7 +339,7 @@ pub fn evaluate_install_at(
                 InstallDecision::Allow
             }
         }
-        VerdictStatus::Unverified => {
+        LatticeOutcome::Pending => {
             if allow_unverified {
                 InstallDecision::AllowUnverified
             } else {
@@ -181,12 +347,12 @@ pub fn evaluate_install_at(
                     code: "unverified",
                     message: format!(
                         "Package '{}' is not qualified. Refusing installation; use --unverified or {ALLOW_UNVERIFIED_ENV}=true only as an explicit break-glass exception.",
-                        verdict.package.canonical()
+                        canonical
                     ),
                 }
             }
         }
-        VerdictStatus::Unknown => {
+        LatticeOutcome::Unknown => {
             if allow_unverified {
                 InstallDecision::AllowUnverified
             } else {
@@ -194,12 +360,27 @@ pub fn evaluate_install_at(
                     code: "unknown",
                     message: format!(
                         "Package '{}' is unknown to the chain registry. Use --unverified or {ALLOW_UNVERIFIED_ENV}=true to install from the original registry.",
-                        verdict.package.canonical()
+                        canonical
                     ),
                 }
             }
         }
     }
+}
+
+/// SHIM-301 status rules evaluated at `now`.
+pub fn evaluate_install_at(
+    verdict: &TrustVerdict,
+    allow_unverified: bool,
+    now: DateTime<Utc>,
+) -> InstallDecision {
+    let outcome = LatticeOutcome::from_verdict(verdict, false, 0);
+    evaluate_lattice_at(
+        &verdict.package.canonical(),
+        &outcome,
+        allow_unverified,
+        now,
+    )
 }
 
 /// Resolve for an install/shim decision: honor cached revocations, ignore
@@ -220,10 +401,17 @@ pub async fn resolve_id_for_install(
     id: &PackageId,
     node_url: Option<&str>,
 ) -> Result<TrustVerdict> {
+    resolve_id_for_install_with_options(id, node_url, &VerifyOptions::from_env()).await
+}
+
+/// Proof-carrying install-grade resolution parameterized by [`VerifyOptions`].
+pub async fn resolve_id_for_install_with_options(
+    id: &PackageId,
+    node_url: Option<&str>,
+    options: &VerifyOptions,
+) -> Result<TrustVerdict> {
     if let Some(cached) = cache::get(id)? {
-        if install_cache_usable(&cached, Utc::now())
-            && (common::compiled_consensus_encoding().is_none() || cached.status.is_blocked())
-        {
+        if install_cache_usable(&cached, Utc::now()) && cached.status.is_blocked() {
             tracing::debug!("install cache hit for {}", id.canonical());
             return Ok(cached);
         }
@@ -238,11 +426,18 @@ pub async fn resolve_id_for_install(
         .unwrap_or_else(crate::default_node_url);
 
     let verdict = chain_client::fetch_verdict(id, &url).await?;
-    let verdict = if common::compiled_consensus_encoding().is_some() {
-        crate::light_client::verify_verdict(verdict, &url, None).await?
-    } else {
-        verdict
-    };
+    let (verdict, proof_opt) =
+        crate::light_client::verify_verdict_detailed(verdict, &url, None, options).await?;
+    if let Some(proof) = proof_opt {
+        let store = crate::freshness::FreshnessStore::open_default()?;
+        let last_tip = store.last_tip_height()?;
+        if let Some(InstallDecision::Block { message, .. }) =
+            crate::freshness::check_tip_height(last_tip, proof.tip_height)
+        {
+            bail!("{message}");
+        }
+        store.record_tip_height(proof.tip_height)?;
+    }
     cache::set(id, &verdict)?;
     Ok(verdict)
 }
@@ -743,5 +938,229 @@ mod tests {
         drop(_yes);
         let _no = EnvRestore::set(ALLOW_UNVERIFIED_ENV, "false");
         assert!(!env_allow_unverified());
+    }
+
+    #[test]
+    fn eco_adv_03_rest_verified_with_revoked_or_missing_proof_blocks_fail_closed() {
+        let now = Utc::now();
+        let lying_rest = verdict(
+            verified(),
+            VerdictSource::Chain {
+                node_url: "https://n.example".into(),
+            },
+            now,
+        );
+        let unproven =
+            reconcile_verdict_with_proof(&lying_rest, Err("status SMT proof invalid"), now);
+        assert!(matches!(unproven, LatticeOutcome::Unproven { .. }));
+        // Break-glass cannot override Unproven (ECO-INV-02).
+        match evaluate_lattice_at(&pkg().canonical(), &unproven, true, now) {
+            InstallDecision::Block { code, .. } => assert_eq!(code, "unproven_status"),
+            other => panic!("expected unproven_status block, got {other:?}"),
+        }
+
+        let revoked_proof = VerifiedProofBundle {
+            canonical: pkg().canonical(),
+            tip_height: 12,
+            tip_block_hash: "ab".repeat(32),
+            tip_timestamp_unix: now.timestamp(),
+            publication_height: 10,
+            publication_block_hash: "cd".repeat(32),
+            record: common::ChainRecord {
+                id: pkg(),
+                content_hash: "hash".into(),
+                ..Default::default()
+            },
+            status: VerdictStatus::Revoked {
+                reason: "committee revoked".into(),
+                findings: vec![],
+            },
+            status_view: registry_view::PackageStatusViewV1::Revoked {
+                height: 12,
+                authority: registry_view::RevocationAuthorityV1::CommitteeQuorum,
+                reason: DisplayText::bounded("committee revoked", 128),
+                witness_digest: None,
+                certificate_digest: Some("ef".repeat(32)),
+            },
+            quorum: registry_view::QuorumLabelV1::V4Quorum,
+            certified: true,
+            status_height: 12,
+            status_proven_by_smt: true,
+        };
+        let joined = reconcile_verdict_with_proof(&lying_rest, Ok(&revoked_proof), now);
+        match evaluate_lattice_at(&pkg().canonical(), &joined, true, now) {
+            InstallDecision::Block { code, .. } => assert_eq!(code, "revoked_certified"),
+            other => panic!("expected revoked_certified block, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn eco_inv_02_lattice_ordering_and_break_glass_rules() {
+        let now = Utc::now();
+        let canonical = pkg().canonical();
+        let verified_l = LatticeOutcome::Verified { findings: vec![] };
+        let pending_l = LatticeOutcome::Pending;
+        let unknown_l = LatticeOutcome::Unknown;
+        let unproven_l = LatticeOutcome::Unproven {
+            reason: "missing proof".into(),
+        };
+        let active_q = LatticeOutcome::Quarantined {
+            reason: "hold".into(),
+            content_hash: "hh".into(),
+            expires_at_unix: Some(now.timestamp() + 3600),
+            certified: true,
+            height: 5,
+        };
+        let expired_q = LatticeOutcome::Quarantined {
+            reason: "hold".into(),
+            content_hash: "hh".into(),
+            expires_at_unix: Some(now.timestamp() - 1),
+            certified: true,
+            height: 5,
+        };
+        let revoked_l = LatticeOutcome::Revoked {
+            reason: "yank".into(),
+            certified: true,
+            height: 6,
+        };
+
+        assert_eq!(
+            verified_l.clone().join(pending_l.clone(), now.timestamp()),
+            pending_l
+        );
+        assert_eq!(
+            pending_l.clone().join(unproven_l.clone(), now.timestamp()),
+            unproven_l
+        );
+        assert_eq!(
+            unproven_l.clone().join(active_q.clone(), now.timestamp()),
+            active_q
+        );
+        assert_eq!(
+            active_q.clone().join(revoked_l.clone(), now.timestamp()),
+            revoked_l
+        );
+        assert_eq!(expired_q.severity(now.timestamp()), 4);
+
+        assert_eq!(
+            evaluate_lattice_at(&canonical, &pending_l, true, now),
+            InstallDecision::AllowUnverified
+        );
+        assert_eq!(
+            evaluate_lattice_at(&canonical, &unknown_l, true, now),
+            InstallDecision::AllowUnverified
+        );
+        assert!(evaluate_lattice_at(&canonical, &unproven_l, true, now).is_blocked());
+        assert!(evaluate_lattice_at(&canonical, &active_q, true, now).is_blocked());
+        assert!(evaluate_lattice_at(&canonical, &expired_q, true, now).is_blocked());
+        assert!(evaluate_lattice_at(&canonical, &revoked_l, true, now).is_blocked());
+    }
+
+    #[test]
+    fn eco_adv_05_uncertified_revocation_is_not_sticky_and_tip_rollback_blocks() {
+        use crate::freshness::{admit_with_freshness_certified, FreshnessStore, WitnessPolicyLoad};
+
+        let store = FreshnessStore::memory();
+        let now = Utc::now();
+        let src = VerdictSource::Chain {
+            node_url: "https://n.example".into(),
+        };
+
+        // Uncertified revocation blocks itself, but is NOT sticky in Journal v2 (ECO-INV-04).
+        let uncert_rev = verdict(
+            VerdictStatus::Revoked {
+                reason: "single validator".into(),
+                findings: vec![],
+            },
+            src.clone(),
+            now,
+        );
+        let d1 = admit_with_freshness_certified(
+            &uncert_rev,
+            true,
+            &store,
+            now,
+            &WitnessPolicyLoad::Inactive,
+            None,
+            false,
+            5,
+            Some(5),
+            evaluate_install,
+        );
+        assert!(d1.is_blocked());
+
+        let ver_later = verdict(verified(), src.clone(), now + Duration::seconds(10));
+        let d2 = admit_with_freshness_certified(
+            &ver_later,
+            false,
+            &store,
+            now + Duration::seconds(10),
+            &WitnessPolicyLoad::Inactive,
+            None,
+            true,
+            6,
+            Some(6),
+            evaluate_install,
+        );
+        assert_eq!(d2, InstallDecision::Allow);
+
+        // Tip rollback (< persisted tip 6) blocks cleanly with freshness_freeze.
+        let d_rollback = admit_with_freshness_certified(
+            &ver_later,
+            false,
+            &store,
+            now + Duration::seconds(20),
+            &WitnessPolicyLoad::Inactive,
+            None,
+            true,
+            4,
+            Some(4),
+            evaluate_install,
+        );
+        match d_rollback {
+            InstallDecision::Block { code, .. } => assert_eq!(code, "freshness_freeze"),
+            other => panic!("expected freshness_freeze on tip rollback, got {other:?}"),
+        }
+
+        // Certified revocation IS sticky and blocks subsequent Verified permanently.
+        let cert_rev = verdict(
+            VerdictStatus::Revoked {
+                reason: "committee qc".into(),
+                findings: vec![],
+            },
+            src,
+            now + Duration::seconds(30),
+        );
+        let d3 = admit_with_freshness_certified(
+            &cert_rev,
+            true,
+            &store,
+            now + Duration::seconds(30),
+            &WitnessPolicyLoad::Inactive,
+            None,
+            true,
+            7,
+            Some(7),
+            evaluate_install,
+        );
+        assert!(d3.is_blocked());
+        let d4 = admit_with_freshness_certified(
+            &ver_later,
+            false,
+            &store,
+            now + Duration::seconds(40),
+            &WitnessPolicyLoad::Inactive,
+            None,
+            true,
+            8,
+            Some(8),
+            evaluate_install,
+        );
+        match d4 {
+            InstallDecision::Block { code, .. } => assert_eq!(code, "freshness_rollback"),
+            other => {
+                panic!("expected freshness_rollback after certified revocation, got {other:?}")
+            }
+        }
     }
 }

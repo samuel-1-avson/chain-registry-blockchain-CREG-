@@ -4,22 +4,24 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
-common     = { path = "../common" }
-tokio      = { workspace = true }
-serde      = { workspace = true }
-serde_json = { workspace = true }
-anyhow     = { workspace = true }
-tracing    = { workspace = true }
-chrono     = { workspace = true }
-reqwest    = { workspace = true }
-hex        = { workspace = true }
-sha2       = { workspace = true }
+common        = { path = "../common" }
+consensus     = { path = "../consensus" }
+registry-view = { path = "../registry-view" }
+tokio         = { workspace = true }
+serde         = { workspace = true }
+serde_json    = { workspace = true }
+anyhow        = { workspace = true }
+tracing       = { workspace = true }
+chrono        = { workspace = true }
+reqwest       = { workspace = true }
+hex           = { workspace = true }
+sha2          = { workspace = true }
 ed25519-dalek = { workspace = true }
-urlencoding = { workspace = true }
-futures    = { workspace = true }
-dirs        = "5"
+urlencoding   = { workspace = true }
+futures       = { workspace = true }
+dirs          = "5"
 # ECA-14: private per-download directories for verified artifacts.
-tempfile    = "3"
+tempfile      = "3"
 
 [lints]
 workspace = true

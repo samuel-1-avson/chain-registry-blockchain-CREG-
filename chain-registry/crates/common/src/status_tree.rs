@@ -251,6 +251,14 @@ impl StatusLeafV1 {
         let bytes = crate::consensus_json_bytes(self).unwrap_or_default();
         sha256(&[LEAF_VALUE_DOMAIN, &bytes])
     }
+
+    /// Value hash parameterized by a chain spec's `consensus_encoding` so
+    /// standalone clients without `phase-c-canonical-transactions` can verify
+    /// `StatusProofV2` against Phase C roots (`ECA-08`).
+    pub fn value_hash_for_encoding(&self, encoding: Option<&str>) -> anyhow::Result<Hash32> {
+        let bytes = crate::consensus_json_bytes_for_encoding(self, encoding)?;
+        Ok(sha256(&[LEAF_VALUE_DOMAIN, &bytes]))
+    }
 }
 
 pub fn package_key(package: &str) -> Hash32 {
@@ -294,6 +302,38 @@ impl StatusProofV2 {
         version: &str,
         leaf: Option<&StatusLeafV1>,
     ) -> bool {
+        let leaf_value = leaf.map(StatusLeafV1::value_hash);
+        self.verify_with_leaf_value(status_root, package, version, leaf, leaf_value.as_ref())
+    }
+
+    /// Verify against `status_root` using the signed chain spec's explicit
+    /// `consensus_encoding`.
+    pub fn verify_for_encoding(
+        &self,
+        status_root: &Hash32,
+        package: &str,
+        version: &str,
+        leaf: Option<&StatusLeafV1>,
+        encoding: Option<&str>,
+    ) -> bool {
+        let leaf_value = match leaf {
+            Some(leaf) => match leaf.value_hash_for_encoding(encoding) {
+                Ok(hash) => Some(hash),
+                Err(_) => return false,
+            },
+            None => None,
+        };
+        self.verify_with_leaf_value(status_root, package, version, leaf, leaf_value.as_ref())
+    }
+
+    fn verify_with_leaf_value(
+        &self,
+        status_root: &Hash32,
+        package: &str,
+        version: &str,
+        leaf: Option<&StatusLeafV1>,
+        leaf_value: Option<&Hash32>,
+    ) -> bool {
         if let Some(leaf) = leaf {
             if leaf.package.trim() != package.trim() || leaf.version.trim() != version.trim() {
                 return false;
@@ -307,7 +347,6 @@ impl StatusProofV2 {
                     && verify_smt_proof(status_root, &package_key, None, &self.package_proof)
             }
             (Some(version_root), Some(version_proof)) => {
-                let leaf_value = leaf.map(StatusLeafV1::value_hash);
                 verify_smt_proof(
                     status_root,
                     &package_key,
@@ -316,7 +355,7 @@ impl StatusProofV2 {
                 ) && verify_smt_proof(
                     version_root,
                     &version_key(version),
-                    leaf_value.as_ref(),
+                    leaf_value,
                     version_proof,
                 )
             }
@@ -356,42 +395,84 @@ impl StatusTree {
         self.packages.is_empty()
     }
 
-    fn version_tree(versions: &BTreeMap<String, StatusLeafV1>) -> SparseMerkleTree {
+    fn version_tree(
+        versions: &BTreeMap<String, StatusLeafV1>,
+        explicit_encoding: Option<Option<&str>>,
+    ) -> anyhow::Result<SparseMerkleTree> {
         let mut tree = SparseMerkleTree::new();
         for (version, leaf) in versions {
-            tree.insert(version_key(version), leaf.value_hash());
+            let value = match explicit_encoding {
+                Some(encoding) => leaf.value_hash_for_encoding(encoding)?,
+                None => leaf.value_hash(),
+            };
+            tree.insert(version_key(version), value);
         }
-        tree
+        Ok(tree)
     }
 
-    fn package_tree(&self) -> SparseMerkleTree {
+    fn package_tree(
+        &self,
+        explicit_encoding: Option<Option<&str>>,
+    ) -> anyhow::Result<SparseMerkleTree> {
         let mut tree = SparseMerkleTree::new();
         for (package, versions) in &self.packages {
-            tree.insert(package_key(package), Self::version_tree(versions).root());
+            tree.insert(
+                package_key(package),
+                Self::version_tree(versions, explicit_encoding)?.root(),
+            );
         }
-        tree
+        Ok(tree)
     }
 
     /// `BlockHeader.status_root`.
     pub fn root(&self) -> Hash32 {
-        self.package_tree().root()
+        self.package_tree(None)
+            .expect("default encoding leaf serialization cannot fail")
+            .root()
+    }
+
+    /// `BlockHeader.status_root` under an explicit spec `consensus_encoding`.
+    pub fn root_for_encoding(&self, encoding: Option<&str>) -> anyhow::Result<Hash32> {
+        Ok(self.package_tree(Some(encoding))?.root())
     }
 
     pub fn prove(&self, package: &str, version: &str) -> StatusProofV2 {
-        let package_proof = self.package_tree().prove(&package_key(package));
+        self.prove_inner(package, version, None)
+            .expect("default encoding leaf serialization cannot fail")
+    }
+
+    /// Build a membership or absence proof under an explicit spec `consensus_encoding`.
+    pub fn prove_for_encoding(
+        &self,
+        package: &str,
+        version: &str,
+        encoding: Option<&str>,
+    ) -> anyhow::Result<StatusProofV2> {
+        self.prove_inner(package, version, Some(encoding))
+    }
+
+    fn prove_inner(
+        &self,
+        package: &str,
+        version: &str,
+        explicit_encoding: Option<Option<&str>>,
+    ) -> anyhow::Result<StatusProofV2> {
+        let package_proof = self
+            .package_tree(explicit_encoding)?
+            .prove(&package_key(package));
         match self.packages.get(package.trim()) {
-            None => StatusProofV2 {
+            None => Ok(StatusProofV2 {
                 package_proof,
                 version_root: None,
                 version_proof: None,
-            },
+            }),
             Some(versions) => {
-                let versions_tree = Self::version_tree(versions);
-                StatusProofV2 {
+                let versions_tree = Self::version_tree(versions, explicit_encoding)?;
+                Ok(StatusProofV2 {
                     package_proof,
                     version_root: Some(versions_tree.root()),
                     version_proof: Some(versions_tree.prove(&version_key(version))),
-                }
+                })
             }
         }
     }
@@ -672,5 +753,23 @@ mod tests {
         assert_eq!(value["status"]["state"], "revoked");
         assert_eq!(value["status"]["certified"], false);
         assert_eq!(value["height"], 7);
+    }
+
+    #[test]
+    fn explicit_phase_c_encoding_proofs_work_without_compile_feature() {
+        let entry = leaf("npm/left-pad", "1.3.0", StatusLeafStateV1::Verified, 9);
+        let phase_c = Some(crate::PHASE_C_CONSENSUS_ENCODING);
+        assert_ne!(
+            entry.value_hash_for_encoding(phase_c).unwrap(),
+            entry.value_hash_for_encoding(None).unwrap()
+        );
+        let mut tree = StatusTree::new();
+        tree.upsert(entry.clone());
+        let root = tree.root_for_encoding(phase_c).unwrap();
+        let proof = tree
+            .prove_for_encoding("npm/left-pad", "1.3.0", phase_c)
+            .unwrap();
+        assert!(proof.verify_for_encoding(&root, "npm/left-pad", "1.3.0", Some(&entry), phase_c));
+        assert!(!proof.verify_for_encoding(&root, "npm/left-pad", "1.3.0", Some(&entry), None));
     }
 }

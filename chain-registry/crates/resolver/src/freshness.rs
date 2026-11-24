@@ -805,6 +805,50 @@ pub fn admit_with_freshness(
     evidence: Option<&WitnessedInclusionEvidence>,
     evaluate: impl FnOnce(&TrustVerdict, bool) -> InstallDecision,
 ) -> InstallDecision {
+    admit_with_freshness_certified(
+        verdict,
+        allow_unverified,
+        store,
+        now,
+        policy,
+        evidence,
+        true,
+        0,
+        None,
+        evaluate,
+    )
+}
+
+/// Apply install admission rules, proof certification provenance (`ECO-INV-04`),
+/// tip-height rollback checks (`ECA-12`), and optional witnessed-head checks.
+#[allow(clippy::too_many_arguments)]
+pub fn admit_with_freshness_certified(
+    verdict: &TrustVerdict,
+    allow_unverified: bool,
+    store: &FreshnessStore,
+    now: DateTime<Utc>,
+    policy: &WitnessPolicyLoad,
+    evidence: Option<&WitnessedInclusionEvidence>,
+    certified: bool,
+    status_height: u64,
+    tip_height: Option<u64>,
+    evaluate: impl FnOnce(&TrustVerdict, bool) -> InstallDecision,
+) -> InstallDecision {
+    if let Some(incoming_tip) = tip_height {
+        let last_tip = match store.last_tip_height() {
+            Ok(height) => height,
+            Err(err) => {
+                return block(
+                    "freshness_unwitnessed",
+                    format!("failed to read persisted tip height: {err}"),
+                );
+            }
+        };
+        if let Some(blocked) = check_tip_height(last_tip, incoming_tip) {
+            return blocked;
+        }
+    }
+
     let max_skew = Duration::seconds(
         match policy {
             WitnessPolicyLoad::Active(config) => config.policy.maximum_future_skew_seconds,
@@ -821,13 +865,17 @@ pub fn admit_with_freshness(
 
     let decision = evaluate(verdict, allow_unverified);
     if let InstallDecision::Block { .. } = &decision {
-        if let Some(record) = record_from_verdict_at(verdict, now) {
+        if let Some(record) = record_from_verdict_certified(verdict, now, certified, status_height)
+        {
             if matches!(
                 record.kind,
                 PackageFreshnessKind::Revoked | PackageFreshnessKind::Quarantined { .. }
             ) {
                 let _ = store.persist_package_at(record, now);
             }
+        }
+        if let Some(incoming_tip) = tip_height {
+            let _ = store.record_tip_height(incoming_tip);
         }
         return decision;
     }
@@ -850,7 +898,17 @@ pub fn admit_with_freshness(
 
     match (&decision, witnessed) {
         (_, WitnessedAdmission::NotRequired) => {
-            persist_accepted_package(store, verdict, &decision);
+            persist_accepted_package_certified(
+                store,
+                verdict,
+                &decision,
+                now,
+                certified,
+                status_height,
+            );
+            if let Some(incoming_tip) = tip_height {
+                let _ = store.record_tip_height(incoming_tip);
+            }
             decision
         }
         (InstallDecision::AllowUnverified, WitnessedAdmission::Missing { .. }) => decision,
@@ -883,24 +941,38 @@ pub fn admit_with_freshness(
                 return blocked;
             }
             let _ = store.persist_accepted_head(bundle.witnessed_head.signed_head.head.clone());
-            persist_accepted_package(store, verdict, &decision);
+            persist_accepted_package_certified(
+                store,
+                verdict,
+                &decision,
+                now,
+                certified,
+                status_height,
+            );
+            if let Some(incoming_tip) = tip_height {
+                let _ = store.record_tip_height(incoming_tip);
+            }
             decision
         }
         (other, _) => other.clone(),
     }
 }
 
-fn persist_accepted_package(
+fn persist_accepted_package_certified(
     store: &FreshnessStore,
     verdict: &TrustVerdict,
     decision: &InstallDecision,
+    now: DateTime<Utc>,
+    certified: bool,
+    status_height: u64,
 ) {
     if matches!(
         decision,
         InstallDecision::Allow | InstallDecision::AllowUnverified
     ) {
-        if let Some(record) = record_from_verdict(verdict) {
-            let _ = store.persist_package(record);
+        if let Some(record) = record_from_verdict_certified(verdict, now, certified, status_height)
+        {
+            let _ = store.persist_package_at(record, now);
         }
     }
 }
