@@ -8,8 +8,9 @@
 // CREG_REQUIRE_WITNESSED_HEAD is set). Independent witness operations remain
 // out of this crate.
 
+use crate::file_store::{atomic_write, quarantine_corrupt_file, FileLockGuard};
 use crate::install_gate::{format_unix, InstallDecision};
-use anyhow::{Context, Result};
+use anyhow::{bail, Context, Result};
 use chrono::{DateTime, Duration, Utc};
 use common::{
     verify_witnessed_inclusion, ConsistencyProof, InclusionProof, PackageId, TransparencyEvent,
@@ -19,7 +20,19 @@ use common::{
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
-use std::sync::Mutex;
+use std::sync::{Mutex, OnceLock};
+
+pub const JOURNAL_SCHEMA_VERSION: u16 = 2;
+pub const MAX_JOURNAL_FILE_BYTES: u64 = 32 * 1024 * 1024;
+
+static PROCESS_JOURNAL_LOCK: OnceLock<Mutex<()>> = OnceLock::new();
+
+fn process_journal_guard() -> std::sync::MutexGuard<'static, ()> {
+    PROCESS_JOURNAL_LOCK
+        .get_or_init(|| Mutex::new(()))
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
+}
 
 pub const FRESHNESS_PATH_ENV: &str = "CREG_FRESHNESS_PATH";
 pub const FRESHNESS_RESET_ENV: &str = "CREG_FRESHNESS_RESET";
@@ -63,6 +76,14 @@ impl PackageFreshnessKind {
     }
 }
 
+fn default_certified_true() -> bool {
+    true
+}
+
+fn default_journal_version() -> u16 {
+    JOURNAL_SCHEMA_VERSION
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct PackageFreshnessRecord {
     pub canonical: String,
@@ -70,14 +91,37 @@ pub struct PackageFreshnessRecord {
     pub resolved_at: DateTime<Utc>,
     #[serde(default)]
     pub content_hash: Option<String>,
+    /// ECO-INV-04: only certified revocations and quarantines are sticky.
+    /// Defaults to `true` when decoding legacy v1 journal files so existing
+    /// entries remain fail-closed.
+    #[serde(default = "default_certified_true")]
+    pub certified: bool,
+    /// Block height where this status was proven (0 for legacy/unproven records).
+    #[serde(default)]
+    pub height: u64,
 }
 
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 struct FreshnessState {
+    #[serde(default = "default_journal_version")]
+    schema_version: u16,
     #[serde(default)]
     packages: BTreeMap<String, PackageFreshnessRecord>,
     #[serde(default)]
     accepted_head: Option<TreeHead>,
+    #[serde(default)]
+    last_tip_height: u64,
+}
+
+impl Default for FreshnessState {
+    fn default() -> Self {
+        Self {
+            schema_version: JOURNAL_SCHEMA_VERSION,
+            packages: BTreeMap::new(),
+            accepted_head: None,
+            last_tip_height: 0,
+        }
+    }
 }
 
 enum StoreInner {
@@ -113,7 +157,7 @@ impl FreshnessStore {
             }
         }
         let dir = dirs::cache_dir()
-            .unwrap_or_else(|| PathBuf::from("/tmp"))
+            .unwrap_or_else(std::env::temp_dir)
             .join("chain-registry");
         std::fs::create_dir_all(&dir)
             .with_context(|| format!("create freshness dir {}", dir.display()))?;
@@ -131,46 +175,138 @@ impl FreshnessStore {
         Ok(self.load()?.accepted_head)
     }
 
+    pub fn last_tip_height(&self) -> Result<u64> {
+        if env_truthy(FRESHNESS_RESET_ENV) {
+            return Ok(0);
+        }
+        Ok(self.load()?.last_tip_height)
+    }
+
+    pub fn record_tip_height(&self, height: u64) -> Result<u64> {
+        let reset = env_truthy(FRESHNESS_RESET_ENV);
+        self.update_state(|state| {
+            let previous = if reset { 0 } else { state.last_tip_height };
+            if height < previous {
+                bail!(
+                    "tip height {} is behind previously accepted height {} (freeze/rollback)",
+                    height,
+                    previous
+                );
+            }
+            if !reset && height == state.last_tip_height {
+                return Ok((height, false));
+            }
+            state.last_tip_height = height;
+            Ok((height, true))
+        })
+    }
+
     pub fn persist_package(&self, record: PackageFreshnessRecord) -> Result<()> {
         self.persist_package_at(record, Utc::now())
     }
 
-    /// Persist `record` under the journal's monotonic rules:
-    /// `Revoked` is sticky; a `Quarantined` entry keeps its first-seen
-    /// deadline, may be released to `Verified` only before that deadline, and
-    /// is converted to `Revoked` once the deadline has passed.
+    /// Persist `record` under the journal's monotonic rules (`ECA-12`,
+    /// `ECO-INV-04`):
+    /// - uncertified revocations and quarantines are never stored as sticky;
+    /// - first-seen non-empty `content_hash` is pinned permanently;
+    /// - certified `Revoked` is sticky forever;
+    /// - certified `Quarantined` keeps its first-seen deadline, may be cleared
+    ///   to `Verified` only by a certified release before that deadline, and
+    ///   becomes `Revoked` once the deadline passes.
     pub fn persist_package_at(
         &self,
         mut record: PackageFreshnessRecord,
         now: DateTime<Utc>,
     ) -> Result<()> {
-        let mut state = self.load()?;
-        if let Some(existing) = state.packages.get(&record.canonical) {
-            match (existing.kind, record.kind) {
-                (PackageFreshnessKind::Revoked, PackageFreshnessKind::Revoked) => {}
-                (PackageFreshnessKind::Revoked, _) => return Ok(()),
-                (PackageFreshnessKind::Quarantined { .. }, PackageFreshnessKind::Revoked) => {}
-                (held @ PackageFreshnessKind::Quarantined { .. }, _)
-                    if held.quarantine_expired_at(now) =>
-                {
-                    record.kind = PackageFreshnessKind::Revoked;
-                    record.content_hash = existing.content_hash.clone();
-                }
-                (
-                    PackageFreshnessKind::Quarantined { .. },
-                    PackageFreshnessKind::Quarantined { .. },
-                ) => return Ok(()),
-                _ => {}
-            }
+        if !record.certified
+            && matches!(
+                record.kind,
+                PackageFreshnessKind::Revoked | PackageFreshnessKind::Quarantined { .. }
+            )
+        {
+            return Ok(());
         }
-        state.packages.insert(record.canonical.clone(), record);
-        self.save(&state)
+        record.content_hash = record
+            .content_hash
+            .as_deref()
+            .map(str::trim)
+            .filter(|hash| !hash.is_empty())
+            .map(str::to_string);
+
+        self.update_state(|state| {
+            if let Some(existing) = state.packages.get(&record.canonical) {
+                let existing_hash = existing
+                    .content_hash
+                    .as_deref()
+                    .map(str::trim)
+                    .filter(|hash| !hash.is_empty())
+                    .map(str::to_string);
+                match (&existing_hash, &record.content_hash) {
+                    (Some(prev), Some(next)) if !prev.eq_ignore_ascii_case(next) => {
+                        bail!(
+                            "refusing to overwrite pinned content_hash for '{}': {} != {}",
+                            record.canonical,
+                            prev,
+                            next
+                        );
+                    }
+                    (Some(prev), None) => {
+                        record.content_hash = Some(prev.clone());
+                    }
+                    _ => {}
+                }
+
+                if existing.certified {
+                    match (existing.kind, record.kind) {
+                        (PackageFreshnessKind::Revoked, PackageFreshnessKind::Revoked) => {
+                            if record.height <= existing.height
+                                && record.content_hash == existing.content_hash
+                            {
+                                return Ok(((), false));
+                            }
+                            record.certified = true;
+                            record.height = record.height.max(existing.height);
+                        }
+                        (PackageFreshnessKind::Revoked, _) => return Ok(((), false)),
+                        (held @ PackageFreshnessKind::Quarantined { .. }, _)
+                            if held.quarantine_expired_at(now) =>
+                        {
+                            record.kind = PackageFreshnessKind::Revoked;
+                            record.certified = true;
+                            record.height = record.height.max(existing.height);
+                        }
+                        (
+                            PackageFreshnessKind::Quarantined { .. },
+                            PackageFreshnessKind::Revoked,
+                        ) => {
+                            record.height = record.height.max(existing.height);
+                        }
+                        (
+                            PackageFreshnessKind::Quarantined { .. },
+                            PackageFreshnessKind::Quarantined { .. },
+                        ) => return Ok(((), false)),
+                        (
+                            PackageFreshnessKind::Quarantined { .. },
+                            PackageFreshnessKind::Verified,
+                        ) if !record.certified => return Ok(((), false)),
+                        _ => {
+                            record.height = record.height.max(existing.height);
+                        }
+                    }
+                } else {
+                    record.height = record.height.max(existing.height);
+                }
+            }
+            state.packages.insert(record.canonical.clone(), record);
+            Ok(((), true))
+        })
     }
 
     pub fn persist_accepted_head(&self, head: TreeHead) -> Result<()> {
-        let mut state = self.load()?;
-        state.accepted_head = Some(head);
-        self.save(&state)
+        self.update_state(|state| {
+            state.accepted_head = Some(head);
+            Ok(((), true))
+        })
     }
 
     pub fn clear(&self) -> Result<()> {
@@ -184,7 +320,9 @@ impl FreshnessStore {
                 .unwrap_or_else(|poisoned| poisoned.into_inner())
                 .clone()),
             StoreInner::File { path, lock } => {
-                let _guard = lock.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+                let _process_guard = process_journal_guard();
+                let _instance_guard = lock.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+                let _file_guard = FileLockGuard::acquire(path)?;
                 load_file(path)
             }
         }
@@ -197,47 +335,90 @@ impl FreshnessStore {
                 Ok(())
             }
             StoreInner::File { path, lock } => {
-                let _guard = lock.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+                let _process_guard = process_journal_guard();
+                let _instance_guard = lock.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+                let _file_guard = FileLockGuard::acquire(path)?;
                 save_file(path, state)
+            }
+        }
+    }
+
+    fn update_state<R>(
+        &self,
+        f: impl FnOnce(&mut FreshnessState) -> Result<(R, bool)>,
+    ) -> Result<R> {
+        match &self.inner {
+            StoreInner::Memory(lock) => {
+                let mut guard = lock.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+                let mut next = guard.clone();
+                let (result, changed) = f(&mut next)?;
+                if changed {
+                    *guard = next;
+                }
+                Ok(result)
+            }
+            StoreInner::File { path, lock } => {
+                let _process_guard = process_journal_guard();
+                let _instance_guard = lock.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+                let _file_guard = FileLockGuard::acquire(path)?;
+                let mut state = load_file(path)?;
+                let (result, changed) = f(&mut state)?;
+                if changed {
+                    save_file(path, &state)?;
+                }
+                Ok(result)
             }
         }
     }
 }
 
 fn load_file(path: &Path) -> Result<FreshnessState> {
-    match std::fs::read(path) {
-        Ok(bytes) => serde_json::from_slice(&bytes).context("decode freshness state"),
-        Err(err) if err.kind() == std::io::ErrorKind::NotFound => Ok(FreshnessState::default()),
-        Err(err) => Err(err).with_context(|| format!("read freshness state {}", path.display())),
+    let meta = match std::fs::metadata(path) {
+        Ok(meta) => meta,
+        Err(err) if err.kind() == std::io::ErrorKind::NotFound => {
+            return Ok(FreshnessState::default());
+        }
+        Err(err) => {
+            return Err(err).with_context(|| format!("stat freshness state {}", path.display()));
+        }
+    };
+    if meta.len() > MAX_JOURNAL_FILE_BYTES {
+        quarantine_corrupt_file(path);
+        bail!(
+            "freshness state {} exceeded max size ({} bytes); quarantined",
+            path.display(),
+            MAX_JOURNAL_FILE_BYTES
+        );
     }
+    let bytes = match std::fs::read(path) {
+        Ok(bytes) => bytes,
+        Err(err) if err.kind() == std::io::ErrorKind::NotFound => {
+            return Ok(FreshnessState::default());
+        }
+        Err(err) => {
+            return Err(err).with_context(|| format!("read freshness state {}", path.display()));
+        }
+    };
+    let state: FreshnessState = match serde_json::from_slice(&bytes) {
+        Ok(state) => state,
+        Err(err) => {
+            quarantine_corrupt_file(path);
+            return Err(err).context("decode freshness state; quarantined corrupt file");
+        }
+    };
+    if state.schema_version == 0 || state.schema_version > JOURNAL_SCHEMA_VERSION {
+        quarantine_corrupt_file(path);
+        bail!(
+            "unsupported freshness state schema version {}; quarantined",
+            state.schema_version
+        );
+    }
+    Ok(state)
 }
 
 fn save_file(path: &Path, state: &FreshnessState) -> Result<()> {
-    if let Some(parent) = path.parent() {
-        std::fs::create_dir_all(parent)
-            .with_context(|| format!("create freshness parent {}", parent.display()))?;
-    }
     let bytes = serde_json::to_vec_pretty(state).context("encode freshness state")?;
-    let tmp = path.with_extension("json.tmp");
-    {
-        use std::io::Write as _;
-        let mut file = std::fs::File::create(&tmp)
-            .with_context(|| format!("create freshness temp {}", tmp.display()))?;
-        file.write_all(&bytes)
-            .with_context(|| format!("write freshness temp {}", tmp.display()))?;
-        file.sync_all()
-            .with_context(|| format!("sync freshness temp {}", tmp.display()))?;
-    }
-    // No pre-delete: `std::fs::rename` replaces the target atomically on Unix
-    // and via MOVEFILE_REPLACE_EXISTING on Windows. Deleting first opened a
-    // window in which the anti-rollback journal did not exist (ECA-15).
-    std::fs::rename(&tmp, path).with_context(|| {
-        format!(
-            "replace freshness state {} with {}",
-            path.display(),
-            tmp.display()
-        )
-    })
+    atomic_write(path, &bytes)
 }
 
 pub fn clear_default_store() -> Result<()> {
@@ -273,10 +454,21 @@ pub fn record_from_verdict_at(
     verdict: &TrustVerdict,
     now: DateTime<Utc>,
 ) -> Option<PackageFreshnessRecord> {
+    record_from_verdict_certified(verdict, now, true, 0)
+}
+
+/// Journal record for `verdict` with explicit certification provenance
+/// (`ECO-INV-04`) and proven block `height`.
+pub fn record_from_verdict_certified(
+    verdict: &TrustVerdict,
+    now: DateTime<Utc>,
+    certified: bool,
+    height: u64,
+) -> Option<PackageFreshnessRecord> {
     let (kind, content_hash) = match &verdict.status {
         VerdictStatus::Verified { content_hash, .. } => (
             PackageFreshnessKind::Verified,
-            Some(content_hash.clone()).filter(|hash| !hash.is_empty()),
+            Some(content_hash.trim().to_string()).filter(|hash| !hash.is_empty()),
         ),
         VerdictStatus::Revoked { .. } => (PackageFreshnessKind::Revoked, None),
         status @ VerdictStatus::Quarantined {
@@ -284,7 +476,7 @@ pub fn record_from_verdict_at(
             expires_at_unix,
             ..
         } => {
-            let hash = Some(content_hash.clone()).filter(|hash| !hash.is_empty());
+            let hash = Some(content_hash.trim().to_string()).filter(|hash| !hash.is_empty());
             if status.quarantine_expired(now.timestamp()) {
                 (PackageFreshnessKind::Revoked, hash)
             } else {
@@ -303,7 +495,34 @@ pub fn record_from_verdict_at(
         kind,
         resolved_at: verdict.resolved_at,
         content_hash,
+        certified,
+        height,
     })
+}
+
+pub fn check_tip_height(last_tip_height: u64, incoming_tip_height: u64) -> Option<InstallDecision> {
+    if incoming_tip_height < last_tip_height {
+        Some(block(
+            "freshness_freeze",
+            format!(
+                "Node tip height {} is behind previously accepted tip height {} (freeze/rollback).",
+                incoming_tip_height, last_tip_height
+            ),
+        ))
+    } else {
+        None
+    }
+}
+
+fn status_content_hash(status: &VerdictStatus) -> Option<&str> {
+    match status {
+        VerdictStatus::Verified { content_hash, .. }
+        | VerdictStatus::Quarantined { content_hash, .. } => {
+            let trimmed = content_hash.trim();
+            (!trimmed.is_empty()).then_some(trimmed)
+        }
+        _ => None,
+    }
 }
 
 pub fn evaluate_package_freshness(
@@ -323,40 +542,42 @@ pub fn evaluate_package_freshness(
     }
     let previous = previous?;
     let incoming_revoked = matches!(verdict.status, VerdictStatus::Revoked { .. });
-    if let PackageFreshnessKind::Quarantined { expires_at_unix } = previous.kind {
-        if !incoming_revoked {
-            if previous.kind.quarantine_expired_at(now) {
-                return Some(block(
-                    "quarantine_expired",
-                    format!(
-                        "Package '{}' was QUARANTINED and the hold expired at {}; it fails closed to REVOKED and cannot be installed.",
-                        verdict.package.canonical(),
-                        format_unix(expires_at_unix)
-                    ),
-                ));
-            }
-            if matches!(
-                verdict.status,
-                VerdictStatus::Unverified | VerdictStatus::Unknown
-            ) {
-                return Some(block(
-                    "quarantined",
-                    format!(
-                        "Package '{}' was previously observed as QUARANTINED; a hold ends only in revocation or a verified release, never in an unverified install (anti-rollback).",
-                        verdict.package.canonical()
-                    ),
-                ));
+    if previous.certified {
+        if let PackageFreshnessKind::Quarantined { expires_at_unix } = previous.kind {
+            if !incoming_revoked {
+                if previous.kind.quarantine_expired_at(now) {
+                    return Some(block(
+                        "quarantine_expired",
+                        format!(
+                            "Package '{}' was QUARANTINED and the hold expired at {}; it fails closed to REVOKED and cannot be installed.",
+                            verdict.package.canonical(),
+                            format_unix(expires_at_unix)
+                        ),
+                    ));
+                }
+                if matches!(
+                    verdict.status,
+                    VerdictStatus::Unverified | VerdictStatus::Unknown
+                ) {
+                    return Some(block(
+                        "quarantined",
+                        format!(
+                            "Package '{}' was previously observed as QUARANTINED; a hold ends only in revocation or a verified release, never in an unverified install (anti-rollback).",
+                            verdict.package.canonical()
+                        ),
+                    ));
+                }
             }
         }
-    }
-    if previous.kind == PackageFreshnessKind::Revoked && !incoming_revoked {
-        return Some(block(
-            "freshness_rollback",
-            format!(
-                "Package '{}' was previously observed as REVOKED; refusing a later non-revoked status (anti-rollback).",
-                verdict.package.canonical()
-            ),
-        ));
+        if previous.kind == PackageFreshnessKind::Revoked && !incoming_revoked {
+            return Some(block(
+                "freshness_rollback",
+                format!(
+                    "Package '{}' was previously observed as REVOKED; refusing a later non-revoked status (anti-rollback).",
+                    verdict.package.canonical()
+                ),
+            ));
+        }
     }
     if matches!(verdict.status, VerdictStatus::Verified { .. })
         && verdict.resolved_at < previous.resolved_at
@@ -369,19 +590,24 @@ pub fn evaluate_package_freshness(
             ),
         ));
     }
-    if let VerdictStatus::Verified { content_hash, .. } = &verdict.status {
-        if verdict.resolved_at == previous.resolved_at {
-            if let Some(previous_hash) = &previous.content_hash {
-                if !content_hash.is_empty() && previous_hash != content_hash {
-                    return Some(block(
-                        "freshness_mix_and_match",
-                        format!(
-                            "Package '{}' mixed a previously accepted digest with a different qualified record at the same timestamp.",
-                            verdict.package.canonical()
-                        ),
-                    ));
-                }
-            }
+    if let (Some(previous_hash), Some(incoming_hash)) = (
+        previous
+            .content_hash
+            .as_deref()
+            .map(str::trim)
+            .filter(|hash| !hash.is_empty()),
+        status_content_hash(&verdict.status),
+    ) {
+        if !previous_hash.eq_ignore_ascii_case(incoming_hash) {
+            return Some(block(
+                "freshness_mix_and_match",
+                format!(
+                    "Package '{}' mixed a previously accepted digest ({}) with a different digest ({}).",
+                    verdict.package.canonical(),
+                    previous_hash,
+                    incoming_hash
+                ),
+            ));
         }
     }
     None
@@ -895,6 +1121,8 @@ mod tests {
                 kind: PackageFreshnessKind::Revoked,
                 resolved_at: t0,
                 content_hash: None,
+                certified: true,
+                height: 0,
             })
             .unwrap();
         let incoming = verdict(verified_hash("aa"), t0 + Duration::seconds(5));
@@ -916,6 +1144,8 @@ mod tests {
             kind: PackageFreshnessKind::Verified,
             resolved_at: now(),
             content_hash: Some("aa".into()),
+            certified: true,
+            height: 0,
         };
         let incoming = verdict(verified_hash("aa"), now() - Duration::hours(1));
         match evaluate_package_freshness(Some(&previous), &incoming, now(), Duration::seconds(60)) {
@@ -940,6 +1170,8 @@ mod tests {
             kind: PackageFreshnessKind::Verified,
             resolved_at: now(),
             content_hash: Some("aa".into()),
+            certified: true,
+            height: 0,
         };
         let incoming = verdict(verified_hash("bb"), now());
         match evaluate_package_freshness(Some(&previous), &incoming, now(), Duration::seconds(60)) {
@@ -993,6 +1225,8 @@ mod tests {
                 kind: PackageFreshnessKind::Revoked,
                 resolved_at: t0,
                 content_hash: None,
+                certified: true,
+                height: 0,
             })
             .unwrap();
         match admit_with_freshness(
@@ -1351,6 +1585,8 @@ mod tests {
                 kind: PackageFreshnessKind::Revoked,
                 resolved_at: now(),
                 content_hash: None,
+                certified: true,
+                height: 0,
             })
             .unwrap();
         let reopened = FreshnessStore::open_path(path);
@@ -1418,6 +1654,252 @@ mod tests {
         match load_witness_policy_from_env() {
             WitnessPolicyLoad::Incomplete(_) => {}
             other => panic!("expected incomplete, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn eco_adv_06_different_content_hash_at_later_timestamp_blocks_as_mix_and_match() {
+        let store = FreshnessStore::memory();
+        let t0 = now();
+        let hash_a = "aa".repeat(32);
+        let hash_b = "bb".repeat(32);
+        let first = verdict(verified_hash(&hash_a), t0);
+        let rec = record_from_verdict_certified(&first, t0, true, 10).unwrap();
+        store.persist_package_at(rec, t0).unwrap();
+
+        let later = verdict(verified_hash(&hash_b), t0 + Duration::hours(1));
+        match evaluate_package_freshness(
+            store.get_package(&pkg().canonical()).unwrap().as_ref(),
+            &later,
+            t0 + Duration::hours(1),
+            Duration::seconds(60),
+        ) {
+            Some(InstallDecision::Block { code, .. }) => {
+                assert_eq!(code, "freshness_mix_and_match")
+            }
+            other => panic!("expected freshness_mix_and_match, got {other:?}"),
+        }
+
+        // First-seen content hash cannot be overwritten even at a newer height.
+        let overwrite =
+            record_from_verdict_certified(&later, t0 + Duration::hours(1), true, 11).unwrap();
+        assert!(store
+            .persist_package_at(overwrite, t0 + Duration::hours(1))
+            .is_err());
+    }
+
+    #[test]
+    fn tip_height_monotonicity_rejects_rollback() {
+        let _lock = ENV_LOCK.lock().expect("env lock");
+        let _reset = EnvRestore::remove(FRESHNESS_RESET_ENV);
+        let dir = tempfile::tempdir().unwrap();
+        let store = FreshnessStore::open_path(dir.path().join("freshness-state.json"));
+        assert_eq!(store.last_tip_height().unwrap(), 0);
+        assert_eq!(store.record_tip_height(10).unwrap(), 10);
+        assert_eq!(store.record_tip_height(12).unwrap(), 12);
+        assert!(store.record_tip_height(11).is_err());
+        assert_eq!(store.last_tip_height().unwrap(), 12);
+
+        match check_tip_height(12, 11) {
+            Some(InstallDecision::Block { code, .. }) => assert_eq!(code, "freshness_freeze"),
+            other => panic!("expected freshness_freeze, got {other:?}"),
+        }
+        assert!(check_tip_height(12, 12).is_none());
+    }
+
+    #[test]
+    fn uncertified_revocation_and_quarantine_are_not_sticky() {
+        let store = FreshnessStore::memory();
+        let t0 = now();
+        let hash = "aa".repeat(32);
+
+        // On an unseen package, uncertified revocations/quarantines are ignored.
+        let uncert_rev =
+            record_from_verdict_certified(&verdict(revoked(), t0), t0, false, 5).unwrap();
+        store.persist_package_at(uncert_rev, t0).unwrap();
+        assert!(store.get_package(&pkg().canonical()).unwrap().is_none());
+
+        let uncert_q = record_from_verdict_certified(
+            &verdict(
+                VerdictStatus::Quarantined {
+                    reason: "unproven".into(),
+                    content_hash: hash.clone(),
+                    expires_at_unix: Some((t0 + Duration::hours(72)).timestamp()),
+                },
+                t0,
+            ),
+            t0,
+            false,
+            6,
+        )
+        .unwrap();
+        store.persist_package_at(uncert_q, t0).unwrap();
+        assert!(store.get_package(&pkg().canonical()).unwrap().is_none());
+
+        // Certified hold is sticky, cannot be cleared by uncertified Verified,
+        // and CAN be cleared before expiry by certified Verified.
+        let cert_q = record_from_verdict_certified(
+            &verdict(
+                VerdictStatus::Quarantined {
+                    reason: "class c hold".into(),
+                    content_hash: hash.clone(),
+                    expires_at_unix: Some((t0 + Duration::hours(72)).timestamp()),
+                },
+                t0,
+            ),
+            t0,
+            true,
+            7,
+        )
+        .unwrap();
+        store.persist_package_at(cert_q, t0).unwrap();
+        assert!(matches!(
+            store.get_package(&pkg().canonical()).unwrap().unwrap().kind,
+            PackageFreshnessKind::Quarantined { .. }
+        ));
+
+        let uncert_release = record_from_verdict_certified(
+            &verdict(verified_hash(&hash), t0 + Duration::minutes(1)),
+            t0 + Duration::minutes(1),
+            false,
+            8,
+        )
+        .unwrap();
+        store
+            .persist_package_at(uncert_release, t0 + Duration::minutes(1))
+            .unwrap();
+        assert!(matches!(
+            store.get_package(&pkg().canonical()).unwrap().unwrap().kind,
+            PackageFreshnessKind::Quarantined { .. }
+        ));
+
+        let cert_release = record_from_verdict_certified(
+            &verdict(verified_hash(&hash), t0 + Duration::minutes(2)),
+            t0 + Duration::minutes(2),
+            true,
+            9,
+        )
+        .unwrap();
+        store
+            .persist_package_at(cert_release, t0 + Duration::minutes(2))
+            .unwrap();
+        assert_eq!(
+            store.get_package(&pkg().canonical()).unwrap().unwrap().kind,
+            PackageFreshnessKind::Verified
+        );
+    }
+
+    #[test]
+    fn legacy_v1_journal_deserializes_fail_closed() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("freshness-state.json");
+        let t0 = now();
+        let legacy_json = serde_json::json!({
+            "packages": {
+                pkg().canonical(): {
+                    "canonical": pkg().canonical(),
+                    "kind": "revoked",
+                    "resolved_at": t0,
+                    "content_hash": null
+                }
+            },
+            "accepted_head": null
+        });
+        std::fs::write(&path, serde_json::to_vec(&legacy_json).unwrap()).unwrap();
+
+        let store = FreshnessStore::open_path(path);
+        assert_eq!(store.last_tip_height().unwrap(), 0);
+        let rec = store.get_package(&pkg().canonical()).unwrap().unwrap();
+        assert!(
+            rec.certified,
+            "legacy records must default to certified=true"
+        );
+        assert_eq!(rec.height, 0);
+        match evaluate_package_freshness(
+            Some(&rec),
+            &verdict(verified_hash("aa"), t0 + Duration::seconds(10)),
+            t0 + Duration::seconds(10),
+            Duration::seconds(60),
+        ) {
+            Some(InstallDecision::Block { code, .. }) => assert_eq!(code, "freshness_rollback"),
+            other => panic!("expected freshness_rollback, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn corrupt_journal_is_quarantined_and_fails_closed() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("freshness-state.json");
+        std::fs::write(&path, b"{truncated").unwrap();
+        let store = FreshnessStore::open_path(path.clone());
+
+        assert!(store.get_package(&pkg().canonical()).is_err());
+        assert!(!path.exists(), "corrupt journal must be quarantined");
+        let quarantined: Vec<_> = std::fs::read_dir(dir.path())
+            .unwrap()
+            .filter_map(|entry| entry.ok())
+            .filter(|entry| {
+                entry
+                    .file_name()
+                    .to_string_lossy()
+                    .starts_with("freshness-state.json.corrupt-")
+            })
+            .collect();
+        assert_eq!(quarantined.len(), 1);
+
+        std::fs::write(
+            &path,
+            format!(
+                r#"{{"schema_version":{},"packages":{{}}}}"#,
+                JOURNAL_SCHEMA_VERSION + 1
+            ),
+        )
+        .unwrap();
+        assert!(store.get_package(&pkg().canonical()).is_err());
+        assert!(!path.exists());
+    }
+
+    #[test]
+    fn concurrent_journal_writers_preserve_all_updates() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("freshness-state.json");
+        let t0 = now();
+        let handles: Vec<_> = (0..8)
+            .map(|worker| {
+                let path = path.clone();
+                std::thread::spawn(move || {
+                    let store = FreshnessStore::open_path(path);
+                    for i in 0..5 {
+                        let canonical = format!("npm:pkg-{worker}-{i}@1.0.0");
+                        store
+                            .persist_package_at(
+                                PackageFreshnessRecord {
+                                    canonical,
+                                    kind: PackageFreshnessKind::Verified,
+                                    resolved_at: t0,
+                                    content_hash: Some(format!("{worker:02x}{i:02x}").repeat(16)),
+                                    certified: true,
+                                    height: (worker * 5 + i + 1) as u64,
+                                },
+                                t0,
+                            )
+                            .unwrap();
+                    }
+                })
+            })
+            .collect();
+        for handle in handles {
+            handle.join().unwrap();
+        }
+        let store = FreshnessStore::open_path(path);
+        for worker in 0..8 {
+            for i in 0..5 {
+                let canonical = format!("npm:pkg-{worker}-{i}@1.0.0");
+                assert!(
+                    store.get_package(&canonical).unwrap().is_some(),
+                    "missing {canonical} after concurrent writes"
+                );
+            }
         }
     }
 }

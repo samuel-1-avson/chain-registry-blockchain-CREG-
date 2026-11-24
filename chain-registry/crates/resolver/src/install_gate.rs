@@ -667,6 +667,8 @@ mod tests {
             kind,
             resolved_at: now - Duration::minutes(10),
             content_hash: None,
+            certified: true,
+            height: 0,
         };
 
         assert!(offline_journal_decision(None, &pkg(), now).is_none());

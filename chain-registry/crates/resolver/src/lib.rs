@@ -12,6 +12,7 @@ pub mod attestation_verifier;
 pub mod cache;
 mod chain_client;
 pub mod downloader;
+mod file_store;
 pub mod freshness;
 pub mod install_gate;
 pub mod npm_manifest;

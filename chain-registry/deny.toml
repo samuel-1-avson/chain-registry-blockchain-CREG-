@@ -57,12 +57,13 @@ ignore = [
     # x2, rustls 0.21 x2, rustls-webpki 0.101 x4, webpki-roots 0.25,
     # rustls-pemfile 1.0, tracing-subscriber 0.2, derivative).
 
+    # ADR-019 Increment 3 part 4a removed sled from crates/resolver: 2 more
+    # ignores dropped (fxhash 0.2.1, instant 0.1.13), leaving 35 ignores.
+
     # --- Transitive unmaintained crates without non-breaking replacement ---
     { id = "RUSTSEC-2025-0141", reason = "Audited 2026-11-22: bincode 2.0.1 unmaintained pulled by yara-x 1.24.0." },
     { id = "RUSTSEC-2026-0543", reason = "Audited 2026-11-22: chrono 0.4.44 unmaintained used across sqlx 0.8.6, pgp 0.14.2, and workspace crates." },
     { id = "RUSTSEC-2026-0105", reason = "Audited 2026-11-22: core2 0.4.0 unmaintained pulled by multihash 0.19.3 in libp2p 0.56.0." },
-    { id = "RUSTSEC-2025-0057", reason = "Audited 2026-11-23: fxhash 0.2.1 unmaintained pulled only by sled 0.34.7 in crates/resolver; removed when the resolver cache leaves sled (ADR-019 Increment 3)." },
-    { id = "RUSTSEC-2024-0384", reason = "Audited 2026-11-23: instant 0.1.13 unmaintained pulled only by parking_lot 0.11.2 (sled 0.34.7) in crates/resolver; removed with sled (ADR-019 Increment 3)." },
     { id = "RUSTSEC-2025-0119", reason = "Audited 2026-11-22: number_prefix 0.4.0 unmaintained pulled by indicatif 0.17.11 in chain-registry-cli." },
     { id = "RUSTSEC-2024-0436", reason = "Audited 2026-11-22: paste 1.0.15 unmaintained proc-macro pulled by alloy-primitives 0.8.26, ratatui, nalgebra." },
     { id = "RUSTSEC-2026-0441", reason = "Audited 2026-11-22: pin-utils 0.1.0 unmaintained pulled by hyper 1.8.1 (axum, reqwest, tonic)." },
@@ -81,9 +82,8 @@ deny = [
     { crate = "ethers", reason = "ADR-019 Increment 6: dead dependency; L1 code uses alloy via common::l1_rpc." },
     { crate = "ethers-core", reason = "ADR-019 Increment 6: see ethers." },
     { crate = "ethers-providers", reason = "ADR-019 Increment 6: see ethers." },
-    # sled is unmaintained (ECA-33). Only the resolver cache still uses it,
-    # until ADR-019 Increment 3 replaces it with a bounded JSON cache.
-    { crate = "sled", wrappers = ["resolver"], reason = "ADR-019: unmaintained; relayer and db-sync moved off it." },
+    # sled is unmaintained (ECA-33); resolver, relayer and db-sync moved off it.
+    { crate = "sled", reason = "ADR-019 Increment 3: unmaintained (ECA-33); resolver, relayer and db-sync moved off it." },
 ]
 
 [sources]

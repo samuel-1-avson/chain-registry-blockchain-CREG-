@@ -12,7 +12,6 @@ anyhow     = { workspace = true }
 tracing    = { workspace = true }
 chrono     = { workspace = true }
 reqwest    = { workspace = true }
-sled       = { workspace = true }
 hex        = { workspace = true }
 sha2       = { workspace = true }
 ed25519-dalek = { workspace = true }

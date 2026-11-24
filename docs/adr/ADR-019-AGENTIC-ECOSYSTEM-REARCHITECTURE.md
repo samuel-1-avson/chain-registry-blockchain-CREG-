@@ -999,3 +999,35 @@ Decisions applied: #5 (relayer store = PostgreSQL) and #6 (single faucet instanc
 **Not yet done:**
 - `creg testnet stake-*` still passes the key to Foundry `cast` on argv; moving it onto `crates/l1-tx` is open.
 - The pinned faucet and relayer images in `testnet/` predate this increment. Deploying the new faucet needs `FAUCET_ALLOWED_ORIGINS` (outside testnet) and, on the compose networks, the plaintext opt-in already added to the compose files.
+
+### Increment 3, part 4a — bounded JSON cache, Journal v2 and `sled` retirement (implemented 2026-11-24)
+
+Maintainer decisions applied: use Rust 1.98.1's `std::fs::File::lock()` / `unlock()` for cross-process advisory locking (paired with an in-process `Mutex`) so `Cargo.lock` gains no new crates. No consensus wire type, signed message, block or header format changed; the frozen test files are untouched.
+
+| Area | What shipped | Where |
+| --- | --- | --- |
+| Advisory locking & atomic writes (`ECA-15`) | New `file_store` helper: `FileLockGuard` (`File::lock`/`unlock` on `<path>.lock` plus process `Mutex`), `atomic_write` (`NamedTempFile` → `sync_all` → `persist` → Unix parent dir `sync_all`, no pre-delete), and `quarantine_corrupt_file` (`<path>.corrupt-<unix_ms>`). | `resolver/src/file_store.rs` |
+| Bounded JSON cache (`ECA-15`, `ECA-33`) | Replaced `sled` with `CacheStore` backed by `verdict-cache.json` (schema v2, 5,000-entry LRU bound, 32 MiB cap, `std::env::temp_dir()` fallback when `dirs::cache_dir()` is absent). Preserves 5-minute positive/quarantine/unverified TTL, 48h revocation TTL, never caching `Unknown`, and quarantines corrupt or unsupported-version files while failing closed. | `resolver/src/cache.rs`, `resolver/src/lib.rs` |
+| Journal v2 (`ECA-12`, `ECA-15`, `ECO-INV-04`) | Upgraded `FreshnessStore` to schema v2 (`32 MiB` cap, file lock + `atomic_write`, corrupt/oversize quarantine). Added `last_tip_height` monotonicity (`last_tip_height`, `record_tip_height`, `check_tip_height`), permanent first-seen `(canonical → content_hash)` pinning across timestamps in both `evaluate_package_freshness` and `persist_package_at`, and `PackageFreshnessRecord.{certified, height}` so uncertified revocations/quarantines are not sticky and only certified releases can clear a certified quarantine before expiry (legacy v1 entries decode fail-closed with `certified = true`). | `resolver/src/freshness.rs`, `resolver/src/install_gate.rs` |
+| `sled` retirement (`ECA-33`, `ECO-INV-10`) | Removed `sled` from `resolver/Cargo.toml`, `Cargo.toml`, and `Cargo.lock` (also dropping `fs2`, `fxhash`, `instant`, and duplicate `parking_lot`/`bitflags` entries). Removed `RUSTSEC-2025-0057` (`fxhash`) and `RUSTSEC-2024-0384` (`instant`) from `deny.toml` (37 → 35 ignores) and replaced `{ crate = "sled", wrappers = ["resolver"] }` with a workspace-wide ban. `tools/relayer-sled-export` stays excluded and untouched. | `Cargo.toml`, `resolver/Cargo.toml`, `Cargo.lock`, `deny.toml` |
+
+**Adversarial coverage added:** `eco-adv-06` (`freshness::tests::eco_adv_06_different_content_hash_at_later_timestamp_blocks_as_mix_and_match`), plus tests for `atomic_write`/quarantine, cache LRU/expiry/`Unknown`/corruption/concurrent writers, tip-height monotonicity, uncertified non-stickiness, legacy v1 journal decode, journal corruption quarantine, and concurrent journal writers.
+
+**Verification (local, 2026-11-24, rustc 1.98.1, `CARGO_BUILD_JOBS=2`).** These all passed:
+- `cargo fmt --all -- --check`
+- `cargo clippy --locked --workspace --all-targets -- -D warnings`
+- `cargo clippy --locked -p chain-registry-node --features phase-c-real-fleet --all-targets -- -D warnings`
+- `cargo deny --workspace check advisories bans sources`: advisories, bans and sources ok, with 35 ignores and none unmatched.
+- `cargo tree --locked -i sled`: matches no packages (`error: package ID specification 'sled' did not match any packages`).
+
+| Test run | Passed |
+| --- | --- |
+| `cargo test --locked -p resolver` | 64/64 (12 new) |
+| `cargo test --locked -p chain-registry-cli` | 108/108 (1 ignored, pre-existing) + 5 shims (0 tests each) |
+| `cargo test --locked -p common --test consensus_golden_vectors` (frozen) | 10/10 |
+| `cargo test --locked -p consensus --test signed_message_formats` (frozen) | 6/6 |
+| `cargo build --offline --manifest-path tools/relayer-sled-export/Cargo.toml` | Builds |
+
+**Remaining in Stage 4 (parts 4b and 4c):**
+- Part 4b: extend `registry_view::ProofBundleV2` / `node::public_v4::proof_bundle` / OpenAPI with `tip_header`, `publication_header`, `publication_transaction`, `authority_history`, and optional `status_transaction`; share `signing_authority`, `assigned_committee`, and `full_set_committee` from `consensus::vote_v4`.
+- Part 4c: remove the phase-C compile gate in `resolver`, verify hybrid PBFT commits + committee QCs + `StatusProofV2` + tip freshness (`3600` s) + `require_v4_quorum` option + `ECO-INV-02` install lattice (`eco-adv-03..06`).
