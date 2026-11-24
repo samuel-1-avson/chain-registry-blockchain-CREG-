@@ -10,8 +10,9 @@
 
 use common::status_tree::Hash32;
 use common::{
-    BlockSignature, CommitteeQuorumCertificateV1, CregFindingCategoryV1, DisplayText,
-    KernelViolationCode, StatusLeafV1, StatusProofV2, TriggerWitnessV1, ValidatorSignature,
+    AuthenticatedValidatorSetSnapshot, BlockHeader, BlockSignature, CommitteeQuorumCertificateV1,
+    CregFindingCategoryV1, DisplayText, KernelViolationCode, StatusLeafV1, StatusProofV2,
+    Transaction, TriggerWitnessV1, ValidatorSignature,
 };
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
@@ -285,7 +286,7 @@ pub struct MerkleStepV1 {
 
 /// Everything a client needs to verify a package's current status and
 /// publication offline (consumed by the Increment 3 resolver).
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub struct ProofBundleV2 {
     pub schema: String,
@@ -294,9 +295,19 @@ pub struct ProofBundleV2 {
     pub tip_height: u64,
     pub tip_block_hash: String,
     pub tip_timestamp_unix: i64,
+    /// Full tip header so clients verify `Block::hash()` against
+    /// `tip_block_hash` and bind `status_root` / `tip_timestamp_unix` /
+    /// `validator_set_hash` to `tip_commit_signatures`.
+    #[cfg_attr(feature = "openapi", schema(value_type = Object))]
+    pub tip_header: BlockHeader,
     /// PBFT commit signatures over the tip block hash.
     #[cfg_attr(feature = "openapi", schema(value_type = Vec<Object>))]
     pub tip_commit_signatures: Vec<BlockSignature>,
+    /// Quorum-certified validator-set transitions from the signed chain-spec
+    /// bootstrap up to `tip_height`.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    #[cfg_attr(feature = "openapi", schema(value_type = Vec<Object>))]
+    pub authority_history: Vec<AuthenticatedValidatorSetSnapshot>,
     /// `status_root` of the tip header; absent before hybrid activation.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub status_root: Option<String>,
@@ -307,11 +318,21 @@ pub struct ProofBundleV2 {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[cfg_attr(feature = "openapi", schema(value_type = Option<Object>))]
     pub status_proof: Option<StatusProofV2>,
-    /// Block, index, transaction hash and Merkle path of the publication.
+    /// Status-transition transaction at `status_leaf.height` (e.g. `RevokeV2`,
+    /// `QuarantineV1`, `QuarantineResolutionV1`), absent when `Verified` comes
+    /// from publication or when a quarantine expired deterministically.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(feature = "openapi", schema(value_type = Option<Object>))]
+    pub status_transaction: Option<Transaction>,
+    /// Block, header, index, transaction and Merkle path of the publication.
     pub publication_height: u64,
     pub publication_block_hash: String,
+    #[cfg_attr(feature = "openapi", schema(value_type = Object))]
+    pub publication_header: BlockHeader,
     pub publication_tx_index: u32,
     pub publication_tx_hash: String,
+    #[cfg_attr(feature = "openapi", schema(value_type = Object))]
+    pub publication_transaction: Transaction,
     pub publication_merkle_path: Vec<MerkleStepV1>,
     /// PBFT commit signatures over the publication block hash.
     #[cfg_attr(feature = "openapi", schema(value_type = Vec<Object>))]
@@ -849,5 +870,54 @@ mod tests {
         let pending = IntelligenceSummaryV1::from_report("npm:lane-c@1.0.0", None, None);
         assert_eq!(pending.status, IntelligenceStatusV1::Pending);
         assert!(pending.maliciousness_score.is_none() && pending.risk_tier.is_none());
+    }
+
+    #[test]
+    fn proof_bundle_v2_round_trips_headers_transactions_and_authority() {
+        let genesis = common::Block::genesis();
+        let record = common::ChainRecord {
+            id: common::PackageId::new("npm", "proof-pkg", "1.0.0"),
+            content_hash: "aa".repeat(32),
+            publisher_pubkey: "bb".repeat(32),
+            status: common::PackageStatus::Verified,
+            ..common::ChainRecord::default()
+        };
+        let pub_tx = Transaction::Publish(record);
+        let pub_tx_hash = common::transaction_hash(&pub_tx);
+        let bundle = ProofBundleV2 {
+            schema: PROOF_BUNDLE_SCHEMA.to_string(),
+            canonical: DisplayText::bounded("npm:proof-pkg@1.0.0", 512),
+            tip_height: 1,
+            tip_block_hash: genesis.hash(),
+            tip_timestamp_unix: genesis.header.timestamp.timestamp(),
+            tip_header: genesis.header.clone(),
+            tip_commit_signatures: vec![],
+            authority_history: vec![],
+            status_root: None,
+            status_leaf: None,
+            status_proof: None,
+            status_transaction: None,
+            publication_height: 1,
+            publication_block_hash: genesis.hash(),
+            publication_header: genesis.header.clone(),
+            publication_tx_index: 0,
+            publication_tx_hash: pub_tx_hash.clone(),
+            publication_transaction: pub_tx,
+            publication_merkle_path: vec![],
+            publication_commit_signatures: vec![],
+            quorum: QuorumLabelV1::LegacyV3Quorum,
+        };
+        let raw = serde_json::to_value(&bundle).unwrap();
+        assert!(raw.get("authority_history").is_none());
+        assert!(raw.get("status_transaction").is_none());
+        assert!(raw.get("tip_header").is_some());
+        assert!(raw.get("publication_header").is_some());
+        assert!(raw.get("publication_transaction").is_some());
+
+        let decoded: ProofBundleV2 = serde_json::from_value(raw).unwrap();
+        assert_eq!(decoded.publication_tx_hash, pub_tx_hash);
+        assert_eq!(decoded.tip_header.height, 0);
+        assert!(decoded.authority_history.is_empty());
+        assert!(decoded.status_transaction.is_none());
     }
 }

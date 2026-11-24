@@ -1028,6 +1028,29 @@ Maintainer decisions applied: use Rust 1.98.1's `std::fs::File::lock()` / `unloc
 | `cargo test --locked -p consensus --test signed_message_formats` (frozen) | 6/6 |
 | `cargo build --offline --manifest-path tools/relayer-sled-export/Cargo.toml` | Builds |
 
-**Remaining in Stage 4 (parts 4b and 4c):**
-- Part 4b: extend `registry_view::ProofBundleV2` / `node::public_v4::proof_bundle` / OpenAPI with `tip_header`, `publication_header`, `publication_transaction`, `authority_history`, and optional `status_transaction`; share `signing_authority`, `assigned_committee`, and `full_set_committee` from `consensus::vote_v4`.
-- Part 4c: remove the phase-C compile gate in `resolver`, verify hybrid PBFT commits + committee QCs + `StatusProofV2` + tip freshness (`3600` s) + `require_v4_quorum` option + `ECO-INV-02` install lattice (`eco-adv-03..06`).
+### Increment 3, part 4b — `ProofBundleV2` completion and shared committee QC verifier (implemented 2026-11-24)
+
+Maintainer decision applied: extend `ProofBundleV2` directly so `/v1/public/v4/packages/:name/:version/proof-bundle` stays single-round-trip and carries the block headers, authoritative transactions, and authenticated validator-set transition history needed for offline client verification in part 4c. Shared the node's committee derivation and QC verification helpers from `consensus::vote_v4` without changing any consensus wire message, block format, or frozen golden-vector test file.
+
+| Area | What shipped | Where |
+| --- | --- | --- |
+| Shared committee QC helpers (`ECO-INV-03`) | Moved `FULL_SET_COMMITTEE_SEED`, `signing_authority`, `assigned_committee`, and `full_set_committee` out of `node::package_status` into `consensus::vote_v4`, and added `verify_committee_qc_for_record` to check QC signatures, authority/block key consistency, committee seed/digest/size bindings, and record-committee assignment proofs. | `consensus/src/vote_v4.rs` |
+| Node caller deduplication | Removed the duplicate committee derivation helpers in `node::package_status`, re-exported `assigned_committee`, `signing_authority`, and (under `#[cfg(test)]`) `full_set_committee`, and delegated `Transition::verify_certificate` to `consensus::vote_v4::verify_committee_qc_for_record`. | `node/src/package_status.rs` |
+| Self-contained `ProofBundleV2` & OpenAPI schema | Extended `registry_view::ProofBundleV2` (with `utoipa` schema fields, dropping `PartialEq`/`Eq` because `BlockHeader`/`Transaction` do not derive them) with `tip_header`, `authority_history`, optional `status_transaction`, `publication_header`, and `publication_transaction`. Updated `/v1/public/v4/packages/:name/:version/proof-bundle` (`status_transaction_for_leaf`, tip consistency re-check) and OpenAPI schema assertions in `openapi`. | `registry-view/src/lib.rs`, `node/src/public_v4.rs`, `node/src/openapi.rs` |
+
+**Verification (local, 2026-11-24, rustc 1.98.1, `CARGO_BUILD_JOBS=2`).** These all passed (`stage4b-gates.bat`):
+- `cargo fmt --all -- --check`
+- `cargo clippy --locked --workspace --all-targets -- -D warnings`
+- `cargo clippy --locked -p chain-registry-node --features phase-c-real-fleet --all-targets -- -D warnings`
+- `cargo deny --workspace check advisories bans sources`: `advisories ok, bans ok, sources ok`
+
+| Test run | Passed |
+| --- | --- |
+| `cargo test --locked -p registry-view --all-features --no-fail-fast` | 8/8 (`proof_bundle_v2_round_trips_headers_transactions_and_authority`) |
+| `cargo test --locked -p consensus --no-fail-fast` | 79/79 lib (2 new) + `signed_message_formats` 6/6 (frozen) + `vote_v4_hybrid_convergence` 5/5 |
+| `cargo test --locked -p common --test consensus_golden_vectors --no-fail-fast` (frozen) | 10/10 |
+| `cargo test --locked -p chain-registry-node --features phase-c-real-fleet --lib --no-fail-fast` | 329/329 (1 ignored, pre-existing `sync::tests::aggregated_votes_pass_sync_only_with_canonical_payload`; includes `proof_bundle_carries_status_transactions_and_authority_history` and `v4_routes_and_registry_view_schemas_are_published`) |
+| `cargo test --locked -p chain-registry-node --test integration --no-fail-fast` | 11/11 |
+
+**Remaining in Stage 4 (part 4c):**
+- Remove the phase-C bypass in `resolver`, add `CREG_SPEC_SIGNING_PUBKEY` build tracking (`resolver/build.rs`), verify hybrid PBFT commits + committee QCs + `StatusProofV2` + tip freshness (`3600` s) + `require_v4_quorum` option + `ECO-INV-02` install lattice (`eco-adv-03..06`), and record part 4c in §13.

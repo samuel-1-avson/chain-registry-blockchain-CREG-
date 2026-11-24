@@ -9,9 +9,10 @@ use common::crypto::{
 };
 use common::vote_v4::MLDSA44_SIGNATURE_HEX_LEN;
 use common::{
-    sha256_hex, validator_status_is_active, BlockSignature, ConsensusParams, PackageStatus,
-    PreparedBlockHeader, PreparedCertificate, ReproposalProof, SemanticDispositionV4, Transaction,
-    TriggerWitnessV1, Validator, ViewChangeVote, VoteV4Envelope, CLASS_C_QUARANTINE_TTL_SECS,
+    committee_digest, sha256_hex, validator_status_is_active, AnalysisCommittee, BlockSignature,
+    ChainRecord, CommitteeQuorumCertificateV1, ConsensusParams, PackageStatus, PreparedBlockHeader,
+    PreparedCertificate, ReproposalProof, SemanticDispositionV4, Transaction, TriggerWitnessV1,
+    Validator, ViewChangeVote, VoteV4Envelope, CLASS_C_QUARANTINE_TTL_SECS,
     MAX_WITNESS_REPLAYS_PER_PACKAGE,
 };
 use serde::{Deserialize, Serialize};
@@ -886,6 +887,119 @@ pub fn aggregate_vote_v4_quorum(
     })
 }
 
+/// Seed of the synthetic committee formed by the full active validator set.
+pub const FULL_SET_COMMITTEE_SEED: &str = "creg-full-validator-set-v1";
+
+/// Validators of `at_authority` that may sign a certificate verified at a
+/// later height: active at the authority height **and** at the block height,
+/// with the same key id (hybrid when `require_hybrid`) in both sets.
+pub fn signing_authority(
+    at_authority: &[Validator],
+    at_block: &[Validator],
+    require_hybrid: bool,
+) -> Vec<Validator> {
+    let key_id = |validator: &Validator| {
+        validator
+            .verifying_key(require_hybrid)
+            .ok()
+            .map(|key| key.key_id())
+    };
+    at_authority
+        .iter()
+        .filter(|validator| validator_status_is_active(&validator.status))
+        .filter(|validator| {
+            let Some(authority_key) = key_id(validator) else {
+                return false;
+            };
+            at_block.iter().any(|current| {
+                current.id == validator.id
+                    && validator_status_is_active(&current.status)
+                    && key_id(current).as_deref() == Some(authority_key.as_str())
+            })
+        })
+        .cloned()
+        .collect()
+}
+
+/// The record's analysis committee when its assignment proof is valid. The
+/// proof is made at admission, before the pipeline may expand
+/// `effective_size`, so it is checked with `effective_size = size`.
+pub fn assigned_committee(record: &ChainRecord) -> Option<AnalysisCommittee> {
+    let committee = record.analysis_committee.as_ref()?;
+    let mut admitted = committee.clone();
+    admitted.effective_size = admitted.size;
+    admitted
+        .assignment_proof_is_valid(&record.id.canonical(), &record.content_hash)
+        .then(|| committee.clone())
+}
+
+/// Committee made of every active validator in `authority`, sorted by id.
+pub fn full_set_committee(authority: &[Validator]) -> AnalysisCommittee {
+    let mut members: Vec<String> = authority
+        .iter()
+        .filter(|validator| validator_status_is_active(&validator.status))
+        .map(|validator| validator.id.clone())
+        .collect();
+    members.sort();
+    members.dedup();
+    let size = u32::try_from(members.len()).unwrap_or(u32::MAX);
+    AnalysisCommittee {
+        size,
+        members,
+        seed: FULL_SET_COMMITTEE_SEED.to_string(),
+        effective_size: size,
+        ..AnalysisCommittee::default()
+    }
+}
+
+/// Resolve the signing committee (the record's verified analysis committee or
+/// the full active validator set at `qc.authority_height`), apply the
+/// dual-height [`signing_authority`] rule, and verify `qc` under
+/// `expected_domain` at `height` (`ECO-INV-03`).
+#[allow(clippy::too_many_arguments)]
+pub fn verify_committee_qc_for_record(
+    qc: &CommitteeQuorumCertificateV1,
+    expected_domain: &str,
+    package_canonical: &str,
+    content_hash: &str,
+    record: Option<&ChainRecord>,
+    at_authority: &[Validator],
+    at_block: &[Validator],
+    hybrid_signature_activation_height: Option<u64>,
+    height: u64,
+) -> Result<usize> {
+    qc.validate_shape()?;
+    if qc.package_canonical.trim() != package_canonical.trim() {
+        bail!("committee QC targets another package");
+    }
+    if !qc
+        .content_hash
+        .trim()
+        .eq_ignore_ascii_case(content_hash.trim())
+    {
+        bail!("committee QC targets another content hash");
+    }
+    let require_hybrid =
+        hybrid_signature_activation_height.is_some_and(|activation| height >= activation);
+    let authority = signing_authority(at_authority, at_block, require_hybrid);
+    let committee = record
+        .and_then(assigned_committee)
+        .into_iter()
+        .chain(std::iter::once(full_set_committee(at_authority)))
+        .find(|committee| committee_digest(committee).eq_ignore_ascii_case(qc.committee_digest.trim()))
+        .context(
+            "committee QC is signed neither by the package's analysis committee nor by the full validator set",
+        )?;
+    verify_committee_qc_with_activation(
+        qc,
+        expected_domain,
+        &committee,
+        &authority,
+        hybrid_signature_activation_height,
+        height,
+    )
+}
+
 /// Verify a committee quorum certificate under the consensus rules in force
 /// at `height` (ADR-019 §3.2, `ECA-02`, `ECO-INV-03`). `authority` must be
 /// the validator set authenticated at `qc.authority_height`. Hybrid
@@ -893,9 +1007,9 @@ pub fn aggregate_vote_v4_quorum(
 /// Returns the number of distinct valid committee signers, which is at
 /// least `2m/3 + 1` of the committee's `m` signers on success.
 pub fn verify_committee_qc(
-    qc: &common::CommitteeQuorumCertificateV1,
+    qc: &CommitteeQuorumCertificateV1,
     expected_domain: &str,
-    committee: &common::AnalysisCommittee,
+    committee: &AnalysisCommittee,
     authority: &[Validator],
     params: &ConsensusParams,
     height: u64,
@@ -914,9 +1028,9 @@ pub fn verify_committee_qc(
 /// `hybrid_signature_activation_height` rather than the full
 /// [`ConsensusParams`] (the node's block validator). Same rules.
 pub fn verify_committee_qc_with_activation(
-    qc: &common::CommitteeQuorumCertificateV1,
+    qc: &CommitteeQuorumCertificateV1,
     expected_domain: &str,
-    committee: &common::AnalysisCommittee,
+    committee: &AnalysisCommittee,
     authority: &[Validator],
     hybrid_signature_activation_height: Option<u64>,
     height: u64,
@@ -1343,5 +1457,197 @@ mod tests {
         )
         .unwrap();
         assert!(matches!(res_ok, VoteV4Outcome::Approved { .. }));
+    }
+
+    #[test]
+    fn signing_authority_and_full_set_committee_filter_departed_and_rotated_keys() {
+        let members: Vec<_> = (1..=4)
+            .map(|i| make_validator_pair(&format!("validator-{i}"), i as u8))
+            .collect();
+        let at_authority: Vec<Validator> = members.iter().map(|(v, _, _)| v.clone()).collect();
+
+        // validator-1 left, validator-2 became inactive, validator-3 rotated PQ key, validator-4 unchanged.
+        let rotated = SigningKey::hybrid_from_seeds(&[3; 32], &[200; 32]);
+        let (_, rotated_pq) = rotated.public_key().hybrid_parts().unwrap();
+        let mut at_block = at_authority[1..].to_vec();
+        at_block[0].status = "inactive".into();
+        at_block[1].pq_pubkey = Some(hex::encode(rotated_pq));
+
+        let hybrid_ids: Vec<String> = signing_authority(&at_authority, &at_block, true)
+            .into_iter()
+            .map(|v| v.id)
+            .collect();
+        assert_eq!(hybrid_ids, vec!["validator-4".to_string()]);
+
+        let classical_ids: Vec<String> = signing_authority(&at_authority, &at_block, false)
+            .into_iter()
+            .map(|v| v.id)
+            .collect();
+        assert_eq!(
+            classical_ids,
+            vec!["validator-3".to_string(), "validator-4".to_string()]
+        );
+
+        let full = full_set_committee(&at_block);
+        assert_eq!(full.seed, FULL_SET_COMMITTEE_SEED);
+        assert_eq!(
+            full.members,
+            vec!["validator-3".to_string(), "validator-4".to_string()]
+        );
+        assert_eq!(full.size, 2);
+        assert_eq!(full.effective_size, 2);
+    }
+
+    #[test]
+    fn verify_committee_qc_for_record_checks_committee_bindings_and_rotation() {
+        use common::{PackageId, PackageStatus, REVOKE_QC_DOMAIN};
+
+        let members: Vec<_> = (1..=4)
+            .map(|i| make_validator_pair(&format!("validator-{i}"), (i + 10) as u8))
+            .collect();
+        let at_authority: Vec<Validator> = members.iter().map(|(v, _, _)| v.clone()).collect();
+        let content_hash = "aa".repeat(32);
+        let canonical = "npm:pkg@1.0.0";
+
+        let mut committee = AnalysisCommittee {
+            size: 3,
+            members: vec![
+                "validator-1".into(),
+                "validator-2".into(),
+                "validator-3".into(),
+                "validator-4".into(),
+            ],
+            seed: "committee-seed".into(),
+            effective_size: 3,
+            validator_snapshot_hash: "snap".into(),
+            selection_randomness: "rand".into(),
+            ..AnalysisCommittee::default()
+        };
+        committee.assignment_proof =
+            common::committee_assignment_proof(canonical, &content_hash, &committee);
+        committee.effective_size = 4;
+
+        let record = ChainRecord {
+            id: PackageId::new("npm", "pkg", "1.0.0"),
+            content_hash: content_hash.clone(),
+            publisher_pubkey: "pub".into(),
+            status: PackageStatus::Verified,
+            evidence_digest: "bb".repeat(32),
+            analysis_committee: Some(committee.clone()),
+            ..ChainRecord::default()
+        };
+
+        // Assigned committee QC with 3/4 signers succeeds.
+        let mut assigned_qc = CommitteeQuorumCertificateV1::new(
+            REVOKE_QC_DOMAIN,
+            canonical,
+            &content_hash,
+            &"bb".repeat(32),
+            &committee,
+            5,
+        );
+        for (v, _, hyb) in members.iter().take(3) {
+            assigned_qc.add_signature(assigned_qc.sign_member(&v.id, hyb));
+        }
+        assert_eq!(
+            verify_committee_qc_for_record(
+                &assigned_qc,
+                REVOKE_QC_DOMAIN,
+                canonical,
+                &content_hash,
+                Some(&record),
+                &at_authority,
+                &at_authority,
+                Some(5),
+                10,
+            )
+            .unwrap(),
+            3
+        );
+
+        // Full-set fallback also works when record is absent.
+        let full = full_set_committee(&at_authority);
+        let mut full_qc = CommitteeQuorumCertificateV1::new(
+            REVOKE_QC_DOMAIN,
+            canonical,
+            &content_hash,
+            &"bb".repeat(32),
+            &full,
+            5,
+        );
+        for (v, _, hyb) in members.iter().take(3) {
+            full_qc.add_signature(full_qc.sign_member(&v.id, hyb));
+        }
+        assert_eq!(
+            verify_committee_qc_for_record(
+                &full_qc,
+                REVOKE_QC_DOMAIN,
+                canonical,
+                &content_hash,
+                None,
+                &at_authority,
+                &at_authority,
+                Some(5),
+                10,
+            )
+            .unwrap(),
+            3
+        );
+
+        // Wrong package, content hash, or domain fails.
+        assert!(verify_committee_qc_for_record(
+            &assigned_qc,
+            REVOKE_QC_DOMAIN,
+            "npm:other@1.0.0",
+            &content_hash,
+            Some(&record),
+            &at_authority,
+            &at_authority,
+            Some(5),
+            10,
+        )
+        .is_err());
+        assert!(verify_committee_qc_for_record(
+            &assigned_qc,
+            REVOKE_QC_DOMAIN,
+            canonical,
+            &"cc".repeat(32),
+            Some(&record),
+            &at_authority,
+            &at_authority,
+            Some(5),
+            10,
+        )
+        .is_err());
+        assert!(verify_committee_qc_for_record(
+            &assigned_qc,
+            common::QUARANTINE_QC_DOMAIN,
+            canonical,
+            &content_hash,
+            Some(&record),
+            &at_authority,
+            &at_authority,
+            Some(5),
+            10,
+        )
+        .is_err());
+
+        // Rotating one signer's key at block height drops them below quorum (2 < 3).
+        let mut at_block = at_authority.clone();
+        let rotated = SigningKey::hybrid_from_seeds(&[11; 32], &[250; 32]);
+        let (_, rotated_pq) = rotated.public_key().hybrid_parts().unwrap();
+        at_block[0].pq_pubkey = Some(hex::encode(rotated_pq));
+        assert!(verify_committee_qc_for_record(
+            &assigned_qc,
+            REVOKE_QC_DOMAIN,
+            canonical,
+            &content_hash,
+            Some(&record),
+            &at_authority,
+            &at_block,
+            Some(5),
+            10,
+        )
+        .is_err());
     }
 }

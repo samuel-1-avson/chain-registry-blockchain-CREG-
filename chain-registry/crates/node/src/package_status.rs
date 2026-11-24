@@ -33,19 +33,19 @@
 use anyhow::{bail, Context, Result};
 use common::status_tree::{split_canonical, Hash32};
 use common::{
-    AnalysisCommittee, Block, ChainRecord, CommitteeQuorumCertificateV1, CregFindingCategoryV1,
-    PackageStatus, QuarantineOutcomeV1, StatusLeafStateV1, StatusLeafV1, StatusTree, Transaction,
+    Block, ChainRecord, CommitteeQuorumCertificateV1, CregFindingCategoryV1, PackageStatus,
+    QuarantineOutcomeV1, StatusLeafStateV1, StatusLeafV1, StatusTree, Transaction,
     TriggerWitnessV1, Validator, APPROVAL_QC_DOMAIN, CLASS_C_QUARANTINE_TTL_SECS,
     QUARANTINE_QC_DOMAIN, QUARANTINE_RESOLUTION_QC_DOMAIN, REVOKE_QC_DOMAIN,
 };
+#[cfg(test)]
+pub use consensus::vote_v4::full_set_committee;
+pub use consensus::vote_v4::{assigned_committee, signing_authority};
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, HashMap};
 
 use crate::chain_store::ChainStore;
 use crate::namespace_consensus::NamespaceConsensusConfig;
-
-/// Seed of the synthetic committee formed by the full active validator set.
-pub const FULL_SET_COMMITTEE_SEED: &str = "creg-full-validator-set-v1";
 
 /// Witnesses kept per package version in the `witness:` index (newest last).
 pub const MAX_WITNESSES_PER_VERSION: usize = 16;
@@ -154,68 +154,6 @@ pub fn leaf_for(
     })
 }
 
-/// Validators of `at_authority` that may sign a certificate verified at a
-/// later height: active at the authority height **and** at the block height,
-/// with the same key id (hybrid when `require_hybrid`) in both sets.
-pub fn signing_authority(
-    at_authority: &[Validator],
-    at_block: &[Validator],
-    require_hybrid: bool,
-) -> Vec<Validator> {
-    let key_id = |validator: &Validator| {
-        validator
-            .verifying_key(require_hybrid)
-            .ok()
-            .map(|key| key.key_id())
-    };
-    at_authority
-        .iter()
-        .filter(|validator| common::validator_status_is_active(&validator.status))
-        .filter(|validator| {
-            let Some(authority_key) = key_id(validator) else {
-                return false;
-            };
-            at_block.iter().any(|current| {
-                current.id == validator.id
-                    && common::validator_status_is_active(&current.status)
-                    && key_id(current).as_deref() == Some(authority_key.as_str())
-            })
-        })
-        .cloned()
-        .collect()
-}
-
-/// The record's analysis committee when its assignment proof is valid. The
-/// proof is made at admission, before the pipeline may expand
-/// `effective_size`, so it is checked with `effective_size = size`.
-pub fn assigned_committee(record: &ChainRecord) -> Option<AnalysisCommittee> {
-    let committee = record.analysis_committee.as_ref()?;
-    let mut admitted = committee.clone();
-    admitted.effective_size = admitted.size;
-    admitted
-        .assignment_proof_is_valid(&record.id.canonical(), &record.content_hash)
-        .then(|| committee.clone())
-}
-
-/// Committee made of every active validator in `authority`, sorted by id.
-pub fn full_set_committee(authority: &[Validator]) -> AnalysisCommittee {
-    let mut members: Vec<String> = authority
-        .iter()
-        .filter(|validator| common::validator_status_is_active(&validator.status))
-        .map(|validator| validator.id.clone())
-        .collect();
-    members.sort();
-    members.dedup();
-    let size = u32::try_from(members.len()).unwrap_or(u32::MAX);
-    AnalysisCommittee {
-        size,
-        members,
-        seed: FULL_SET_COMMITTEE_SEED.to_string(),
-        effective_size: size,
-        ..AnalysisCommittee::default()
-    }
-}
-
 /// Block-local view over the committed index.
 struct Overlay<'a> {
     chain: &'a ChainStore,
@@ -320,36 +258,16 @@ impl Transition<'_, '_> {
         content_hash: &str,
         record: Option<&ChainRecord>,
     ) -> Result<usize> {
-        qc.validate_shape()?;
-        if qc.package_canonical.trim() != package_canonical.trim() {
-            bail!("committee QC targets another package");
-        }
-        if !qc
-            .content_hash
-            .trim()
-            .eq_ignore_ascii_case(content_hash.trim())
-        {
-            bail!("committee QC targets another content hash");
-        }
         let at_authority = self.authority_set(qc.authority_height)?;
         let at_block = self.authority_set(self.height)?;
-        let authority = signing_authority(&at_authority, &at_block, self.active);
-        let committee = record
-            .and_then(assigned_committee)
-            .into_iter()
-            .chain(std::iter::once(full_set_committee(&at_authority)))
-            .find(|committee| {
-                common::committee_digest(committee)
-                    .eq_ignore_ascii_case(qc.committee_digest.trim())
-            })
-            .context(
-                "committee QC is signed neither by the package's analysis committee nor by the full validator set",
-            )?;
-        consensus::vote_v4::verify_committee_qc_with_activation(
+        consensus::vote_v4::verify_committee_qc_for_record(
             qc,
             domain,
-            &committee,
-            &authority,
+            package_canonical,
+            content_hash,
+            record,
+            &at_authority,
+            &at_block,
             self.config.vote_v4_activation_height,
             self.height,
         )
@@ -1308,6 +1226,7 @@ mod tests {
 
     #[test]
     fn expanded_record_committee_keeps_its_assignment_proof() {
+        use common::AnalysisCommittee;
         let mut committee = AnalysisCommittee {
             size: 2,
             members: vec![

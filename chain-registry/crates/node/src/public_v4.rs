@@ -304,9 +304,84 @@ pub fn package_view(
     Ok(Some(view))
 }
 
-/// Proof bundle against the current tip: tip commit signatures, the tip's
-/// `status_root` with the version's leaf and proof (from activation on), and
-/// the publication's block, index and Merkle path.
+fn status_transaction_for_leaf(
+    chain: &ChainStore,
+    canonical: &str,
+    leaf: &StatusLeafV1,
+    publication_height: u64,
+) -> Result<Option<Transaction>> {
+    match leaf.status {
+        StatusLeafStateV1::Verified => {
+            if leaf.height == publication_height {
+                return Ok(None);
+            }
+            let Some(block) = chain.get_block_by_height(leaf.height)? else {
+                return Ok(None);
+            };
+            Ok(block
+                .transactions
+                .iter()
+                .rev()
+                .find(|tx| {
+                    matches!(
+                        tx,
+                        Transaction::QuarantineResolutionV1 {
+                            package_canonical,
+                            outcome: QuarantineOutcomeV1::Release,
+                            ..
+                        } if package_canonical.trim() == canonical
+                    )
+                })
+                .cloned())
+        }
+        StatusLeafStateV1::Quarantined { .. } => {
+            let Some(block) = chain.get_block_by_height(leaf.height)? else {
+                return Ok(None);
+            };
+            Ok(block
+                .transactions
+                .iter()
+                .rev()
+                .find(|tx| {
+                    matches!(
+                        tx,
+                        Transaction::QuarantineV1 { record, .. }
+                            if record.id.canonical() == canonical
+                    )
+                })
+                .cloned())
+        }
+        StatusLeafStateV1::Revoked { .. } => {
+            let Some(block) = chain.get_block_by_height(leaf.height)? else {
+                return Ok(None);
+            };
+            Ok(block
+                .transactions
+                .iter()
+                .rev()
+                .find(|tx| match tx {
+                    Transaction::RevokeV2 { request, .. } => {
+                        request.package_canonical.trim() == canonical
+                    }
+                    Transaction::Revoke {
+                        package_canonical, ..
+                    } => package_canonical.trim() == canonical,
+                    Transaction::QuarantineResolutionV1 {
+                        package_canonical,
+                        outcome: QuarantineOutcomeV1::Reject,
+                        ..
+                    } => package_canonical.trim() == canonical,
+                    _ => false,
+                })
+                .cloned())
+        }
+    }
+}
+
+/// Proof bundle against the current tip: tip header and commit signatures,
+/// authenticated validator-set transition history, the tip's `status_root`
+/// with the version's leaf, proof, and optional status-transition transaction,
+/// and the publication's block, header, index, transaction and Merkle path.
 pub fn proof_bundle(chain: &ChainStore, canonical: &str) -> Result<Option<ProofBundleV2>> {
     let Some(record) = chain.get_package(canonical)? else {
         return Ok(None);
@@ -314,6 +389,7 @@ pub fn proof_bundle(chain: &ChainStore, canonical: &str) -> Result<Option<ProofB
     let Some((publication_block, tx_index)) = publication(chain, &record)? else {
         return Ok(None);
     };
+    let publication_transaction = publication_block.transactions[tx_index].clone();
     let merkle = resolver::light_client::build_merkle_proof(&publication_block, tx_index)?;
     let (package, version) =
         split_canonical(canonical).context("package id cannot be split into name and version")?;
@@ -338,20 +414,47 @@ pub fn proof_bundle(chain: &ChainStore, canonical: &str) -> Result<Option<ProofB
             }
             None => (None, None),
         };
+        let committed_leaf = match &status_leaf {
+            Some(leaf) => Some(leaf.clone()),
+            None => chain.status_leaf(canonical)?,
+        };
+        let status_transaction = match committed_leaf.as_ref() {
+            Some(leaf) => status_transaction_for_leaf(
+                chain,
+                canonical,
+                leaf,
+                publication_block.header.height,
+            )?,
+            None => None,
+        };
+        let authority_history: Vec<common::AuthenticatedValidatorSetSnapshot> =
+            crate::validator_set_history::load_checked(chain.data_dir())?
+                .into_iter()
+                .filter(|entry| entry.effective_from_height <= tip_height)
+                .filter_map(|entry| entry.certificate)
+                .collect();
+        if chain.tip_height()? != tip_height {
+            continue;
+        }
         return Ok(Some(ProofBundleV2 {
             schema: PROOF_BUNDLE_SCHEMA.to_string(),
             canonical: DisplayText::bounded(canonical, 512),
             tip_height,
             tip_block_hash: tip.hash(),
             tip_timestamp_unix: tip.header.timestamp.timestamp(),
+            tip_header: tip.header.clone(),
             tip_commit_signatures: tip.pbft_signatures.clone(),
+            authority_history,
             status_root: ProofBundleV2::status_root_from(tip.header.status_root.as_ref()),
             status_leaf,
             status_proof,
+            status_transaction,
             publication_height: publication_block.header.height,
             publication_block_hash: publication_block.hash(),
+            publication_header: publication_block.header.clone(),
             publication_tx_index: u32::try_from(tx_index).unwrap_or(u32::MAX),
             publication_tx_hash: merkle.tx_hash.clone(),
+            publication_transaction,
             publication_merkle_path: merkle
                 .path
                 .iter()
@@ -925,6 +1028,30 @@ mod tests {
         assert_eq!(bundle.tip_height, 2);
         assert_eq!(bundle.publication_height, 1);
         assert_eq!(bundle.publication_tx_index, 0);
+        assert_eq!(
+            Block {
+                header: bundle.tip_header.clone(),
+                transactions: vec![],
+                pbft_signatures: vec![],
+            }
+            .hash(),
+            bundle.tip_block_hash
+        );
+        assert_eq!(
+            Block {
+                header: bundle.publication_header.clone(),
+                transactions: vec![],
+                pbft_signatures: vec![],
+            }
+            .hash(),
+            bundle.publication_block_hash
+        );
+        assert_eq!(
+            common::transaction_hash(&bundle.publication_transaction),
+            bundle.publication_tx_hash
+        );
+        assert!(bundle.status_transaction.is_none());
+        assert!(bundle.authority_history.is_empty());
         let root = common::status_tree::hex32::parse(bundle.status_root.as_deref().expect("root"))
             .expect("hex root");
         let leaf = bundle.status_leaf.as_ref().expect("leaf");
@@ -947,6 +1074,162 @@ mod tests {
         assert!(proof_bundle(&fx.store, "npm:absent@1.0.0")
             .expect("bundle")
             .is_none());
+    }
+
+    #[test]
+    fn proof_bundle_carries_status_transactions_and_authority_history() {
+        use common::{
+            AuthenticatedValidatorSetSnapshot, ValidatorSet, ValidatorSetTransitionSignature,
+            QUARANTINE_RESOLUTION_QC_DOMAIN, VALIDATOR_SNAPSHOT_SCHEMA_VERSION,
+        };
+
+        let fx = fixture(Some(1));
+        let rec_q = record("held-then-released", "publisher");
+        let can_q = rec_q.id.canonical();
+        let hold_qc = fx.qc(QUARANTINE_QC_DOMAIN, &can_q, &rec_q.content_hash, None, 3);
+        let b1 = fx
+            .commit(fx.block(
+                10,
+                vec![
+                    Transaction::Publish(rec_q.clone()),
+                    Transaction::QuarantineV1 {
+                        record: rec_q.clone(),
+                        reason_code: CregFindingCategoryV1::CredentialExfiltration,
+                        quorum_certificate: hold_qc,
+                    },
+                ],
+            ))
+            .expect("publish + hold");
+        let b1_bundle = proof_bundle(&fx.store, &can_q)
+            .expect("bundle")
+            .expect("held");
+        assert!(matches!(
+            b1_bundle.status_transaction,
+            Some(Transaction::QuarantineV1 { .. })
+        ));
+
+        // Record certified authority transitions at height 2 (<= tip) and 999 (> tip).
+        let bootstrap = ValidatorSet::new(fx.members.iter().map(|m| m.validator.clone()).collect());
+        let bootstrap_hash = common::canonical_validator_set_hash(&bootstrap);
+        let make_transition = |effective_from_height: u64, previous_block_hash: String| {
+            let mut snap = AuthenticatedValidatorSetSnapshot {
+                schema_version: VALIDATOR_SNAPSHOT_SCHEMA_VERSION,
+                effective_from_height,
+                previous_block_hash,
+                previous_validator_set_hash: bootstrap_hash.clone(),
+                validators: bootstrap.clone(),
+                validator_set_hash: bootstrap_hash.clone(),
+                transition_signatures: vec![],
+            };
+            let msg = common::validator_set_transition_message(&snap);
+            for m in fx.members.iter().take(3) {
+                snap.transition_signatures
+                    .push(ValidatorSetTransitionSignature {
+                        validator_id: m.validator.id.clone(),
+                        validator_pubkey: m.validator.pubkey.clone(),
+                        signature: m.ed.sign(msg.as_bytes()).to_hex(),
+                    });
+            }
+            snap
+        };
+        crate::validator_set_history::record_authenticated(
+            fx.store.data_dir(),
+            make_transition(2, b1.hash()),
+            &bootstrap,
+        )
+        .expect("record height 2 transition");
+        crate::validator_set_history::record_authenticated(
+            fx.store.data_dir(),
+            make_transition(999, "ff".repeat(32)),
+            &bootstrap,
+        )
+        .expect("record future transition");
+
+        // Block 2: release pkg-q and publish pkg-r.
+        let rec_r = record("revoked-pkg", "publisher");
+        let can_r = rec_r.id.canonical();
+        let release_qc = fx.qc(
+            QUARANTINE_RESOLUTION_QC_DOMAIN,
+            &can_q,
+            &rec_q.content_hash,
+            Some(QuarantineOutcomeV1::Release),
+            3,
+        );
+        fx.commit(fx.block(
+            20,
+            vec![
+                Transaction::QuarantineResolutionV1 {
+                    package_canonical: can_q.clone(),
+                    content_hash: rec_q.content_hash.clone(),
+                    outcome: QuarantineOutcomeV1::Release,
+                    quorum_certificate: release_qc,
+                },
+                Transaction::Publish(rec_r.clone()),
+            ],
+        ))
+        .expect("release + publish r");
+        let released_bundle = proof_bundle(&fx.store, &can_q)
+            .expect("bundle")
+            .expect("released");
+        assert!(matches!(
+            released_bundle.status_transaction,
+            Some(Transaction::QuarantineResolutionV1 {
+                outcome: QuarantineOutcomeV1::Release,
+                ..
+            })
+        ));
+        assert_eq!(released_bundle.authority_history.len(), 1);
+        assert_eq!(
+            released_bundle.authority_history[0].effective_from_height,
+            2
+        );
+
+        // Block 3: certified RevokeV2 on pkg-r, and publish + QuarantineV1 on pkg-exp.
+        let rec_exp = record("expired-pkg", "publisher");
+        let can_exp = rec_exp.id.canonical();
+        let revoke_qc = fx.qc(REVOKE_QC_DOMAIN, &can_r, &rec_r.content_hash, None, 3);
+        let exp_qc = fx.qc(
+            QUARANTINE_QC_DOMAIN,
+            &can_exp,
+            &rec_exp.content_hash,
+            None,
+            3,
+        );
+        fx.commit(fx.block(
+            30,
+            vec![
+                revoke_v2(revocation(&fx.members[0].ed, &can_r), Some(revoke_qc)),
+                Transaction::Publish(rec_exp.clone()),
+                Transaction::QuarantineV1 {
+                    record: rec_exp.clone(),
+                    reason_code: CregFindingCategoryV1::Backdoor,
+                    quorum_certificate: exp_qc,
+                },
+            ],
+        ))
+        .expect("revoke + hold exp");
+        let revoked_bundle = proof_bundle(&fx.store, &can_r)
+            .expect("bundle")
+            .expect("revoked");
+        assert!(matches!(
+            revoked_bundle.status_transaction,
+            Some(Transaction::RevokeV2 {
+                quorum_certificate: Some(_),
+                ..
+            })
+        ));
+
+        // Block 4: advance past quarantine TTL -> deterministic expiry leaves status_transaction = None.
+        fx.commit(fx.block(30 + CLASS_C_QUARANTINE_TTL_SECS + 1, vec![]))
+            .expect("expiry block");
+        let expired_bundle = proof_bundle(&fx.store, &can_exp)
+            .expect("bundle")
+            .expect("expired");
+        assert_eq!(
+            expired_bundle.status_leaf.as_ref().expect("leaf").status,
+            StatusLeafStateV1::Revoked { certified: true }
+        );
+        assert!(expired_bundle.status_transaction.is_none());
     }
 
     #[test]

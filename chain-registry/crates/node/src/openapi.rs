@@ -1632,6 +1632,21 @@ mod tests {
         ] {
             assert!(schemas[schema].is_object(), "missing schema {schema}");
         }
+        let proof_bundle = schemas["ProofBundleV2"]["properties"]
+            .as_object()
+            .expect("ProofBundleV2 properties");
+        for field in [
+            "tip_header",
+            "publication_header",
+            "publication_transaction",
+            "authority_history",
+            "status_transaction",
+        ] {
+            assert!(
+                proof_bundle.contains_key(field),
+                "ProofBundleV2 OpenAPI schema missing {field}"
+            );
+        }
         // The public Lane C schema has no free-text report fields.
         let intelligence = schemas["IntelligenceSummaryV1"]["properties"]
             .as_object()
