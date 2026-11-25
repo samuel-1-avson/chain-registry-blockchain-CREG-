@@ -2,15 +2,17 @@
 //! + isolated host DNS/TLS sinkhole (`VNA-15`).
 
 use super::canary::CanaryProfile;
+use super::nsjail::{resolve_rootfs_strict, VerifiedRootfs};
 use super::schema::{
-    CanaryChannel, CanaryExfiltration, KernelBehaviorGraphV1, RawKernelEvent, TriggerSpecV1,
-    MAX_KERNEL_EVENTS,
+    normalize_telemetry, CanaryChannel, CanaryExfiltration, ExecutionTier, KernelBehaviorGraphV1,
+    RawKernelEvent, TriggerSpecV1, MAX_KERNEL_EVENTS,
 };
-use anyhow::Result;
+use anyhow::{Context, Result};
 use common::PackageManifest;
 use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
+use std::time::{Duration, Instant};
 
 pub const DEFAULT_VSOCK_CID: u32 = 3;
 pub const DEFAULT_VSOCK_PORT: u32 = 5005;
