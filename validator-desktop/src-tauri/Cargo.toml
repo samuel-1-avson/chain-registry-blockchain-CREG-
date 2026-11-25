@@ -1,0 +1,32 @@
+[workspace]
+
+[package]
+name = "creg-validator-desktop"
+version = "0.1.0"
+description = "Desktop operator GUI for the CREG four-zone validator node"
+edition = "2021"
+
+[lib]
+name = "creg_validator_desktop_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+tauri = { version = "2", features = [] }
+zone-ipc = { path = "../../chain-registry/crates/zone-ipc" }
+ai-config = { path = "../../chain-registry/crates/ai-config" }
+registry-view = { path = "../../chain-registry/crates/registry-view" }
+tokio = { version = "1", features = ["full"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+anyhow = "1"
+reqwest = { version = "0.12", features = ["json", "stream"] }
+futures-util = "0.3"
+chrono = { version = "0.4", features = ["serde"] }
+dirs = "5"
+tracing = "0.1"
+
+[dev-dependencies]
+tempfile = "3"
