@@ -52,6 +52,7 @@ $phaseCArchivePaths = @(
     'chain-registry/Cargo.lock',
     'chain-registry/Dockerfile',
     'chain-registry/crates',
+    'chain-registry/migrations',
     'chain-registry/config',
     'chain-registry/rules',
     'chain-registry/validators',
