@@ -113,7 +113,12 @@ COPY crates/l1-tx/Cargo.toml              crates/l1-tx/
 
 # Phase 3: Ecosystem crates
 COPY crates/insurance/Cargo.toml        crates/insurance/
-COPY crates/db-sync/Cargo.toml          crates/db-sync/
+COPY crates/indexer/Cargo.toml          crates/indexer/
+COPY crates/ai-config/Cargo.toml crates/ai-config/
+COPY crates/dev-cli/Cargo.toml crates/dev-cli/
+COPY crates/registry-view/Cargo.toml crates/registry-view/
+COPY crates/gateway/Cargo.toml crates/gateway/
+COPY crates/zone-ipc/Cargo.toml crates/zone-ipc/
 COPY crates/ipfs-pinner/Cargo.toml      crates/ipfs-pinner/
 COPY crates/secrets/Cargo.toml          crates/secrets/
 
@@ -136,7 +141,12 @@ RUN mkdir -p crates/l1-tx/src              && echo "pub fn _stub() {}" > crates/
 
 # Phase 3 stubs
 RUN mkdir -p crates/insurance/src        && echo "pub fn _stub() {}" > crates/insurance/src/lib.rs
-RUN mkdir -p crates/db-sync/src          && echo "pub fn _stub() {}" > crates/db-sync/src/lib.rs
+RUN mkdir -p crates/ai-config/src && echo "pub fn _stub() {}" > crates/ai-config/src/lib.rs
+RUN mkdir -p crates/dev-cli/src && echo "fn main() {}" > crates/dev-cli/src/main.rs
+RUN mkdir -p crates/registry-view/src && echo "pub fn _stub() {}" > crates/registry-view/src/lib.rs
+RUN mkdir -p crates/gateway/src && echo "fn main() {}" > crates/gateway/src/main.rs
+RUN mkdir -p crates/zone-ipc/src && echo "pub fn _stub() {}" > crates/zone-ipc/src/lib.rs
+RUN mkdir -p crates/indexer/src          && echo "pub fn _stub() {}" > crates/indexer/src/lib.rs
 RUN mkdir -p crates/ipfs-pinner/src      && echo "pub fn _stub() {}" > crates/ipfs-pinner/src/lib.rs
 
 # Faucet stub
@@ -152,6 +162,7 @@ RUN cargo fetch --locked || (sleep 5 && cargo fetch --locked) || (sleep 10 && ca
 
 # Copy real source and build properly.
 COPY crates/ crates/
+COPY migrations/ migrations/
 COPY circuits/ circuits/
 COPY contracts/ contracts/
 COPY models/ models/

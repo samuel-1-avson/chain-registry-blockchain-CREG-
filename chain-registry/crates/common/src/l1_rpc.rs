@@ -416,7 +416,9 @@ where
     }
 }
 
-async fn quorum_json_call<F, Fut>(endpoints: &[String], method: &str, call: F) -> Result<Value>
+/// Require a strict majority of matching answers even for reads that normally
+/// use failover, such as block headers that anchor a finalized log range.
+pub async fn quorum_json_call<F, Fut>(endpoints: &[String], method: &str, call: F) -> Result<Value>
 where
     F: Fn(String) -> Fut,
     Fut: Future<Output = Result<Value>>,

@@ -220,6 +220,10 @@ fn public_routes(sse_bus: EventBus, ws_bus: EventBus) -> Router<SharedState> {
             get(get_package_intelligence),
         )
         .route("/v1/public/blocks", get(list_blocks_paginated))
+        .route(
+            "/v1/public/validator-set-transitions",
+            get(public_validator_set_transitions),
+        )
         .route("/v1/public/blocks/:height", get(get_block_by_height))
         .route("/v1/public/blocks/hash/:hash", get(get_block_by_hash))
         .route("/v1/public/transactions/:canonical", get(get_transaction))
@@ -1533,6 +1537,20 @@ async fn list_validator_registrations(State(state): State<SharedState>) -> impl 
             .then(left.identity.node_id.cmp(&right.identity.node_id))
     });
     Json(registrations)
+}
+
+async fn public_validator_set_transitions(state: State<SharedState>) -> Response {
+    let response = list_validator_set_transitions(state).await;
+    if response.status().is_server_error() {
+        return (
+            StatusCode::SERVICE_UNAVAILABLE,
+            Json(ErrorResponse {
+                error: "validator-set history unavailable".to_string(),
+            }),
+        )
+            .into_response();
+    }
+    response
 }
 
 /// GET /v1/validator/set-transitions

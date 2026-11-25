@@ -1,0 +1,30 @@
+[package]
+name = "creg-indexer"
+version = "0.1.0"
+edition = "2021"
+build = "build.rs"
+
+[dependencies]
+common = { path = "../common", features = ["l1-rpc"] }
+registry-view = { path = "../registry-view" }
+resolver = { path = "../resolver" }
+alloy = { workspace = true }
+anyhow = { workspace = true }
+axum = { workspace = true }
+chrono = { workspace = true }
+futures = { workspace = true }
+hex = { workspace = true }
+reqwest = { workspace = true }
+rocksdb = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+sqlx = { workspace = true, features = ["migrate", "macros", "json"] }
+tokio = { workspace = true }
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true, features = ["env-filter"] }
+
+[dev-dependencies]
+tempfile = "3"
+
+[lints]
+workspace = true

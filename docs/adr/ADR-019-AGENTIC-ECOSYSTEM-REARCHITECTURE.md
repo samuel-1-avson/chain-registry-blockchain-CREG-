@@ -1203,3 +1203,25 @@ No consensus wire type, signed message, block or header format changed; `Cargo.l
 | `cargo test --locked -p chain-registry-cli --no-fail-fast` | 129/129 passed, 1 ignored (pre-existing `explorer_tui::tests::render_console_preview_html`), 0 failed (plus 5 shims, 0 tests each) |
 | `cargo test --locked -p common --test consensus_golden_vectors --no-fail-fast` (frozen) | 10/10 |
 | `cargo test --locked -p consensus --test signed_message_formats --no-fail-fast` (frozen) | 6/6 |
+
+### Increment 5, part 6a — Standalone indexer and chain sources (`ECA-25`)
+
+`creg-indexer` builds from `crates/indexer`. Local ingestion keeps one RocksDB secondary open, catches up once per tick and pauses while the primary has an active reorg journal. Remote ingestion uses public block and validator-set-transition routes. It verifies the signed spec's genesis, the authority certificates and their parent anchors, the block's transaction Merkle root and the activation-aware PBFT commit quorum. The node no longer starts a PostgreSQL worker or depends on SQLx. The binary listens on loopback by default, and the local Compose service publishes its port on host loopback.
+
+**Verification.** The Windows test caught up to a write from a live primary using the same secondary and paused on an active reorg journal. The remote body test rejected a transaction list that differed from the header's Merkle commitment. The node's locked normal dependency graphs, with and without `phase-c-real-fleet`, contain no `sqlx`. The Compose configuration parsed successfully.
+
+### Increment 5, part 6b — Embedded schema and transactional projection (`ECA-22`, `ECA-24`)
+
+`migrations/004_indexer_v2.sql` evolves the existing schema under the embedded SQLx migrator. The upgrade replays the chain from genesis and checks the retained block hashes as it backfills v4 evidence. A cursor row lock serializes writers. One transaction writes each block, its package and validator projections, its SSE records and the cursor. Re-applying the same block is a no-op. A conflicting hash or parent aborts ingestion. Publisher rotations match the exact namespace. Class C expiry uses the committing block's timestamp before applying that block's transactions.
+
+**Verification.** PostgreSQL 16 tests covered fresh migrations, v1 replay, an idempotent re-apply, concurrent apply, conflicting and discontinuous blocks, and rollback after a late SQL error. The same tests checked exact namespace rotation, expiry at the block deadline, and join, leave and slash events.
+
+### Increment 5, part 6c — L1 bounty lane and read API (`ECA-42` indexer work)
+
+The bounty lane decodes `DiscoveryBountyAwarded` with Alloy and checks the chain ID, confirmation boundary, log block hashes and cursor through `common::l1_rpc` quorum reads. It uses the finalized tag when available and a 12-block depth otherwise. Bounties keep their L1 block and transaction hashes and join to committed witness digests as the two lanes catch up. Committee wei remains reserved under the current contract. The contract change stays tracked with `ECA-42`.
+
+The indexer's rate-limited GET routes serve quarantine, package history, committee diversity, the bounty leaderboard and durable SSE v2 replay from PostgreSQL. Committee epochs are identified by the start of a contiguous validator-set run, with epoch 0 covering the bootstrap set. SSE uses `<height>.<tx_index>` IDs, followed by synthetic expiry and bounty event indices allocated under the same cursor lock. An L1 event uses the CREG height current when the bounty is indexed. See [indexer configuration](../../chain-registry/migrations/README.md).
+
+**Verification.** The Alloy log fixture decoded successfully. A mock Ethereum RPC exercised the 12-block fallback into PostgreSQL, round-tripped `2^255` in `NUMERIC(78,0)`, and joined the award after the witness was indexed. HTTP tests verified the quarantine queue, evidence history, committee diversity, bounty leaderboard and SSE resume.
+
+**Workspace gates (Windows, 2026-11-25, rustc 1.98.1).** Format check, workspace Clippy, Phase C node Clippy and `cargo deny --workspace check advisories bans sources` exited 0. Both Clippy runs reused the RocksDB and Snappy libraries built from the locked dependencies in the local Cargo target. The indexer passed 3 unit tests and 3 PostgreSQL tests. The frozen `consensus_golden_vectors` and `signed_message_formats` suites passed 10/10 and 6/6, with both files unchanged.

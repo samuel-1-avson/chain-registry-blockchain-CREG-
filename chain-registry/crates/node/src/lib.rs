@@ -47,7 +47,6 @@ pub mod vote_v4_round;
 // ── Private modules required by the public ones above ────────────────────────
 mod authority_archive;
 mod bridge;
-mod db_sync_proxy;
 mod explorer;
 mod governance_api;
 mod grpc;

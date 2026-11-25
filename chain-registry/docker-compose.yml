@@ -244,7 +244,6 @@ services:
       POSTGRES_DB: creg
     volumes:
       - postgres-data:/var/lib/postgresql/data
-      - ./testnet/init-testnet-db.sql:/docker-entrypoint-initdb.d/init.sql:ro
     ports:
       - "${POSTGRES_PORT:-5432}:5432"
     restart: unless-stopped
@@ -345,22 +344,31 @@ services:
       retries: 5
 
   indexer:
-    image: chain-registry-app:latest
+    image: creg-indexer:latest
     build:
       context: .
       dockerfile: Dockerfile
+      target: creg-indexer
     container_name: creg-indexer
     entrypoint: ["/app/creg-indexer"]
     environment:
       CREG_PG_URL: postgres://creg:${POSTGRES_PASSWORD:-creg_password}@postgres:5432/creg
       CREG_INDEXER_DATA_DIR: "/data"
+      CREG_INDEXER_SECONDARY_DIR: "/indexer-data"
       CREG_INDEXER_LISTEN: "0.0.0.0:8084"
       CREG_INDEXER_POLL_INTERVAL_SECS: "${CREG_INDEXER_POLL_INTERVAL_SECS:-5}"
-      RUST_LOG: "${INDEXER_RUST_LOG:-info,db_sync=debug}"
+      CREG_INDEXER_REWARDS_ADDRESS: "${CREG_INDEXER_REWARDS_ADDRESS:-}"
+      CREG_INDEXER_L1_CHAIN_ID: "${CREG_INDEXER_L1_CHAIN_ID:-}"
+      CREG_INDEXER_L1_START_BLOCK: "${CREG_INDEXER_L1_START_BLOCK:-}"
+      CREG_INDEXER_L1_RPC_URL: "${CREG_INDEXER_L1_RPC_URL:-}"
+      CREG_INDEXER_L1_RPC_FALLBACK_URLS: "${CREG_INDEXER_L1_RPC_FALLBACK_URLS:-}"
+      RUST_LOG: "${INDEXER_RUST_LOG:-info,creg_indexer=debug}"
     ports:
-      - "8084:8084"
+      - "127.0.0.1:8084:8084"
     volumes:
       - node-data:/data:ro
+    tmpfs:
+      - /indexer-data:uid=10002,gid=10002,mode=0700
     depends_on:
       node:
         condition: service_healthy

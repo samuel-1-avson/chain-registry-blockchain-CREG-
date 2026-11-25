@@ -446,10 +446,25 @@ pub fn block_transaction_hashes(block: &Block) -> Vec<String> {
 /// Computes the Merkle root of a list of transaction hashes.
 /// Returns a fixed "empty" hash for an empty list.
 pub fn merkle_root(txs: &[Transaction]) -> String {
-    if txs.is_empty() {
+    merkle_root_from_hashes(txs.iter().map(transaction_hash).collect())
+}
+
+/// Compute the full transaction commitment with the signed spec's encoding.
+pub fn merkle_root_for_encoding(
+    txs: &[Transaction],
+    encoding: Option<&str>,
+) -> anyhow::Result<String> {
+    let hashes = txs
+        .iter()
+        .map(|tx| transaction_hash_for_encoding(tx, encoding))
+        .collect::<anyhow::Result<Vec<_>>>()?;
+    Ok(merkle_root_from_hashes(hashes))
+}
+
+fn merkle_root_from_hashes(mut hashes: Vec<String>) -> String {
+    if hashes.is_empty() {
         return sha256_hex(b"empty");
     }
-    let mut hashes: Vec<String> = txs.iter().map(transaction_hash).collect();
 
     while hashes.len() > 1 {
         if !hashes.len().is_multiple_of(2) {

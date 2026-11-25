@@ -1,33 +1,15 @@
 # Database Schema
 
-## Source of truth
+The PostgreSQL mirror schema lives in [the indexer migrations](../chain-registry/migrations/README.md). The standalone `creg-indexer` applies the embedded SQLx migrations when it starts. Consensus and the node's chain reads use RocksDB.
 
-**Canonical schema:** `chain-registry/crates/db-sync/src/schema.rs` (`INIT_SQL`)
+| Table or view | Purpose |
+|---|---|
+| `sync_state`, `blocks` | Canonical ingest cursor, block commitments and PBFT commit signatures |
+| `packages`, `validator_votes`, `publisher_stats` | Package mirror, legacy validator votes and publisher metrics |
+| `package_status_history`, `vote_signatures`, `semantic_votes` | Package transitions and vote evidence by block and transaction |
+| `trigger_witnesses`, `revocations`, `quarantines`, `v_quarantine_queue` | Witness and revocation records and the active Class C queue |
+| `validator_events` | Validator joins, leaves and slashes |
+| `l1_bounty_cursor`, `discovery_bounties`, `v_discovery_bounty_witnesses` | L1 progress, confirmed bounty logs and their witness associations |
+| `index_events` | Ordered SSE v2 replay records |
 
-Applied automatically by:
-
-- `creg-indexer` / `db-sync` sync worker on startup
-- `chain-registry/migrations/001_db_sync_bootstrap.sql` (same DDL for manual ops)
-
-## Tables (db-sync)
-
-| Table | Purpose |
-|-------|---------|
-| `sync_state` | Last mirrored block height |
-| `packages` | Package records (PK: `canonical`) |
-| `validator_votes` | Per-package validator votes |
-| `blocks` | Block headers (PK: `height`) |
-| `publisher_stats` | Aggregated publisher metrics |
-
-## Legacy testnet SQL
-
-`chain-registry/testnet/init-testnet-db.sql` historically defined overlapping tables (`validator_signatures`, `chain_blocks`, etc.). **Do not use both bootstraps on the same database.**
-
-For new environments:
-
-1. Run `migrations/001_db_sync_bootstrap.sql`
-2. Optionally run `migrations/002_testnet_extras.sql` for faucet/metrics tables
-
-## Node read path
-
-The validator node serves REST from **RocksDB**, not PostgreSQL. PG is a **mirror** for analytics/explorer indexing.
+Stake and bounty amounts use `NUMERIC(78,0)`. Public bounty amounts are decimal strings.

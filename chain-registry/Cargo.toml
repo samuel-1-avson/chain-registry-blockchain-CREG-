@@ -10,7 +10,7 @@ members = [
     "crates/wasm-sandbox",
     "crates/threshold-encryption",
     "crates/insurance",
-    "crates/db-sync",
+    "crates/indexer",
     "crates/ipfs-pinner",
     "crates/faucet",
     "crates/relayer",

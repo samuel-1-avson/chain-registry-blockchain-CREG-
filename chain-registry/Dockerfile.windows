@@ -64,7 +64,12 @@ COPY crates/wasm-sandbox/Cargo.toml     crates/wasm-sandbox/
 COPY crates/threshold-encryption/Cargo.toml crates/threshold-encryption/
 COPY crates/l1-tx/Cargo.toml            crates/l1-tx/
 COPY crates/insurance/Cargo.toml        crates/insurance/
-COPY crates/db-sync/Cargo.toml          crates/db-sync/
+COPY crates/indexer/Cargo.toml          crates/indexer/
+COPY crates/ai-config/Cargo.toml crates/ai-config/
+COPY crates/dev-cli/Cargo.toml crates/dev-cli/
+COPY crates/registry-view/Cargo.toml crates/registry-view/
+COPY crates/gateway/Cargo.toml crates/gateway/
+COPY crates/zone-ipc/Cargo.toml crates/zone-ipc/
 COPY crates/ipfs-pinner/Cargo.toml      crates/ipfs-pinner/
 COPY crates/secrets/Cargo.toml          crates/secrets/
 
@@ -84,7 +89,12 @@ RUN mkdir -p crates/common/src && echo "pub fn _stub() {}" > crates/common/src/l
     mkdir -p crates/threshold-encryption/src && echo "pub fn _stub() {}" > crates/threshold-encryption/src/lib.rs && \
     mkdir -p crates/l1-tx/src && echo "pub fn _stub() {}" > crates/l1-tx/src/lib.rs && \
     mkdir -p crates/insurance/src && echo "pub fn _stub() {}" > crates/insurance/src/lib.rs && \
-    mkdir -p crates/db-sync/src && echo "pub fn _stub() {}" > crates/db-sync/src/lib.rs && \
+    mkdir -p crates/ai-config/src && echo "pub fn _stub() {}" > crates/ai-config/src/lib.rs && \
+    mkdir -p crates/dev-cli/src && echo "fn main() {}" > crates/dev-cli/src/main.rs && \
+    mkdir -p crates/registry-view/src && echo "pub fn _stub() {}" > crates/registry-view/src/lib.rs && \
+    mkdir -p crates/gateway/src && echo "fn main() {}" > crates/gateway/src/main.rs && \
+    mkdir -p crates/zone-ipc/src && echo "pub fn _stub() {}" > crates/zone-ipc/src/lib.rs && \
+    mkdir -p crates/indexer/src && echo "pub fn _stub() {}" > crates/indexer/src/lib.rs && \
     mkdir -p crates/ipfs-pinner/src && echo "pub fn _stub() {}" > crates/ipfs-pinner/src/lib.rs && \
     mkdir -p crates/faucet/src && echo "fn main() {}" > crates/faucet/src/main.rs && \
     mkdir -p crates/relayer/src && echo "fn main() {}" > crates/relayer/src/main.rs && \
@@ -96,6 +106,7 @@ RUN cargo build --release --package chain-registry-node 2>/dev/null || true
 
 # Copy real source code
 COPY crates/ crates/
+COPY migrations/ migrations/
 COPY circuits/ circuits/
 COPY contracts/ contracts/
 COPY models/ models/

@@ -32,13 +32,13 @@ use axum::{Json, Router};
 use common::status_tree::split_canonical;
 use common::{
     Block, ChainRecord, DisplayText, PackageStatus, QuarantineOutcomeV1, StatusLeafStateV1,
-    StatusLeafV1, Transaction, CLASS_C_QUARANTINE_TTL_SECS,
+    StatusLeafV1, Transaction,
 };
 use futures::stream::{self, Stream};
 use registry_view::{
     CommitteeSummaryV1, MerkleStepV1, PackageStatusViewV1, PackageViewV4, ProofBundleV2,
-    QuarantineListV1, QuorumLabelV1, RevocationAuthorityV1, SseEnvelopeV2, SseEventKindV2,
-    WitnessBundleV1, WitnessVerificationV1, WitnessViewV1, MAX_REASON_CHARS, PROOF_BUNDLE_SCHEMA,
+    QuarantineListV1, QuorumLabelV1, RevocationAuthorityV1, SseEnvelopeV2, WitnessBundleV1,
+    WitnessVerificationV1, WitnessViewV1, MAX_REASON_CHARS, PROOF_BUNDLE_SCHEMA,
     QUARANTINE_LIST_SCHEMA, WITNESS_BUNDLE_SCHEMA,
 };
 use serde::Deserialize;
@@ -121,27 +121,6 @@ fn publication(chain: &ChainStore, record: &ChainRecord) -> Result<Option<(Block
             .is_some_and(|published| published.id.canonical() == canonical)
     });
     Ok(index.map(|index| (block, index)))
-}
-
-/// `v4_quorum` only for a publication that carries a committee certificate.
-fn quorum_label(tx: &Transaction) -> QuorumLabelV1 {
-    match tx {
-        Transaction::PublishAuthorizedV1 {
-            committee_qc: Some(_),
-            ..
-        } => QuorumLabelV1::V4Quorum,
-        _ => QuorumLabelV1::LegacyV3Quorum,
-    }
-}
-
-fn committee_summary(record: &ChainRecord) -> CommitteeSummaryV1 {
-    let effective_size = record
-        .analysis_committee
-        .as_ref()
-        .map(|committee| committee.effective_size)
-        .filter(|size| *size > 0)
-        .unwrap_or(record.analysis_effective_size);
-    CommitteeSummaryV1::from_votes(effective_size, &record.validator_signatures)
 }
 
 struct RevocationDetail {
@@ -251,7 +230,7 @@ fn status_from_leaf(
             height: leaf.height,
             expires_at_unix,
             reason_code,
-            committee: record.map(committee_summary),
+            committee: record.map(CommitteeSummaryV1::for_record),
         },
         StatusLeafStateV1::Revoked { certified } => {
             let detail = revocation_detail(chain, canonical, leaf, certified, record)?;
@@ -290,12 +269,12 @@ pub fn package_view(
     };
     let quorum = match &record {
         Some(record) => publication(chain, record)?
-            .map(|(block, index)| quorum_label(&block.transactions[index]))
+            .map(|(block, index)| QuorumLabelV1::for_publication(&block.transactions[index]))
             .unwrap_or(QuorumLabelV1::LegacyV3Quorum),
         None => QuorumLabelV1::LegacyV3Quorum,
     };
     let mut view = PackageViewV4::new(canonical, &content_hash, status.at(now_unix), quorum);
-    view.committee = record.as_ref().map(committee_summary);
+    view.committee = record.as_ref().map(CommitteeSummaryV1::for_record);
     view.witness_digests = chain
         .witnesses_for(canonical)?
         .into_iter()
@@ -464,7 +443,7 @@ pub fn proof_bundle(chain: &ChainStore, canonical: &str) -> Result<Option<ProofB
                 })
                 .collect(),
             publication_commit_signatures: publication_block.pbft_signatures.clone(),
-            quorum: quorum_label(&publication_block.transactions[tx_index]),
+            quorum: QuorumLabelV1::for_publication(&publication_block.transactions[tx_index]),
         }));
     }
     bail!("the chain advanced while the proof bundle was built; retry")
@@ -522,110 +501,6 @@ pub fn quarantine_list(
         packages,
         truncated,
     })
-}
-
-/// SSE v2 events for one committed block, in transaction order, ending with
-/// `block_committed` (whose `tx_index` is the transaction count). A witness
-/// carried by a revocation travels in that revocation's event, so every id
-/// names exactly one event and `Last-Event-ID` resume never splits a pair.
-pub fn block_events(block: &Block) -> Vec<SseEnvelopeV2> {
-    let height = block.header.height;
-    let mut events = Vec::new();
-    for (index, tx) in block.transactions.iter().enumerate() {
-        let event = match tx {
-            Transaction::Publish(record) | Transaction::PublishAuthorizedV1 { record, .. } => {
-                Some((
-                    SseEventKindV2::PackageVerified,
-                    record.id.canonical(),
-                    serde_json::json!({
-                        "content_hash": record.content_hash.trim().to_ascii_lowercase(),
-                        "quorum": quorum_label(tx),
-                    }),
-                ))
-            }
-            Transaction::QuarantineV1 {
-                record,
-                reason_code,
-                quorum_certificate,
-            } => Some((
-                SseEventKindV2::PackageQuarantined,
-                record.id.canonical(),
-                serde_json::json!({
-                    "content_hash": record.content_hash.trim().to_ascii_lowercase(),
-                    "reason_code": reason_code,
-                    "expires_at_unix": block
-                        .header
-                        .timestamp
-                        .timestamp()
-                        .saturating_add(CLASS_C_QUARANTINE_TTL_SECS),
-                    "certificate_digest": quorum_certificate.digest(),
-                }),
-            )),
-            Transaction::QuarantineResolutionV1 {
-                package_canonical,
-                content_hash,
-                outcome,
-                quorum_certificate,
-            } => Some((
-                SseEventKindV2::QuarantineResolved,
-                package_canonical.trim().to_string(),
-                serde_json::json!({
-                    "content_hash": content_hash.trim().to_ascii_lowercase(),
-                    "outcome": outcome,
-                    "certificate_digest": quorum_certificate.digest(),
-                }),
-            )),
-            Transaction::Revoke {
-                package_canonical,
-                reason,
-                ..
-            } => Some((
-                SseEventKindV2::PackageRevokedV2,
-                package_canonical.trim().to_string(),
-                serde_json::json!({
-                    "reason": DisplayText::bounded(reason, MAX_REASON_CHARS),
-                    "certificate_digest": null,
-                    "witness_digest": null,
-                }),
-            )),
-            Transaction::RevokeV2 {
-                request,
-                witness,
-                quorum_certificate,
-                ..
-            } => Some((
-                SseEventKindV2::PackageRevokedV2,
-                request.package_canonical.trim().to_string(),
-                serde_json::json!({
-                    "reason": DisplayText::bounded(&request.reason, MAX_REASON_CHARS),
-                    "certificate_digest": quorum_certificate.as_ref().map(|qc| qc.digest()),
-                    "witness_digest": witness.as_ref().map(|w| w.canonical_digest()),
-                }),
-            )),
-            _ => None,
-        };
-        if let Some((kind, canonical, data)) = event {
-            events.push(SseEnvelopeV2::new(
-                kind,
-                height,
-                u32::try_from(index).unwrap_or(u32::MAX),
-                Some(&canonical),
-                data,
-            ));
-        }
-    }
-    events.push(SseEnvelopeV2::new(
-        SseEventKindV2::BlockCommitted,
-        height,
-        u32::try_from(block.transactions.len()).unwrap_or(u32::MAX),
-        None,
-        serde_json::json!({
-            "block_hash": block.hash(),
-            "tx_count": block.transactions.len(),
-            "status_root": ProofBundleV2::status_root_from(block.header.status_root.as_ref()),
-        }),
-    ));
-    events
 }
 
 // ── HTTP handlers ────────────────────────────────────────────────────────────
@@ -820,7 +695,7 @@ impl SseCursor {
             let Some(block) = chain.get_block_by_height(height)? else {
                 break;
             };
-            for envelope in block_events(&block) {
+            for envelope in registry_view::block_events(&block) {
                 if self
                     .delivered_through
                     .is_some_and(|delivered| envelope.tx_index <= delivered)
@@ -960,7 +835,7 @@ mod tests {
                 }],
             ))
             .expect("quarantine");
-        let deadline = held.header.timestamp.timestamp() + CLASS_C_QUARANTINE_TTL_SECS;
+        let deadline = held.header.timestamp.timestamp() + common::CLASS_C_QUARANTINE_TTL_SECS;
         let list = quarantine_list(&fx.store, 10, now).expect("list");
         assert_eq!(list.packages.len(), 1);
         assert!(!list.truncated);
@@ -1220,7 +1095,7 @@ mod tests {
         ));
 
         // Block 4: advance past quarantine TTL -> deterministic expiry leaves status_transaction = None.
-        fx.commit(fx.block(30 + CLASS_C_QUARANTINE_TTL_SECS + 1, vec![]))
+        fx.commit(fx.block(30 + common::CLASS_C_QUARANTINE_TTL_SECS + 1, vec![]))
             .expect("expiry block");
         let expired_bundle = proof_bundle(&fx.store, &can_exp)
             .expect("bundle")
@@ -1253,11 +1128,17 @@ mod tests {
         let block = fx
             .commit(fx.block(10, vec![Transaction::Publish(rec.clone())]))
             .expect("publish");
-        let events = block_events(&block);
+        let events = registry_view::block_events(&block);
         let ids: Vec<&str> = events.iter().map(|event| event.id.as_str()).collect();
         assert_eq!(ids, vec!["1.0", "1.1"]);
-        assert_eq!(events[0].kind, SseEventKindV2::PackageVerified);
-        assert_eq!(events[1].kind, SseEventKindV2::BlockCommitted);
+        assert_eq!(
+            events[0].kind,
+            registry_view::SseEventKindV2::PackageVerified
+        );
+        assert_eq!(
+            events[1].kind,
+            registry_view::SseEventKindV2::BlockCommitted
+        );
         assert!(events[1].data["status_root"].is_string());
         let frame = events[0].to_sse_frame();
         assert!(frame.starts_with("id: 1.0\nevent: package_verified\ndata: {"));

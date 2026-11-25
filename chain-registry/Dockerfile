@@ -181,14 +181,17 @@ RUN cargo --version && rustc --version && \
 
 WORKDIR /build
 
-# All 19 workspace crate manifests for deterministic locked fetch.
+# Workspace crate manifests for deterministic locked fetch.
 COPY Cargo.toml Cargo.lock ./
 COPY crates/cli/Cargo.toml                  crates/cli/
 COPY crates/common/Cargo.toml               crates/common/
 COPY crates/common/build.rs                 crates/common/
 COPY crates/common/proto/                   crates/common/proto/
 COPY crates/consensus/Cargo.toml            crates/consensus/
-COPY crates/db-sync/Cargo.toml              crates/db-sync/
+COPY crates/indexer/Cargo.toml              crates/indexer/
+COPY crates/ai-config/Cargo.toml crates/ai-config/
+COPY crates/dev-cli/Cargo.toml crates/dev-cli/
+COPY crates/registry-view/Cargo.toml crates/registry-view/
 COPY crates/faucet/Cargo.toml               crates/faucet/
 COPY crates/gateway/Cargo.toml              crates/gateway/
 COPY crates/insurance/Cargo.toml            crates/insurance/
@@ -210,7 +213,10 @@ COPY crates/zone-ipc/Cargo.toml             crates/zone-ipc/
 RUN mkdir -p crates/cli/src                  && echo "fn main() {}"      > crates/cli/src/main.rs && \
     mkdir -p crates/common/src               && echo "pub fn _stub() {}" > crates/common/src/lib.rs && \
     mkdir -p crates/consensus/src            && echo "pub fn _stub() {}" > crates/consensus/src/lib.rs && \
-    mkdir -p crates/db-sync/src              && echo "pub fn _stub() {}" > crates/db-sync/src/lib.rs && \
+    mkdir -p crates/ai-config/src && echo "pub fn _stub() {}" > crates/ai-config/src/lib.rs && \
+    mkdir -p crates/dev-cli/src && echo "fn main() {}" > crates/dev-cli/src/main.rs && \
+    mkdir -p crates/registry-view/src && echo "pub fn _stub() {}" > crates/registry-view/src/lib.rs && \
+    mkdir -p crates/indexer/src              && echo "pub fn _stub() {}" > crates/indexer/src/lib.rs && \
     mkdir -p crates/faucet/src               && echo "fn main() {}"      > crates/faucet/src/main.rs && \
     mkdir -p crates/gateway/src              && echo "fn main() {}"      > crates/gateway/src/main.rs && \
     mkdir -p crates/insurance/src            && echo "pub fn _stub() {}" > crates/insurance/src/lib.rs && \
@@ -220,7 +226,6 @@ RUN mkdir -p crates/cli/src                  && echo "fn main() {}"      > crate
     mkdir -p crates/node/src/bin             && echo "pub fn _stub() {}" > crates/node/src/lib.rs && \
     echo "fn main() {}" > crates/node/src/main.rs && \
     echo "fn main() {}" > crates/node/src/bin/dump_openapi.rs && \
-    echo "fn main() {}" > crates/node/src/bin/creg_indexer.rs && \
     echo "fn main() {}" > crates/node/src/bin/creg_consensusd.rs && \
     echo "fn main() {}" > crates/node/src/bin/creg_node_supervisor.rs && \
     echo "fn main() {}" > crates/node/src/bin/creg_authority_rejection_fixture.rs && \
@@ -240,6 +245,7 @@ RUN cargo fetch --locked || (sleep 5 && cargo fetch --locked) || (sleep 10 && ca
 
 # Copy tracked compiler & runtime inputs (no circuits/ or models/ bloat).
 COPY crates/ crates/
+COPY migrations/ migrations/
 COPY config/ config/
 COPY rules/ rules/
 COPY validators/ validators/
@@ -266,11 +272,11 @@ RUN env -u RUSTFLAGS -u CARGO_ENCODED_RUSTFLAGS \
     cargo build --release --locked \
         --package chain-registry-node \
         --bin creg-node \
-        --bin creg-indexer \
         --bin creg-consensusd \
         --bin creg-node-supervisor \
         --bin creg_recovery_inspect \
         --features "${CREG_NODE_FEATURES}" && \
+    cargo build --release --locked --package creg-indexer && \
     cargo build --release --locked \
         --package validator \
         --bin creg-sandboxd \
@@ -374,6 +380,11 @@ USER 10004:10004
 ENTRYPOINT ["/app/creg-agent-runner"]
 
 # ── Target: `recovery-inspector` (Phase-C RocksDB & safety inspector) ────────
+FROM runtime-base AS creg-indexer
+COPY --from=builder --chown=10002:10002 /build/target/release/creg-indexer /app/creg-indexer
+USER 10002:10002
+ENTRYPOINT ["/app/creg-indexer"]
+
 FROM runtime-base AS recovery-inspector
 COPY --from=builder --chown=10002:10002 /build/target/release/creg_recovery_inspect /app/creg_recovery_inspect
 USER 10002:10002

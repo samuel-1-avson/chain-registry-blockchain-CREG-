@@ -16,7 +16,6 @@ mod chain_store;
 mod committee_qc;
 mod config;
 mod consensus_admission;
-mod db_sync_proxy;
 mod equivocation_monitor;
 mod events;
 mod explorer;
@@ -696,7 +695,6 @@ async fn main() -> Result<()> {
         // once so the first post-activation status_root covers every version.
         chain.rebuild_package_index()?;
     }
-    let chain_for_sync = chain.clone();
     let tip = chain.tip_height()?;
     tracing::info!("  chain tip:   height={}", tip);
     let mut pbft_engine = crate::state::PbftEngine::new();
@@ -967,35 +965,6 @@ async fn main() -> Result<()> {
 
     // â”€â”€ Spawn background tasks â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
     tracing::info!("Starting subsystems...");
-
-    // PostgreSQL sync worker (chain store â†’ PostgreSQL ETL)
-    // Default to the dedicated `creg-indexer` service so validators do not
-    // own both the consensus path and the explorer mirror path in the same
-    // process. Set CREG_PG_SYNC_IN_PROCESS=true to restore the legacy mode.
-    if !config.pg_url.is_empty() {
-        if std::env::var("CREG_PG_SYNC_IN_PROCESS").ok().as_deref() == Some("true") {
-            let sync_config = db_sync::sync_worker::SyncConfig {
-                poll_interval: std::time::Duration::from_secs(1),
-                pg_url: config.pg_url.clone(),
-                ..Default::default()
-            };
-            let chain_proxy: db_sync::sync_worker::ChainStoreHandle =
-                Arc::new(tokio::sync::RwLock::new(chain_for_sync));
-            match db_sync::SyncWorker::new(sync_config, chain_proxy).await {
-                Ok(worker) => {
-                    tokio::spawn(worker.run());
-                    tracing::info!("Legacy in-process PostgreSQL sync worker started");
-                }
-                Err(e) => {
-                    tracing::warn!("Failed to start PostgreSQL sync worker: {}", e);
-                }
-            }
-        } else {
-            tracing::info!(
-                "Skipping in-process PostgreSQL sync worker; run the dedicated creg-indexer service or set CREG_PG_SYNC_IN_PROCESS=true for legacy mode"
-            );
-        }
-    }
 
     tokio::spawn(sync::run(Arc::clone(&state)));
 

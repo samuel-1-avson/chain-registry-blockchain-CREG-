@@ -298,8 +298,6 @@ pub struct NodeConfig {
     pub vote_timeout_secs: u64,
     /// IPFS API base URL.
     pub ipfs_url: String,
-    /// PostgreSQL connection URL for the sync worker.
-    pub pg_url: String,
     /// The set of active validators (JSON-encoded).
     pub validator_set: common::ValidatorSet,
     /// Max peers for low-bandwidth environments
@@ -356,7 +354,6 @@ impl Default for NodeConfig {
             block_interval_secs: 0,
             vote_timeout_secs: 0,
             ipfs_url: String::new(),
-            pg_url: String::new(),
             validator_set: common::ValidatorSet::default(),
             max_peers: 0,
             cors: CorsConfig::default(),
@@ -474,7 +471,6 @@ impl NodeConfig {
             // See scaling discussion in docs and validator_pipeline.
             vote_timeout_secs: env("CREG_VOTE_TIMEOUT_SECS", "120").parse().unwrap_or(120),
             ipfs_url: env("CREG_IPFS_URL", "http://127.0.0.1:5001"),
-            pg_url: env("CREG_PG_URL", ""),
             validator_set: serde_json::from_str(&env("CREG_VALIDATOR_SET", "{\"validators\":[]}"))
                 .unwrap_or_else(|_| common::ValidatorSet::new(vec![])),
             max_peers,
@@ -1209,7 +1205,6 @@ mod tests {
             block_interval_secs: 5,
             vote_timeout_secs: 10,
             ipfs_url: "http://127.0.0.1:5001".into(),
-            pg_url: String::new(),
             validator_set: common::ValidatorSet::new(vec![]),
             max_peers: 15,
             cors: CorsConfig::default(),

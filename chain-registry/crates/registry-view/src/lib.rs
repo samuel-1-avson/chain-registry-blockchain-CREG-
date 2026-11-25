@@ -8,6 +8,8 @@
 //! Display data is never evidence: security decisions verify
 //! [`ProofBundleV2`] with the consensus verifiers.
 
+pub mod index;
+
 use common::status_tree::Hash32;
 use common::{
     AuthenticatedValidatorSetSnapshot, BlockHeader, BlockSignature, CommitteeQuorumCertificateV1,
@@ -47,6 +49,17 @@ pub enum QuorumLabelV1 {
 }
 
 impl QuorumLabelV1 {
+    /// `v4_quorum` only for a publication that carries a committee certificate.
+    pub fn for_publication(tx: &Transaction) -> Self {
+        match tx {
+            Transaction::PublishAuthorizedV1 {
+                committee_qc: Some(_),
+                ..
+            } => QuorumLabelV1::V4Quorum,
+            _ => QuorumLabelV1::LegacyV3Quorum,
+        }
+    }
+
     pub fn for_height(height: u64, activation_height: Option<u64>) -> Self {
         match activation_height {
             Some(activation) if height >= activation => Self::V4Quorum,
@@ -92,6 +105,16 @@ pub struct CommitteeSummaryV1 {
 }
 
 impl CommitteeSummaryV1 {
+    pub fn for_record(record: &common::ChainRecord) -> Self {
+        let size = record
+            .analysis_committee
+            .as_ref()
+            .map(|committee| committee.effective_size)
+            .filter(|size| *size > 0)
+            .unwrap_or(record.analysis_effective_size);
+        Self::from_votes(size, &record.validator_signatures)
+    }
+
     /// Summarise the recorded votes of a committee of `effective_size`.
     pub fn from_votes(effective_size: u32, votes: &[ValidatorSignature]) -> Self {
         let mut summary = Self {
@@ -693,6 +716,110 @@ impl SseEnvelopeV2 {
             payload
         )
     }
+}
+
+/// SSE v2 events for one committed block, in transaction order, ending with
+/// `block_committed` (whose `tx_index` is the transaction count). A witness
+/// carried by a revocation travels in that revocation's event, so every id
+/// names exactly one event and `Last-Event-ID` resume never splits a pair.
+pub fn block_events(block: &common::Block) -> Vec<SseEnvelopeV2> {
+    let height = block.header.height;
+    let mut events = Vec::new();
+    for (index, tx) in block.transactions.iter().enumerate() {
+        let event = match tx {
+            Transaction::Publish(record) | Transaction::PublishAuthorizedV1 { record, .. } => {
+                Some((
+                    SseEventKindV2::PackageVerified,
+                    record.id.canonical(),
+                    serde_json::json!({
+                        "content_hash": record.content_hash.trim().to_ascii_lowercase(),
+                        "quorum": QuorumLabelV1::for_publication(tx),
+                    }),
+                ))
+            }
+            Transaction::QuarantineV1 {
+                record,
+                reason_code,
+                quorum_certificate,
+            } => Some((
+                SseEventKindV2::PackageQuarantined,
+                record.id.canonical(),
+                serde_json::json!({
+                    "content_hash": record.content_hash.trim().to_ascii_lowercase(),
+                    "reason_code": reason_code,
+                    "expires_at_unix": block
+                        .header
+                        .timestamp
+                        .timestamp()
+                        .saturating_add(common::CLASS_C_QUARANTINE_TTL_SECS),
+                    "certificate_digest": quorum_certificate.digest(),
+                }),
+            )),
+            Transaction::QuarantineResolutionV1 {
+                package_canonical,
+                content_hash,
+                outcome,
+                quorum_certificate,
+            } => Some((
+                SseEventKindV2::QuarantineResolved,
+                package_canonical.trim().to_string(),
+                serde_json::json!({
+                    "content_hash": content_hash.trim().to_ascii_lowercase(),
+                    "outcome": outcome,
+                    "certificate_digest": quorum_certificate.digest(),
+                }),
+            )),
+            Transaction::Revoke {
+                package_canonical,
+                reason,
+                ..
+            } => Some((
+                SseEventKindV2::PackageRevokedV2,
+                package_canonical.trim().to_string(),
+                serde_json::json!({
+                    "reason": DisplayText::bounded(reason, MAX_REASON_CHARS),
+                    "certificate_digest": null,
+                    "witness_digest": null,
+                }),
+            )),
+            Transaction::RevokeV2 {
+                request,
+                witness,
+                quorum_certificate,
+                ..
+            } => Some((
+                SseEventKindV2::PackageRevokedV2,
+                request.package_canonical.trim().to_string(),
+                serde_json::json!({
+                    "reason": DisplayText::bounded(&request.reason, MAX_REASON_CHARS),
+                    "certificate_digest": quorum_certificate.as_ref().map(|qc| qc.digest()),
+                    "witness_digest": witness.as_ref().map(|w| w.canonical_digest()),
+                }),
+            )),
+            _ => None,
+        };
+        if let Some((kind, canonical, data)) = event {
+            events.push(SseEnvelopeV2::new(
+                kind,
+                height,
+                u32::try_from(index).unwrap_or(u32::MAX),
+                Some(&canonical),
+                data,
+            ));
+        }
+    }
+    events.push(SseEnvelopeV2::new(
+        SseEventKindV2::BlockCommitted,
+        height,
+        u32::try_from(block.transactions.len()).unwrap_or(u32::MAX),
+        None,
+        serde_json::json!({
+            "block_hash": block.hash(),
+            "tx_count": block.transactions.len(),
+            "status_root": ProofBundleV2::status_root_from(block.header.status_root.as_ref()),
+        }),
+    ));
+    events
 }
 
 #[cfg(test)]

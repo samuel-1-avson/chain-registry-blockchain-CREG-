@@ -90,8 +90,8 @@ impl Checkpoint {
 }
 
 /// Load the trust root independently of a node's proof response. The binary
-/// pins the signer; environment configuration selects the signed network.
-async fn load_verified_chain_spec() -> Result<ChainSpec> {
+/// pins the signer. Environment configuration selects the signed network.
+pub async fn load_verified_chain_spec() -> Result<ChainSpec> {
     let pinned = option_env!("CREG_SPEC_SIGNING_PUBKEY")
         .filter(|key| !key.trim().is_empty())
         .context("resolver has no binary-pinned CREG_SPEC_SIGNING_PUBKEY")?;
