@@ -255,6 +255,9 @@ COPY docker-compose*.yml ./
 
 # Optional committed-source manifest verification (Phase-C reproducible builds).
 COPY BUILD-SOURCE-MANIFEST.json* BUILD-SOURCE-FILES.sha256* ./
+# The checksum list covers every archived file, including this recipe, so the
+# recipe must be present in /build for `sha256sum -c` to pass.
+COPY Dockerfile ./
 RUN if [ -n "${SOURCE_MANIFEST_SHA256}" ]; then \
         test -n "${SOURCE_REVISION}" && \
         printf '%s  BUILD-SOURCE-MANIFEST.json\n' "${SOURCE_MANIFEST_SHA256}" | sha256sum -c - && \
