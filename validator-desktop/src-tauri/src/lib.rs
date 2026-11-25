@@ -7,7 +7,7 @@ use chain_client::{NodeOverview, PackageEvidenceBundle, SseStreamHandle};
 use registry_view::index::{CommitteeDiversityV1, QuarantineQueueV1};
 use runtime::{EnvironmentInfo, RuntimeMode, RuntimeState, RuntimeStatus};
 use std::path::PathBuf;
-use tauri::{AppHandle, State};
+use tauri::{AppHandle, Manager, State};
 use zone_ipc::ProviderProbeReportV1;
 use zones::DesktopDoctorReport;
 
@@ -186,6 +186,14 @@ pub fn run() {
     let runtime_state = RuntimeState::default();
     let sse_handle = SseStreamHandle::default();
     let result = tauri::Builder::default()
+        .setup(|app| {
+            if let Some(window) = app.get_webview_window("main") {
+                let _ = window.unminimize();
+                let _ = window.show();
+                let _ = window.set_focus();
+            }
+            Ok(())
+        })
         .manage(runtime_state)
         .manage(sse_handle)
         .invoke_handler(tauri::generate_handler![

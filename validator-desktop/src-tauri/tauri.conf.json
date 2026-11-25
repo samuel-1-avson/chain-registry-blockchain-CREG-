@@ -5,22 +5,26 @@
   "identifier": "dev.cregnet.validator-desktop",
   "build": {
     "beforeDevCommand": "npm.cmd run dev",
-    "devUrl": "http://localhost:1420",
+    "devUrl": "http://127.0.0.1:1420",
     "beforeBuildCommand": "npm.cmd run build",
     "frontendDist": "../dist"
   },
   "app": {
     "windows": [
       {
+        "label": "main",
         "title": "CREG Validator Node",
         "width": 1280,
         "height": 820,
         "minWidth": 960,
-        "minHeight": 640
+        "minHeight": 640,
+        "visible": true,
+        "center": true,
+        "focus": true
       }
     ],
     "security": {
-      "csp": "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src ipc: http://ipc.localhost https://ipc.localhost; object-src 'none'; base-uri 'none'; frame-ancestors 'none'"
+      "csp": "default-src 'self' http://tauri.localhost https://tauri.localhost; script-src 'self' http://tauri.localhost https://tauri.localhost; style-src 'self' 'unsafe-inline' http://tauri.localhost https://tauri.localhost; img-src 'self' data: http://tauri.localhost https://tauri.localhost; connect-src 'self' ipc: http://ipc.localhost https://ipc.localhost http://tauri.localhost https://tauri.localhost; object-src 'none'; base-uri 'none'; frame-ancestors 'none'"
     }
   },
   "bundle": {
