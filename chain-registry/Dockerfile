@@ -1,3 +1,4 @@
+# syntax=docker/dockerfile:1.7
 # Unified Reproducible Multi-Stage Build for Chain Registry Validator & Services
 # (ADR-018 Increment 7 / VNA-26 — single canonical container recipe).
 #
