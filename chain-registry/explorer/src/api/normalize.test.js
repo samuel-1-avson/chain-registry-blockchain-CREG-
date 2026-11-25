@@ -3,6 +3,8 @@ import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import {
   blockTxCount,
+  findingCategoryLabel,
+  formatViolationTitle,
   normalizeBlock,
   normalizeBlocks,
   normalizeTransaction,
@@ -80,8 +82,12 @@ test('quarantined publications are amber and unknown types are neutral', () => {
   assert.equal(held.package_status, 'quarantined')
   assert.deepEqual(txDisplayStatus(held, { finalized: true }), { label: 'quarantined', variant: 'warning' })
 
-  assert.deepEqual(txDisplayStatus({ type: 'quarantine_v1' }, { finalized: true }), { label: 'unknown', variant: 'muted' })
-  assert.deepEqual(txDisplayStatus({}, { finalized: true }), { label: 'unknown', variant: 'muted' })
+  assert.deepEqual(txDisplayStatus({ type: 'quarantine_v1' }, { finalized: true }), { label: 'quarantined', variant: 'warning' })
+  assert.deepEqual(txDisplayStatus({ type: 'quarantine_resolution_v1', resolution: 'released' }, { finalized: true }), { label: 'released', variant: 'success' })
+  assert.deepEqual(txDisplayStatus({ type: 'quarantine_resolution_v1', resolution: 'rejected' }, { finalized: true }), { label: 'rejected', variant: 'error' })
+  assert.deepEqual(txDisplayStatus({ type: 'quarantine_expiry' }, { finalized: true }), { label: 'revoked', variant: 'error' })
+  assert.deepEqual(txDisplayStatus({ type: 'future_unknown_tx_v9' }, { finalized: true }), { label: 'UNKNOWN', variant: 'muted' })
+  assert.deepEqual(txDisplayStatus({}, { finalized: true }), { label: 'UNKNOWN', variant: 'muted' })
 
   const published = normalizeBlock(liveBlock).transactions[0]
   assert.deepEqual(txDisplayStatus(published, { finalized: true }), { label: 'finalized', variant: 'success' })
@@ -96,4 +102,15 @@ test('package status variants never default to success', () => {
   for (const other of ['', 'neutral', 'quarantined_v2', undefined, null, 7, '__proto__', 'constructor']) {
     assert.equal(packageStatusVariant(other), 'muted', String(other))
   }
+})
+
+test('closed finding category and kernel violation dictionaries reject arbitrary text', () => {
+  assert.equal(findingCategoryLabel('credential_exfiltration'), 'Credential exfiltration')
+  assert.equal(findingCategoryLabel('<script>alert(1)</script>'), 'Unknown category')
+  assert.equal(formatViolationTitle({ code: 'KB-CANARY-EXFIL' }), 'Canary secret exfiltration')
+  assert.equal(
+    formatViolationTitle({ code: null, title: 'spoofed', unknown: 'UNKNOWN(deadbeef)' }),
+    'Unknown violation code (UNKNOWN(deadbeef))',
+  )
+  assert.equal(formatViolationTitle({ code: 'INJECTED', title: '<img src=x>' }), 'Unknown violation code')
 })

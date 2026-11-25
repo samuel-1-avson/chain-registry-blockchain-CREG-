@@ -4,16 +4,26 @@ import { TimeAgo } from '../components/TimeAgo.jsx'
 import { StatusBadge } from '../components/StatusBadge.jsx'
 import { EmptyState } from '../components/ErrorState.jsx'
 import { ShareButton } from '../components/ShareButton.jsx'
+import { UntrustedText } from '../components/UntrustedText.jsx'
 
 const KIND_COLOR = {
   block: 'info',
   new_block: 'info',
+  block_committed: 'info',
   'consensus-vote': 'warning',
   vote: 'warning',
   tx: 'success',
   publish: 'success',
   package: 'success',
+  package_verified: 'success',
+  quarantine_resolved: 'success',
+  bounty_awarded: 'success',
+  package_quarantined: 'warning',
+  quarantine_expired: 'error',
   revoke: 'error',
+  package_revoked: 'error',
+  package_revoked_v2: 'error',
+  witness_committed: 'error',
   bridge: 'muted',
   anchor: 'muted',
   slash: 'error',
@@ -225,9 +235,14 @@ function EventRow({ event: ev, showJson }) {
             </Link>
           )}
           {ev.canonical && (
-            <Link to={`/tx/${encodeURIComponent(ev.canonical)}`} style={{ color: 'var(--text-secondary)', fontFamily: 'var(--font-mono)', fontSize: 11, textDecoration: 'none' }}>
-              {ev.canonical}
+            <Link to={`/package/${encodeURIComponent(ev.canonical)}`} style={{ color: 'var(--text-secondary)', fontFamily: 'var(--font-mono)', fontSize: 11, textDecoration: 'none' }}>
+              <UntrustedText value={ev.canonical} maxGraphemes={96} />
             </Link>
+          )}
+          {ev.id && (
+            <span style={{ color: 'var(--text-tertiary)', fontFamily: 'var(--font-mono)', fontSize: 10 }}>
+              #{ev.id}
+            </span>
           )}
         </div>
         <TimeAgo timestamp={ev.ts || Date.now()} />
@@ -244,9 +259,9 @@ function EventRow({ event: ev, showJson }) {
         </pre>
       )}
 
-      {!showJson && ev.message && (
+      {!showJson && (ev.message || ev.reason) && (
         <div style={{ fontSize: 11, color: 'var(--text-secondary)', marginTop: 4 }}>
-          {ev.message}
+          <UntrustedText value={ev.message || ev.reason} maxGraphemes={128} />
         </div>
       )}
     </div>

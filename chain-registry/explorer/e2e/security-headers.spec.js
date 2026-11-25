@@ -24,7 +24,13 @@ function expectSecurityHeaders(response, label) {
     expect(headers[name], `${label}: ${name}`).toMatch(pattern)
   }
   const csp = headers['content-security-policy']
-  for (const directive of ["object-src 'none'", "base-uri 'none'", "frame-ancestors 'none'"]) {
+  for (const directive of [
+    "object-src 'none'",
+    "base-uri 'none'",
+    "frame-ancestors 'none'",
+    "require-trusted-types-for 'script'",
+    'trusted-types creg-default',
+  ]) {
     expect(csp, `${label}: ${directive}`).toContain(directive)
   }
   expect(csp, `${label}: no unsafe script sources`).not.toMatch(/script-src[^;]*'unsafe-(inline|eval)'/)

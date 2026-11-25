@@ -8,6 +8,7 @@ import {
   createSession,
   deleteSession,
   loadSession,
+  purgeExpiredSessions,
   setSessionCookie,
   type SessionVariables,
 } from "../middleware/session.js";
@@ -67,6 +68,7 @@ export function createAuthRoutes(options: AuthRouteOptions) {
     }
 
     purgeExpiredNonces(db);
+    purgeExpiredSessions(db);
     const normalized = normalizeAddress(address);
     const nonce = createNonceValue();
     const issuedAt = new Date().toISOString();
@@ -126,50 +128,49 @@ export function createAuthRoutes(options: AuthRouteOptions) {
     }
 
     if (siweMessage.domain !== siweDomain) {
-      return c.json({ error: "invalid_domain", message: "SIWE domain mismatch." }, 401);
+      return c.json(
+        { error: "authentication_failed", message: "Authentication failed." },
+        401,
+      );
     }
 
     if (siweMessage.chainId !== 11155111) {
-      return c.json({ error: "invalid_chain", message: "Switch to Sepolia." }, 401);
+      return c.json(
+        { error: "authentication_failed", message: "Authentication failed." },
+        401,
+      );
     }
 
-    const nonceRow = db.handle
+    // ECA-40: atomically consume the nonce BEFORE verifying the signature so
+    // concurrent or replayed submissions cannot both pass nonce validation.
+    const nowIso = new Date().toISOString();
+    const normalizedAddr = normalizeAddress(siweMessage.address);
+    const consume = db.handle
       .prepare(
-        `SELECT nonce, address, expires_at, consumed_at
-         FROM nonces
-         WHERE nonce = ?`,
+        `UPDATE nonces
+         SET consumed_at = ?
+         WHERE nonce = ? AND address = ? AND consumed_at IS NULL AND expires_at > ?`,
       )
-      .get(siweMessage.nonce) as
-      | {
-          nonce: string;
-          address: string;
-          expires_at: string;
-          consumed_at: string | null;
-        }
-      | undefined;
-
-    if (!nonceRow || nonceRow.consumed_at) {
-      return c.json({ error: "invalid_nonce", message: "Nonce expired or already used." }, 401);
-    }
-
-    if (Date.parse(nonceRow.expires_at) <= Date.now()) {
-      return c.json({ error: "invalid_nonce", message: "Nonce expired or already used." }, 401);
-    }
-
-    if (normalizeAddress(siweMessage.address) !== nonceRow.address) {
-      return c.json({ error: "invalid_nonce", message: "Nonce address mismatch." }, 401);
+      .run(nowIso, siweMessage.nonce, normalizedAddr, nowIso);
+    if (consume.changes !== 1) {
+      return c.json(
+        { error: "authentication_failed", message: "Authentication failed." },
+        401,
+      );
     }
 
     try {
-      await siweMessage.verify({ signature, domain: siweDomain, nonce: siweMessage.nonce });
-    } catch (error) {
-      const detail = error instanceof Error ? error.message : "Signature verification failed.";
-      return c.json({ error: "invalid_signature", message: detail }, 401);
+      await siweMessage.verify({
+        signature,
+        domain: siweDomain,
+        nonce: siweMessage.nonce,
+      });
+    } catch {
+      return c.json(
+        { error: "authentication_failed", message: "Authentication failed." },
+        401,
+      );
     }
-
-    db.handle
-      .prepare("UPDATE nonces SET consumed_at = ? WHERE nonce = ?")
-      .run(new Date().toISOString(), siweMessage.nonce);
 
     const session = createSession(db, siweMessage.address, sessionMaxAgeSec);
     setSessionCookie(c, session.id, sessionMaxAgeSec, secureCookies);

@@ -98,9 +98,13 @@ export function NetworkPage() {
                 </td>
                 <td>{probe.latencyMs}ms</td>
                 <td>
-                  <a href={probe.url} target="_blank" rel="noreferrer">
-                    {probe.url}
-                  </a>
+                  {probe.url ? (
+                    <a href={probe.url} target="_blank" rel="noreferrer">
+                      {probe.url}
+                    </a>
+                  ) : (
+                    <span>{probe.message ?? (probe.statusCode != null ? `HTTP ${probe.statusCode}` : "ok")}</span>
+                  )}
                 </td>
               </tr>
             ))}

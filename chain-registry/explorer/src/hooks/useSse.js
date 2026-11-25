@@ -22,14 +22,31 @@ const joinUrl = (base, path) => {
  * onEvent receives the parsed JSON payload (or raw string if not JSON).
  * Returns { state, lastEventAt, reconnectAttempt }.
  */
-const DEFAULT_EVENTS_PATH = NODE_ROUTE_MODE === 'legacy' ? '/v1/events' : '/v1/public/events'
-const REGISTRY_EVENTS = ['package_submitted', 'package_verified', 'package_rejected',
-  'package_revoked', 'block_produced', 'validator_voted']
+const DEFAULT_EVENTS_PATH = NODE_ROUTE_MODE === 'legacy' ? '/v1/events' : '/v1/index/events'
+const REGISTRY_EVENTS = [
+  // SSE v2 events (registry_view::SseEventKindV2)
+  'package_verified',
+  'package_quarantined',
+  'quarantine_resolved',
+  'quarantine_expired',
+  'package_revoked_v2',
+  'witness_committed',
+  'bounty_awarded',
+  'block_committed',
+  // Legacy v1 events
+  'package_submitted',
+  'package_rejected',
+  'package_revoked',
+  'block_produced',
+  'validator_voted',
+]
 
-export function useSse({ path = DEFAULT_EVENTS_PATH, onEvent, eventTypes = REGISTRY_EVENTS, enabled = true } = {}) {
+export function useSse({ path, onEvent, eventTypes = REGISTRY_EVENTS, enabled = true } = {}) {
   const [state, setState] = useState(enabled ? SSE_STATE.Connecting : SSE_STATE.Idle)
   const [lastEventAt, setLastEventAt] = useState(null)
   const [reconnectAttempt, setReconnectAttempt] = useState(0)
+  const [lastEventId, setLastEventId] = useState(null)
+  const lastEventIdRef = useRef(null)
   const onEventRef = useRef(onEvent)
   onEventRef.current = onEvent
 
@@ -44,15 +61,46 @@ export function useSse({ path = DEFAULT_EVENTS_PATH, onEvent, eventTypes = REGIS
     let reconnectTimer = null
     let staleTimer = null
     let lastActivityAt = 0
-    let resolvedPath = path
+    let resolvedPath = path || DEFAULT_EVENTS_PATH
 
-    const handlePayload = (raw, type) => {
+    const handlePayload = (raw, type, evtId) => {
       setLastEventAt(Date.now())
       lastActivityAt = Date.now()
       setState(SSE_STATE.Live)
       let parsed
       try { parsed = JSON.parse(raw) } catch { parsed = raw }
-      onEventRef.current?.(parsed, type)
+      const envelopeId = (evtId && String(evtId).trim())
+        || (parsed && typeof parsed === 'object' && typeof parsed.id === 'string' ? parsed.id : null)
+      if (envelopeId) {
+        lastEventIdRef.current = envelopeId
+        setLastEventId(envelopeId)
+      }
+      onEventRef.current?.(parsed, type, envelopeId)
+    }
+
+    const resolveEventsPath = async () => {
+      if (path || NODE_ROUTE_MODE !== 'auto') return path || DEFAULT_EVENTS_PATH
+      try {
+        await nodeFetch('/v1/index/quarantine-queue?limit=1')
+        return '/v1/index/events'
+      } catch {
+        // Indexer not mounted; check v4 node routes next.
+      }
+      try {
+        await nodeFetch('/v1/public/v4/quarantine?limit=1')
+        return '/v1/public/v4/events'
+      } catch {
+        // Fall through to v1 public health check.
+      }
+      try {
+        await nodeFetch('/v1/public/health')
+        return '/v1/public/events'
+      } catch (error) {
+        if (error instanceof ApiError && [404, 405, 501].includes(error.status)) {
+          return '/v1/events'
+        }
+        return '/v1/public/events'
+      }
     }
 
     const connect = async () => {
@@ -67,16 +115,14 @@ export function useSse({ path = DEFAULT_EVENTS_PATH, onEvent, eventTypes = REGIS
         reconnectTimer = setTimeout(connect, 30_000)
         return
       }
-      // Probe a finite public endpoint to select the event route. EventSource
-      // does not expose HTTP status codes to its error callback.
-      if (NODE_ROUTE_MODE === 'auto' && path === '/v1/public/events') {
-        try { await nodeFetch('/v1/public/health') }
-        catch (error) {
-          if (error instanceof ApiError && [404, 405, 501].includes(error.status)) resolvedPath = '/v1/events'
-        }
+      if (attempt === 0) {
+        resolvedPath = await resolveEventsPath()
       }
       if (cancelled) return
-      const url = joinUrl(API_BASE, resolvedPath)
+      const resumeSuffix = lastEventIdRef.current
+        ? `${resolvedPath.includes('?') ? '&' : '?'}after=${encodeURIComponent(lastEventIdRef.current)}`
+        : ''
+      const url = joinUrl(API_BASE, `${resolvedPath}${resumeSuffix}`)
       setState(SSE_STATE.Connecting)
 
       es = new EventSource(url)
@@ -88,9 +134,11 @@ export function useSse({ path = DEFAULT_EVENTS_PATH, onEvent, eventTypes = REGIS
         setLastEventAt(Date.now())
         lastActivityAt = Date.now()
       }
-      es.onmessage = (evt) => handlePayload(evt.data, 'message')
+      es.onmessage = (evt) => handlePayload(evt.data, 'message', evt.lastEventId)
       if (Array.isArray(eventTypes)) {
-        for (const t of eventTypes) es.addEventListener(t, (evt) => handlePayload(evt.data, t))
+        for (const t of eventTypes) {
+          es.addEventListener(t, (evt) => handlePayload(evt.data, t, evt.lastEventId))
+        }
       }
       es.onerror = () => {
         if (cancelled) return
@@ -123,5 +171,5 @@ export function useSse({ path = DEFAULT_EVENTS_PATH, onEvent, eventTypes = REGIS
     }
   }, [enabled, path, eventTypes?.join('|')])
 
-  return { state, lastEventAt, reconnectAttempt }
+  return { state, lastEventAt, reconnectAttempt, lastEventId }
 }

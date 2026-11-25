@@ -107,6 +107,15 @@ const joinUrl = (base, path) => {
   return `${base.replace(/\/$/, '')}${path}`
 }
 
+export function splitCanonicalForV4(canonical) {
+  const raw = String(canonical || '').trim()
+  const at = raw.lastIndexOf('@')
+  if (at > 0 && at < raw.length - 1) {
+    return { name: raw.slice(0, at), version: raw.slice(at + 1) }
+  }
+  return null
+}
+
 export async function nodeFetch(path, { signal, method = 'GET', body, headers = {} } = {}) {
   const url = joinUrl(API_BASE, path)
   if (isObserverUnavailable() && path.startsWith('/v1/')) {
@@ -190,6 +199,101 @@ export const nodeApi = {
     groupedNodeFetch(
       `/v1/public/packages/${encodeURIComponent(canonical)}/intelligence`,
       `/v1/packages/${encodeURIComponent(canonical)}/intelligence`,
+      { signal },
+    ),
+  packageV4: (canonical, signal) => {
+    const parts = splitCanonicalForV4(canonical)
+    if (!parts) return Promise.resolve({ __endpointStatus: { kind: 'endpoint-unavailable', statusCode: 400 } })
+    return optionalGroupedNodeFetch(
+      `/v1/public/v4/packages/${encodeURIComponent(parts.name)}/${encodeURIComponent(parts.version)}/status`,
+      null,
+      () => ({}),
+      {
+        feature: 'v4 package status',
+        message: 'v4 package status is not available on this node.',
+      },
+      { signal },
+    )
+  },
+  packageWitnesses: (canonical, signal) => {
+    const parts = splitCanonicalForV4(canonical)
+    if (!parts) return Promise.resolve({ witnesses: [] })
+    return optionalGroupedNodeFetch(
+      `/v1/public/v4/packages/${encodeURIComponent(parts.name)}/${encodeURIComponent(parts.version)}/witnesses`,
+      null,
+      () => ({ schema: 'creg.witness-bundle.v1', canonical, witnesses: [] }),
+      {
+        feature: 'Class B trigger witnesses',
+        message: 'Trigger witness proofs are not available on this node.',
+      },
+      { signal },
+    )
+  },
+  packageEvidenceHistory: (canonical, { limit = 50, before } = {}, signal) => {
+    const q = new URLSearchParams()
+    q.set('limit', String(limit))
+    if (before != null) q.set('before', String(before))
+    return optionalGroupedNodeFetch(
+      `/v1/index/packages/${encodeURIComponent(canonical)}/evidence-history?${q.toString()}`,
+      null,
+      () => ({ canonical, entries: [], next_before: null }),
+      {
+        feature: 'Indexed evidence history',
+        message: 'Evidence timeline requires the standalone indexer.',
+      },
+      { signal },
+    )
+  },
+  quarantineQueue: async ({ limit = 50 } = {}, signal) => {
+    const q = `limit=${encodeURIComponent(String(limit))}`
+    try {
+      return await groupedNodeFetch(`/v1/index/quarantine-queue?${q}`, null, { signal })
+    } catch {
+      const fallback = await optionalGroupedNodeFetch(
+        `/v1/public/v4/quarantine?${q}`,
+        null,
+        () => ({ server_time_unix: Math.floor(Date.now() / 1000), entries: [], truncated: false }),
+        {
+          feature: 'Quarantine queue',
+          message: 'Quarantine queue is not available yet.',
+        },
+        { signal },
+      )
+      if (Array.isArray(fallback.entries)) return fallback
+      return {
+        server_time_unix: Math.floor(Date.now() / 1000),
+        truncated: Boolean(fallback.truncated),
+        entries: (fallback.packages || []).map((pkg) => ({
+          canonical: pkg.canonical,
+          content_hash: pkg.content_hash,
+          reason_code: pkg.status?.reason_code || 'other',
+          opened_height: pkg.status?.height,
+          expires_at_unix: pkg.status?.expires_at_unix ?? 0,
+          committee: pkg.status?.committee || pkg.committee,
+        })),
+      }
+    }
+  },
+  committeeDiversity: (epoch = 0, signal) =>
+    optionalGroupedNodeFetch(
+      `/v1/index/committee-diversity?epoch=${encodeURIComponent(String(epoch))}`,
+      null,
+      () => ({}),
+      {
+        feature: 'Committee diversity',
+        message: 'Committee diversity metrics require the standalone indexer.',
+      },
+      { signal },
+    ),
+  bountyLeaderboard: ({ limit = 50 } = {}, signal) =>
+    optionalGroupedNodeFetch(
+      `/v1/index/bounties/leaderboard?limit=${encodeURIComponent(String(limit))}`,
+      null,
+      () => ({ entries: [], truncated: false }),
+      {
+        feature: 'Discovery bounty leaderboard',
+        message: 'Bounty leaderboard requires the standalone indexer.',
+      },
       { signal },
     ),
 

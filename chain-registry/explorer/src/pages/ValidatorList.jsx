@@ -5,6 +5,8 @@ import { Hash } from '../components/Hash.jsx'
 import { SkeletonRow } from '../components/Skeleton.jsx'
 import { ErrorState } from '../components/ErrorState.jsx'
 import { StatusBadge } from '../components/StatusBadge.jsx'
+import { CommitteeTelemetryPanel } from '../components/CommitteeTelemetryPanel.jsx'
+import { UntrustedText } from '../components/UntrustedText.jsx'
 import { formatWei } from '../utils/format.js'
 
 export default function ValidatorList() {
@@ -21,6 +23,7 @@ export default function ValidatorList() {
         <h1 style={{ margin: 0, fontSize: 20 }}>Validators</h1>
         <span style={{ color: 'var(--text-tertiary)', fontSize: 12 }}>{list.length} total</span>
       </header>
+      <CommitteeTelemetryPanel />
       <div className="ce-card" style={{ padding: 0, overflow: 'hidden' }}>
         <table className="ce-table">
           <thead>
@@ -43,7 +46,14 @@ export default function ValidatorList() {
                 return (
                   <tr key={addr || i}>
                     <td><Hash value={addr} kind="validator" start={8} end={6} /></td>
-                    <td style={{ color: 'var(--text-secondary)' }}>{v.alias || '—'}</td>
+                    <td style={{ color: 'var(--text-secondary)' }}>
+                      {v.alias ? <UntrustedText value={v.alias} maxGraphemes={48} /> : '—'}
+                      {v.capabilities?.ai_mode && (
+                        <div style={{ fontSize: 10, color: 'var(--text-tertiary)', marginTop: 2 }}>
+                          Self-reported: <UntrustedText value={v.capabilities.ai_mode} maxGraphemes={32} label="self-reported" />
+                        </div>
+                      )}
+                    </td>
                     <td style={{ fontFamily: 'var(--font-mono)' }}>{stakeDisplay}</td>
                     <td><StatusBadge variant={status === 'Active' ? 'success' : 'warning'}>{status}</StatusBadge></td>
                     <td><Hash value={nodeId} start={6} end={4} showCopy={false} /></td>

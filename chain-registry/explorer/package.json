@@ -8,7 +8,8 @@
     "build": "vite build",
     "preview": "vite preview",
     "gen-types": "node scripts/gen-types.mjs",
-    "test:unit": "node --test src/api/normalize.test.js rpc-allowlist.test.js",
+    "lint": "node --test src/utils/untrustedText.test.js",
+    "test:unit": "node --test src/api/normalize.test.js src/utils/untrustedText.test.js rpc-allowlist.test.js",
     "test:e2e": "playwright test",
     "test:e2e:install": "playwright install --with-deps chromium",
     "test:lighthouse": "lhci autorun"

@@ -50,6 +50,7 @@ COPY --from=builder /app/dist /usr/share/nginx/html
 # in deployments. It must never be the edge's api.../sepolia route: that route
 # forwards back into this gateway, and the edge refuses the loop (HTTP 508).
 ENV CREG_NODE_UPSTREAM=node:8080 \
+    CREG_INDEXER_UPSTREAM=indexer:8090 \
     CREG_SEPOLIA_RPC_UPSTREAM=https://ethereum-sepolia-rpc.publicnode.com/ \
     CREG_SEPOLIA_RPC_HOST=ethereum-sepolia-rpc.publicnode.com \
     NGINX_ENVSUBST_FILTER=^CREG_

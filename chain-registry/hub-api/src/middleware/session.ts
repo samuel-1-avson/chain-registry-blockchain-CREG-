@@ -55,6 +55,13 @@ export function deleteSession(db: HubDatabase, sessionId: string): void {
   db.handle.prepare("DELETE FROM sessions WHERE id = ?").run(sessionId);
 }
 
+export function purgeExpiredSessions(db: HubDatabase): number {
+  const result = db.handle
+    .prepare("DELETE FROM sessions WHERE expires_at <= ?")
+    .run(new Date().toISOString());
+  return result.changes;
+}
+
 export function loadSession(
   db: HubDatabase,
   sessionId: string,

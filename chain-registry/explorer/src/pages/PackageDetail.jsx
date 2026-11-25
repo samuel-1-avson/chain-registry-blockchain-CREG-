@@ -7,10 +7,15 @@ import { SkeletonCard } from '../components/Skeleton.jsx'
 import { ErrorState, EmptyState } from '../components/ErrorState.jsx'
 import { StatusBadge } from '../components/StatusBadge.jsx'
 import { PackageIntelligencePanel } from '../components/PackageIntelligencePanel.jsx'
+import { PackageEvidenceTimeline } from '../components/PackageEvidenceTimeline.jsx'
+import { WitnessInspector } from '../components/WitnessInspector.jsx'
+import { UntrustedText } from '../components/UntrustedText.jsx'
 import { packageStatusVariant } from '../api/normalize.js'
 
 const TABS = [
   { id: 'overview', label: 'Overview' },
+  { id: 'evidence', label: 'Evidence & Timeline' },
+  { id: 'witnesses', label: 'Trigger Witnesses' },
   { id: 'analysis', label: 'Deep Analysis' },
 ]
 
@@ -45,14 +50,18 @@ export default function PackageDetail() {
         </div>
         {isRevoked && p.revocation_reason && (
           <p role="status" style={{ color: 'var(--accent-error)', fontSize: 12, marginTop: 'var(--space-2)' }}>
-            Revocation reason: {p.revocation_reason}
+            Revocation reason: <UntrustedText value={p.revocation_reason} maxGraphemes={256} expandable />
           </p>
         )}
         {isQuarantined && (
           <p role="status" style={{ color: 'var(--accent-warning)', fontSize: 12, marginTop: 'var(--space-2)' }}>
             Quarantined for committee review — not installable.
             {quarantineExpiry ? ` Fails closed to revoked at ${quarantineExpiry} unless released.` : ''}
-            {p.quarantine_reason ? ` Reason: ${p.quarantine_reason}` : ''}
+            {p.quarantine_reason ? (
+              <>
+                {' '}Reason: <UntrustedText value={p.quarantine_reason} maxGraphemes={256} expandable />
+              </>
+            ) : ''}
           </p>
         )}
       </header>
@@ -105,6 +114,10 @@ export default function PackageDetail() {
           </details>
         </>
       )}
+
+      {tab === 'evidence' && <PackageEvidenceTimeline canonical={canonical} />}
+
+      {tab === 'witnesses' && <WitnessInspector canonical={canonical} />}
 
       {tab === 'analysis' && <PackageIntelligencePanel canonical={canonical} />}
     </div>

@@ -13,6 +13,8 @@ const NAV = [
   { to: '/pending', label: 'Pending' },
   { to: '/validators', label: 'Validators' },
   { to: '/packages', label: 'Packages' },
+  { to: '/quarantine', label: 'Quarantine' },
+  { to: '/bounties', label: 'Bounties' },
   { to: '/consensus', label: 'Consensus' },
   { to: '/bridge', label: 'Bridge' },
   { to: '/events', label: 'Events' },

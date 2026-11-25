@@ -36,6 +36,8 @@ import NotFound from './pages/NotFound.jsx'
 import WalletPage from './pages/WalletPage.jsx'
 import PublisherDashboard from './pages/PublisherDashboard.jsx'
 import PublisherProfile from './pages/PublisherProfile.jsx'
+import QuarantineQueue from './pages/QuarantineQueue.jsx'
+import BountyLeaderboard from './pages/BountyLeaderboard.jsx'
 
 const EVENT_BUFFER_CAP = 500
 
@@ -71,22 +73,42 @@ if (typeof document !== 'undefined') {
 }
 
 function ExplorerShell() {
-  const stats = useChainStats(4000)
   const [events, setEvents] = useState([])
+  const [sseTick, setSseTick] = useState(0)
+  const [quarantineTick, setQuarantineTick] = useState(0)
+  const seenIdsRef = useRef(new Set())
   const eventsRef = useRef(events)
   eventsRef.current = events
 
-  const handleEvent = useCallback((event, eventType) => {
+  const handleEvent = useCallback((event, eventType, envelopeId) => {
     if (!event || typeof event !== 'object') return
-    const payload = event.payload && typeof event.payload === 'object'
-      ? event.payload
-      : event
-    const kind = eventType || event.kind || event.type || 'event'
+    const payload = event.data && typeof event.data === 'object'
+      ? event.data
+      : (event.payload && typeof event.payload === 'object' ? event.payload : event)
+    const kind = (eventType && eventType !== 'message' ? eventType : null) || event.kind || event.type || 'event'
+    const id = envelopeId || event.id || null
+    if (id) {
+      if (seenIdsRef.current.has(id)) return
+      seenIdsRef.current.add(id)
+      if (seenIdsRef.current.size > EVENT_BUFFER_CAP * 2) {
+        const first = seenIdsRef.current.values().next().value
+        seenIdsRef.current.delete(first)
+      }
+    }
     const stamped = {
       ...payload,
+      id,
+      height: event.height ?? payload.height,
+      canonical: event.canonical ?? payload.canonical,
       kind,
       type: kind,
       ts: payload.ts || event.ts || new Date().toISOString(),
+    }
+    if (kind === 'block_committed' || kind === 'block_produced') {
+      setSseTick((n) => n + 1)
+    }
+    if (kind === 'package_quarantined' || kind === 'quarantine_resolved' || kind === 'quarantine_expired') {
+      setQuarantineTick((n) => n + 1)
     }
     setEvents((prev) => {
       const next = [stamped, ...prev]
@@ -96,6 +118,7 @@ function ExplorerShell() {
   }, [])
 
   const sse = useSse({ onEvent: handleEvent })
+  const stats = useChainStats({ sseState: sse.state, sseTick })
 
   const layoutProps = useMemo(() => ({
     sseState: sse.state,
@@ -118,6 +141,8 @@ function ExplorerShell() {
             <Route path="/validators" element={<ValidatorList />} />
             <Route path="/packages" element={<PackageList />} />
             <Route path="/package/:id" element={<PackageDetail />} />
+            <Route path="/quarantine" element={<QuarantineQueue sseState={sse.state} sseTick={quarantineTick} />} />
+            <Route path="/bounties" element={<BountyLeaderboard />} />
             <Route path="/wallet" element={<WalletPage />} />
             <Route path="/publisher" element={<PublisherDashboard />} />
             <Route path="/publisher/:pubkey" element={<PublisherProfile />} />

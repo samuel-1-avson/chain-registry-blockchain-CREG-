@@ -3,7 +3,11 @@ import { Hono } from "hono";
 import { HubDatabase } from "./db/index.js";
 import { rateLimit } from "./middleware/rateLimit.js";
 import { singleFlightCache } from "./status/singleFlight.js";
-import { sessionMiddleware, type SessionVariables } from "./middleware/session.js";
+import {
+  purgeExpiredSessions,
+  sessionMiddleware,
+  type SessionVariables,
+} from "./middleware/session.js";
 import { createAuthRoutes } from "./routes/auth.js";
 import { createContributionRoutes } from "./routes/contributions.js";
 import { ContributionService } from "./contributions/service.js";
@@ -31,8 +35,8 @@ const siweDomain =
   process.env.HUB_SIWE_DOMAIN ?? process.env.CREG_PUBLIC_JOIN_HOST ?? "testnet.cregnet.dev";
 const siweUri =
   process.env.HUB_SIWE_URI ?? `https://${siweDomain.replace(/^https?:\/\//, "")}`;
-const secureCookies =
-  process.env.HUB_COOKIE_SECURE !== "false" && process.env.NODE_ENV === "production";
+const secureCookies = process.env.HUB_COOKIE_SECURE !== "false";
+const indexerApiUrl = (process.env.HUB_INDEXER_URL ?? "").trim();
 const statusRateLimitWindowMs = Number(
   process.env.HUB_STATUS_RATE_WINDOW_MS ?? "60000",
 );
@@ -154,6 +158,51 @@ if (hubDb.getState() === "ready") {
 }
 
 const publicStatus = singleFlightCache(statusCacheTtlMs, buildPublicStatus);
+const publicIndexSummary = singleFlightCache(statusCacheTtlMs, buildIndexSummary);
+
+const SESSION_PURGE_INTERVAL_MS = 15 * 60 * 1000;
+if (hubDb.getState() === "ready") {
+  setInterval(() => {
+    try {
+      purgeExpiredSessions(hubDb);
+      hubDb.handle
+        .prepare("DELETE FROM nonces WHERE expires_at <= ?")
+        .run(new Date().toISOString());
+    } catch (error) {
+      console.error("hub-api periodic purge failed:", error);
+    }
+  }, SESSION_PURGE_INTERVAL_MS).unref();
+}
+
+const indexRateLimit = rateLimit({
+  windowMs: statusRateLimitWindowMs,
+  max: statusRateLimitMax,
+  keyPrefix: "index-read",
+});
+
+app.get(
+  "/api/v1/index/summary",
+  indexRateLimit,
+  async (c) => {
+    c.header("Cache-Control", `public, max-age=${Math.floor(statusCacheTtlMs / 1000)}`);
+    return c.json(await publicIndexSummary.get());
+  },
+);
+
+app.get("/api/v1/index/quarantine-queue", indexRateLimit, async (c) => {
+  const limit = parseBoundedInt(c.req.query("limit"), 25, 1, 200);
+  return proxyIndexerJson(c, `/v1/index/quarantine-queue?limit=${limit}`);
+});
+
+app.get("/api/v1/index/bounties/leaderboard", indexRateLimit, async (c) => {
+  const limit = parseBoundedInt(c.req.query("limit"), 25, 1, 200);
+  return proxyIndexerJson(c, `/v1/index/bounties/leaderboard?limit=${limit}`);
+});
+
+app.get("/api/v1/index/committee-diversity", indexRateLimit, async (c) => {
+  const epoch = parseBoundedInt(c.req.query("epoch"), 0, 0, Number.MAX_SAFE_INTEGER);
+  return proxyIndexerJson(c, `/v1/index/committee-diversity?epoch=${epoch}`);
+});
 
 app.get(
   "/api/status/public",
@@ -373,4 +422,81 @@ function pickString(
   if (typeof value === "string") return value;
   if (typeof value === "number" && Number.isFinite(value)) return String(value);
   return null;
+}
+
+function parseBoundedInt(
+  raw: string | undefined,
+  fallback: number,
+  min: number,
+  max: number,
+): number {
+  if (!raw || !/^\d+$/.test(raw.trim())) return fallback;
+  const n = Number(raw.trim());
+  if (!Number.isSafeInteger(n)) return fallback;
+  return Math.min(Math.max(n, min), max);
+}
+
+async function proxyIndexerJson(
+  c: import("hono").Context,
+  pathAndQuery: string,
+) {
+  if (!indexerApiUrl) {
+    return c.json(
+      { error: "indexer_unavailable", message: "Indexer service unavailable." },
+      503,
+    );
+  }
+  const result = await fetchJsonProbe("indexer", joinUrl(indexerApiUrl, pathAndQuery));
+  if (!result.probe.ok || !result.data) {
+    return c.json(
+      { error: "indexer_unavailable", message: "Indexer service unavailable." },
+      503,
+    );
+  }
+  c.header("Cache-Control", `public, max-age=${Math.floor(statusCacheTtlMs / 1000)}`);
+  return c.json(result.data);
+}
+
+async function buildIndexSummary() {
+  const checkedAt = new Date().toISOString();
+  if (!indexerApiUrl) {
+    return {
+      available: false,
+      checkedAt,
+      serverTimeUnix: null as number | null,
+      quarantineCount: null as number | null,
+      activeQuarantines: [] as unknown[],
+      bountyProvers: [] as unknown[],
+      committeeDiversity: null as unknown,
+    };
+  }
+  const [quarantineRes, leaderboardRes, diversityRes] = await Promise.all([
+    fetchJsonProbe(
+      "indexer_quarantine",
+      joinUrl(indexerApiUrl, "/v1/index/quarantine-queue?limit=25"),
+    ),
+    fetchJsonProbe(
+      "indexer_bounties",
+      joinUrl(indexerApiUrl, "/v1/index/bounties/leaderboard?limit=10"),
+    ),
+    fetchJsonProbe(
+      "indexer_diversity",
+      joinUrl(indexerApiUrl, "/v1/index/committee-diversity?epoch=0"),
+    ),
+  ]);
+  const qData = asRecord(quarantineRes.data);
+  const qEntries = Array.isArray(qData.entries) ? qData.entries : [];
+  const bData = asRecord(leaderboardRes.data);
+  const bEntries = Array.isArray(bData.entries) ? bData.entries : [];
+  const available =
+    quarantineRes.probe.ok || leaderboardRes.probe.ok || diversityRes.probe.ok;
+  return {
+    available,
+    checkedAt,
+    serverTimeUnix: pickNumber(qData, "server_time_unix"),
+    quarantineCount: quarantineRes.probe.ok ? qEntries.length : null,
+    activeQuarantines: qEntries.slice(0, 5),
+    bountyProvers: bEntries.slice(0, 5),
+    committeeDiversity: diversityRes.probe.ok ? diversityRes.data : null,
+  };
 }

@@ -1,5 +1,6 @@
 export type UpstreamProbe = {
   name: string;
+  url?: string;
   ok: boolean;
   statusCode?: number;
   latencyMs: number;
@@ -42,4 +43,50 @@ export async function fetchPublicStatus(
   }
 
   return (await response.json()) as PublicStatus;
+}
+
+export type IndexQuarantinePreview = {
+  canonical: string;
+  reason_code: string;
+  expires_at_unix: number;
+};
+
+export type IndexBountyProverPreview = {
+  prover_address: string;
+  awards: number;
+  prover_bonus_wei: string;
+  committee_reserved_wei: string;
+};
+
+export type IndexDiversityPreview = {
+  epoch: number;
+  observations: number;
+  hybrid_signers: number;
+  classical_signers: number;
+  model_families: Array<{ model_family: string; votes: number }>;
+};
+
+export type IndexSummary = {
+  available: boolean;
+  checkedAt: string;
+  serverTimeUnix: number | null;
+  quarantineCount: number | null;
+  activeQuarantines: IndexQuarantinePreview[];
+  bountyProvers: IndexBountyProverPreview[];
+  committeeDiversity: IndexDiversityPreview | null;
+};
+
+export async function fetchIndexSummary(
+  signal?: AbortSignal,
+): Promise<IndexSummary | null> {
+  try {
+    const response = await fetch("/api/v1/index/summary", {
+      headers: { accept: "application/json" },
+      signal,
+    });
+    if (!response.ok) return null;
+    return (await response.json()) as IndexSummary;
+  } catch {
+    return null;
+  }
 }
