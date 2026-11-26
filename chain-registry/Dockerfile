@@ -398,6 +398,15 @@ USER 65532:65532
 EXPOSE 8082
 ENTRYPOINT ["/app/faucet"]
 
+# ── Target: `relayer-runtime` (ADR-019 l1-tx relayer) ────────────────────────
+# Needs a writable RELAYER_DATA_DIR for the sled journal; /data is created and
+# owned by 10002 in runtime-base.
+FROM runtime-base AS relayer-runtime
+COPY --from=builder --chown=10002:10002 /build/target/release/creg-relayer /app/creg-relayer
+USER 10002:10002
+EXPOSE 8083
+ENTRYPOINT ["/app/creg-relayer"]
+
 FROM runtime-base AS recovery-inspector
 COPY --from=builder --chown=10002:10002 /build/target/release/creg_recovery_inspect /app/creg_recovery_inspect
 USER 10002:10002

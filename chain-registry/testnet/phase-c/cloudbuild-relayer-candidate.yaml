@@ -1,0 +1,43 @@
+substitutions:
+  _IMAGE: ""
+  _SOURCE_REVISION: ""
+  _SOURCE_MANIFEST_SHA256: ""
+  _SOURCE_DATE_EPOCH: ""
+
+steps:
+  - id: build-committed-r7-relayer
+    name: gcr.io/cloud-builders/docker
+    env:
+      - DOCKER_BUILDKIT=1
+    args:
+      - build
+      - --file
+      - Dockerfile
+      - --target
+      - relayer-runtime
+      - --build-arg
+      - SOURCE_REVISION=${_SOURCE_REVISION}
+      - --build-arg
+      - SOURCE_MANIFEST_SHA256=${_SOURCE_MANIFEST_SHA256}
+      - --build-arg
+      - SOURCE_DATE_EPOCH=${_SOURCE_DATE_EPOCH}
+      - --tag
+      - ${_IMAGE}
+      - .
+
+  - id: record-relayer-binary-hash
+    name: gcr.io/cloud-builders/docker
+    args:
+      - run
+      - --rm
+      - --entrypoint=/usr/bin/sha256sum
+      - ${_IMAGE}
+      - /app/creg-relayer
+
+images:
+  - ${_IMAGE}
+
+timeout: 14400s
+options:
+  diskSizeGb: "100"
+  logging: CLOUD_LOGGING_ONLY
