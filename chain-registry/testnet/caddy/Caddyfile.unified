@@ -55,6 +55,17 @@ import hub.caddy
 		respond `{"service":"CREG Blockchain JSON-RPC","network":"creg-testnet","methods":["creg_chainId","creg_blockNumber","creg_getBlockByNumber","creg_health"],"sepoliaL1Gateway":"https://{$CREG_PUBLIC_API_HOST}/sepolia"}` 200
 	}
 
+	# 2c. Indexer read model (/v1/index/*) -> standalone creg-indexer.
+	# Plain `handle`, not `handle_path`: the indexer serves the full
+	# /v1/index/... path itself, so the prefix must not be stripped.
+	handle /v1/index/* {
+		reverse_proxy {$CREG_INDEXER_UPSTREAM:creg-indexer:8084} {
+			lb_policy first
+			fail_duration 5s
+			max_fails 2
+		}
+	}
+
 	# 3. CREG Node REST API (/v1/*) & Health -> Dedicated Observer VM
 	handle /v1/* {
 		reverse_proxy {$CREG_PUBLIC_NODE_UPSTREAM:creg-phase-c-r7-o1:8080} {
