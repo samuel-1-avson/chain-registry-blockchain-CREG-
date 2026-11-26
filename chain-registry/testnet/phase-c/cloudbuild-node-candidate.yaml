@@ -47,7 +47,7 @@ steps:
 images:
   - ${_IMAGE}
 
-timeout: 7200s
+timeout: 14400s
 options:
   diskSizeGb: "100"
   logging: CLOUD_LOGGING_ONLY
