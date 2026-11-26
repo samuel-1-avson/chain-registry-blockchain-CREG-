@@ -52,6 +52,8 @@ secrets/
 # SEC-301b: hot-key loader crate (source only — not credential files)
 !crates/secrets/
 !crates/secrets/**
+# ADR-019 ECA-13: argv secret-input guard (source only — matches *secret* above)
+!crates/cli/src/secret_input.rs
 !.gitignore
 
 # =============================================================================

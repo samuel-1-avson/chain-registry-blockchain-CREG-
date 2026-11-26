@@ -454,12 +454,14 @@ fn extract_binary(asset_name: &str, bytes: &[u8], staging: &Path) -> Result<Path
     }
 }
 
-fn set_executable(_path: &Path) -> Result<()> {
+fn set_executable(path: &Path) -> Result<()> {
     #[cfg(unix)]
     {
         use std::os::unix::fs::PermissionsExt;
         fs::set_permissions(path, fs::Permissions::from_mode(0o755))?;
     }
+    #[cfg(not(unix))]
+    let _ = path;
     Ok(())
 }
 
