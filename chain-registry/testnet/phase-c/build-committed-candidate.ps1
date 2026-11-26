@@ -4,7 +4,7 @@ param(
     [string]$Revision = 'a19fce7dcbd917fa1650212485807ab1b7bae1c1',
     [ValidatePattern('^[a-z0-9][a-z0-9._/-]*:[a-zA-Z0-9_][a-zA-Z0-9_.-]{0,127}$')]
     [string]$ImageTag = 'creg-node:phase-c-a19fce7-rust193',
-    [ValidateSet('node-runtime', 'node-cli', 'recovery-inspector', 'faucet-runtime')]
+    [ValidateSet('node-runtime', 'node-cli', 'recovery-inspector', 'faucet-runtime', 'creg-indexer')]
     [string]$Target = 'node-runtime',
     [string]$StagingDirectory = '',
     [string]$EvidenceDirectory = '',
@@ -90,6 +90,7 @@ Copy-Item -LiteralPath $phaseCRecipe -Destination (Join-Path $phaseCContext $pha
 $phaseCCloudBuildName = switch ($Target) {
     'node-runtime'   { 'cloudbuild-node-candidate.yaml' }
     'faucet-runtime' { 'cloudbuild-faucet-candidate.yaml' }
+    'creg-indexer'   { 'cloudbuild-indexer-candidate.yaml' }
     default          { 'cloudbuild-committed-candidate.yaml' }
 }
 $phaseCCloudBuild = Join-Path $PSScriptRoot $phaseCCloudBuildName
