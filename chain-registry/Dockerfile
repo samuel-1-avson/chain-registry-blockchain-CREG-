@@ -389,6 +389,15 @@ COPY --from=builder --chown=10002:10002 /build/target/release/creg-indexer /app/
 USER 10002:10002
 ENTRYPOINT ["/app/creg-indexer"]
 
+# ── Target: `faucet-runtime` (public faucet, ADR-019 claim signing) ───────────
+# UID 65532 matches the deployed faucet container; the service keeps no local
+# state (PostgreSQL only), so the image needs no writable volume.
+FROM runtime-base AS faucet-runtime
+COPY --from=builder --chown=65532:65532 /build/target/release/faucet /app/faucet
+USER 65532:65532
+EXPOSE 8082
+ENTRYPOINT ["/app/faucet"]
+
 FROM runtime-base AS recovery-inspector
 COPY --from=builder --chown=10002:10002 /build/target/release/creg_recovery_inspect /app/creg_recovery_inspect
 USER 10002:10002

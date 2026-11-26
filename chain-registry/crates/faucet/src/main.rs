@@ -2842,7 +2842,9 @@ async fn main() -> anyhow::Result<()> {
 
     let reconciliation_state = Arc::clone(&state);
     tokio::spawn(async move {
-        let mut retry_delay = Duration::from_secs(300);
+        // Recover from transient gateway throttling promptly: the first retry is
+        // deliberately short, then the ladder doubles to the existing 900 s cap.
+        let mut retry_delay = Duration::from_secs(15);
         loop {
             let result = async {
                 sync_claims_with_signer_ledger(&reconciliation_state).await?;
@@ -2855,7 +2857,7 @@ async fn main() -> anyhow::Result<()> {
                     reconciliation_state
                         .ledger_reconciled
                         .store(true, Ordering::Release);
-                    retry_delay = Duration::from_secs(300);
+                    retry_delay = Duration::from_secs(15);
                     tokio::time::sleep(Duration::from_secs(60)).await;
                 }
                 Err(err) => {
