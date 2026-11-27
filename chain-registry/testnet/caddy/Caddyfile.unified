@@ -40,9 +40,12 @@ import hub.caddy
 	}
 
 	# 2. CREG Blockchain JSON-RPC (POST /rpc or POST /jsonrpc) -> Dedicated Observer VM
+	# OPTIONS goes to the node too, so a browser's CORS preflight is answered by
+	# the node's CORS layer (CREG_CORS_ALLOWED_ORIGINS) rather than by the
+	# descriptor below, which carries no CORS headers.
 	@creg_rpc_path path /rpc* /jsonrpc*
 	handle @creg_rpc_path {
-		@jsonrpc_post method POST
+		@jsonrpc_post method POST OPTIONS
 		handle @jsonrpc_post {
 			reverse_proxy {$CREG_PUBLIC_NODE_UPSTREAM:creg-phase-c-r7-o1:8080} {
 				lb_policy first
@@ -52,7 +55,7 @@ import hub.caddy
 			}
 		}
 		header Content-Type application/json
-		respond `{"service":"CREG Blockchain JSON-RPC","network":"creg-testnet","methods":["creg_chainId","creg_blockNumber","creg_getBlockByNumber","creg_health"],"sepoliaL1Gateway":"https://{$CREG_PUBLIC_API_HOST}/sepolia"}` 200
+		respond `{"service":"CREG Blockchain JSON-RPC","network":"creg-testnet","methods":["creg_chainId","creg_blockNumber","creg_getBlockByNumber","creg_health","creg_syncing"],"sepoliaL1Gateway":"https://{$CREG_PUBLIC_API_HOST}/sepolia"}` 200
 	}
 
 	# 2c. Indexer read model (/v1/index/*) -> standalone creg-indexer.

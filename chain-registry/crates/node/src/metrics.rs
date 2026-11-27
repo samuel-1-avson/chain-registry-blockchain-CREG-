@@ -21,6 +21,10 @@
 //   creg_equivocation_detection_enabled, creg_equivocation_evidence,
 //   creg_equivocation_tracked_votes, creg_equivocation_pending_votes,
 //   creg_equivocation_votes_rejected_total, creg_equivocation_persist_failures_total
+//
+// Native JSON-RPC (json_rpc.rs):
+//   creg_rpc_requests_total{method,outcome}, creg_rpc_request_duration_seconds_total{method},
+//   creg_rpc_rejected_total{reason}, creg_rpc_batches_total, creg_rpc_notifications_total
 
 use crate::NodeState;
 use std::sync::Arc;
@@ -620,12 +624,15 @@ pub async fn render(state: Arc<RwLock<NodeState>>) -> String {
         1.0,
     );
 
+    // Native JSON-RPC (POST /rpc): calls, latency and refusals.
+    crate::json_rpc::render_metrics(&mut out);
+
     out
 }
 
 /// Seconds between the tip block's header timestamp and `now`, clamped at zero
 /// so a proposer clock slightly ahead of ours never reports a negative age.
-fn tip_age_seconds(
+pub(crate) fn tip_age_seconds(
     tip_timestamp: chrono::DateTime<chrono::Utc>,
     now: chrono::DateTime<chrono::Utc>,
 ) -> i64 {
