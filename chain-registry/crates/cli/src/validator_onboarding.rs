@@ -768,7 +768,7 @@ async fn authorize(
         HeaderValue::from_static("nosniff"),
     );
     headers.insert("content-security-policy", HeaderValue::from_static(
-        "default-src 'none'; script-src 'self'; style-src 'self'; connect-src 'self'; base-uri 'none'; frame-ancestors 'none'; form-action 'none'"
+        "default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self' data:; connect-src 'self'; base-uri 'none'; frame-ancestors 'none'; form-action 'none'"
     ));
     response
 }
@@ -1702,5 +1702,74 @@ mod tests {
 
         enrollment.abort();
         server.abort();
+    }
+
+    #[tokio::test]
+    async fn serves_multi_wallet_picker_assets_and_csp() {
+        let key = SigningKey::from_bytes(&[31; 32]);
+        let config = browser_config("fixture-validator".into(), &key).unwrap();
+        let http = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let origin = format!("http://{}", http.local_addr().unwrap());
+        let state = Enrollment {
+            signing_key: Arc::new(key),
+            client: Client::new(),
+            network: Url::parse("http://127.0.0.1:1").unwrap(),
+            local_node: Url::parse("http://127.0.0.1:1").unwrap(),
+            config,
+            origin: origin.clone(),
+            session: "fixture-session".into(),
+            nonce: "fixture-nonce".into(),
+            vote_height: Arc::new(Mutex::new(None)),
+            launcher: None,
+            launch_status: Arc::new(Mutex::new("idle")),
+        };
+        let router = app(state);
+        let enrollment = tokio::spawn(async move { axum::serve(http, router).await.unwrap() });
+        let client = Client::new();
+
+        let index_resp = client.get(format!("{origin}/")).send().await.unwrap();
+        assert_eq!(index_resp.status(), StatusCode::OK);
+        let csp = index_resp
+            .headers()
+            .get("content-security-policy")
+            .unwrap()
+            .to_str()
+            .unwrap()
+            .to_string();
+        assert!(csp.contains("img-src 'self' data:"), "unexpected csp: {csp}");
+        let html = index_resp.text().await.unwrap();
+        assert!(html.contains("id=\"wallet-list\""));
+        assert!(html.contains("id=\"switch-account\""));
+        assert!(html.contains("id=\"rescan-wallets\""));
+
+        let js = client
+            .get(format!("{origin}/onboarding.js"))
+            .send()
+            .await
+            .unwrap()
+            .error_for_status()
+            .unwrap()
+            .text()
+            .await
+            .unwrap();
+        assert!(js.contains("eip6963:announceProvider"));
+        assert!(js.contains("eip6963:requestProvider"));
+        assert!(js.contains("wallet_requestPermissions"));
+        assert!(js.contains("normalizeWalletName"));
+
+        let css = client
+            .get(format!("{origin}/onboarding.css"))
+            .send()
+            .await
+            .unwrap()
+            .error_for_status()
+            .unwrap()
+            .text()
+            .await
+            .unwrap();
+        assert!(css.contains(".wallet-list"));
+        assert!(css.contains(".wallet-option"));
+
+        enrollment.abort();
     }
 }

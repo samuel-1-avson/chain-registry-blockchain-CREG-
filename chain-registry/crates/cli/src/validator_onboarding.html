@@ -17,7 +17,13 @@
     <p id="status" class="notice" role="status">Checking the R7 network…</p>
     <section>
       <h2>Wallet</h2>
-      <button id="connect" disabled>Connect wallet</button>
+      <p id="wallet-hint" class="wallet-hint">Detecting browser wallets…</p>
+      <div id="wallet-list" class="wallet-list" role="radiogroup" aria-label="Detected browser wallets"></div>
+      <div class="actions">
+        <button id="connect" disabled>Connect wallet</button>
+        <button id="switch-account" class="secondary" hidden disabled>Switch account</button>
+        <button id="rescan-wallets" class="secondary" type="button">Rescan wallets</button>
+      </div>
       <p id="wallet" class="mono"></p>
       <p id="balance"></p>
       <a id="faucet" href="https://faucet.testnet.cregnet.dev" target="_blank" rel="noopener noreferrer">Open tCREG faucet</a>
