@@ -119,8 +119,9 @@ for eco in ecosystems:
                     fh.update(chunk)
             h.update(f"f {rel} {size} {fh.hexdigest()}\n".encode("utf-8"))
     manifest["ecosystems"][eco] = {
-        "tree_sha256": h.hexdigest(),
-        "regular_file_count": reg_count,
+        "sha256": h.hexdigest(),
+        "file_count": reg_count,
+        "base_image": f"creg-rootfs-{eco}:pinned",
     }
 
 with open(os.path.join(root, "rootfs-digests.json"), "w", encoding="utf-8") as out:

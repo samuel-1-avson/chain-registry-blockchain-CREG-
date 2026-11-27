@@ -28,6 +28,33 @@ export type RuntimeStatus = {
   last_error: string | null;
 };
 
+export type R7AdmissionSummary = {
+  stage: string;
+  stage_reason: string;
+  l1_approvals_collected: number;
+  l1_approvals_required: number;
+  transition_approvals_collected: number;
+  transition_approvals_required: number;
+  l1_tx_status: string;
+  l1_tx_hash: string | null;
+  l1_confirmed_block: number | null;
+  voting_activation_height: number | null;
+  first_finalized_vote_height: number | null;
+  missing_signer_setup: string[];
+  unavailable_reason: string | null;
+};
+
+export type R7RuntimeStatus = {
+  node_id: string;
+  container_state: string;
+  health: {
+    is_validator: boolean;
+    synced: boolean;
+    finalized_height: number;
+  } | null;
+  admission: R7AdmissionSummary | null;
+};
+
 export type ZoneCapabilitiesV1 =
   | {
       kind: "gateway";
@@ -255,6 +282,8 @@ export function isTauriRuntime(): boolean {
 
 export const desktopApi = {
   detectEnvironment: () => invoke<EnvironmentInfo>("detect_environment"),
+  openValidatorOnboarding: () => invoke<void>("open_validator_onboarding"),
+  getR7RuntimeStatus: () => invoke<R7RuntimeStatus[]>("get_r7_runtime_status"),
   getRuntimeStatus: (mode?: RuntimeMode, composeFile?: string) =>
     invoke<RuntimeStatus>("get_runtime_status", { mode, composeFile }),
   startValidator: (args: {

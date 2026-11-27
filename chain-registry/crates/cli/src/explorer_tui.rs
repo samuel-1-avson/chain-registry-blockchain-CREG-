@@ -456,6 +456,11 @@ fn palette_commands() -> &'static [PaletteCommand] {
             hint: "8",
         },
         PaletteCommand {
+            id: "validator-onboarding",
+            label: "Join R7 as a validator",
+            hint: "",
+        },
+        PaletteCommand {
             id: "consensus",
             label: "Go to PBFT consensus",
             hint: "9",
@@ -2526,6 +2531,24 @@ fn execute_palette_id(app: &mut App, id: &str) -> bool {
         "mempool" => app.current_view = View::Mempool,
         "events" => app.current_view = View::Events,
         "operator" => app.current_view = View::Operator,
+        "validator-onboarding" => {
+            let launched = std::env::current_exe().and_then(|binary| {
+                std::process::Command::new(binary)
+                    .args(["validator", "onboard"])
+                    .env_remove("CREG_NODE_URL")
+                    .stdin(std::process::Stdio::null())
+                    .stdout(std::process::Stdio::null())
+                    .stderr(std::process::Stdio::null())
+                    .spawn()
+            });
+            match launched {
+                Ok(mut child) => {
+                    std::thread::spawn(move || { let _ = child.wait(); });
+                    app.push_toast(ToastKind::Info, "Opening R7 validator onboarding in your browser");
+                }
+                Err(error) => app.push_toast(ToastKind::Error, format!("Could not open validator onboarding: {error}")),
+            }
+        }
         "consensus" => app.current_view = View::Consensus,
         "faucet" => app.current_view = View::Faucet,
         "preflight" => app.current_view = View::Preflight,
@@ -4739,10 +4762,8 @@ fn draw_operator(f: &mut Frame, app: &App, area: Rect) {
     let commands = Paragraph::new(vec![
         Line::from("Browser explorer:  http://localhost:3007"),
         Line::from("Node health:        creg testnet status --node-url http://localhost:8080"),
-        Line::from(
-            "Register ID:        creg testnet register-validator --node-id <id> --pubkey <key>",
-        ),
-        Line::from("Validator actions:  use an external wallet/CLI; this console stays read-only"),
+        Line::from("Join R7:            press : and select Join R7 as a validator"),
+        Line::from("CLI onboarding:     creg validator onboard"),
         Line::from("Diagnostics:        press p for preflight, x to export a redacted report"),
     ])
     .block(

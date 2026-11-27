@@ -990,9 +990,26 @@ impl ChainStore {
         validator_id: &str,
         validator_pubkey: &str,
     ) -> Result<()> {
-        if self.pbft_safety_journal.get().is_some() {
-            anyhow::bail!("PBFT safety journal was already initialized");
-        }
+        self.initialize_pbft_safety_journal_at_height(
+            genesis_hash,
+            validator_id,
+            validator_pubkey,
+            None,
+        )
+    }
+
+    /// Initialize the durable PBFT signing journal. When `certified_activation_height`
+    /// is `Some(h)` (`h > 0`), a synced observer activating for the first time
+    /// at a certified transition height may create its fresh journal provided no
+    /// journal/binding previously existed and no canonical block already carries
+    /// a PBFT vote from this identity.
+    pub fn initialize_pbft_safety_journal_at_height(
+        &self,
+        genesis_hash: &str,
+        validator_id: &str,
+        validator_pubkey: &str,
+        certified_activation_height: Option<u64>,
+    ) -> Result<()> {
         let binding = serde_json::to_vec(&(
             genesis_hash.trim_start_matches("0x").to_ascii_lowercase(),
             validator_id,
@@ -1007,6 +1024,9 @@ impl ChainStore {
         {
             anyhow::bail!("chain storage is bound to another PBFT signing identity");
         }
+        if self.pbft_safety_journal.get().is_some() {
+            return Ok(());
+        }
         let existing_journal = self.data_dir.join("pbft-safety.rocksdb").exists();
         let journal = if existing_binding.is_some() || existing_journal {
             crate::pbft_safety::PbftSigningJournal::open_existing(
@@ -1016,8 +1036,33 @@ impl ChainStore {
                 validator_pubkey,
             )?
         } else {
-            if self.tip_height()? != 0 || self.block_count() != 1 {
-                anyhow::bail!("nonempty validator chain lacks its original signing journal; refusing to recreate locks");
+            let tip = self.tip_height()?;
+            if tip != 0 || self.block_count() != 1 {
+                let Some(activation_height) = certified_activation_height.filter(|&h| h > 0) else {
+                    anyhow::bail!("nonempty validator chain lacks its original signing journal; refusing to recreate locks");
+                };
+                let normalized_pk = validator_pubkey
+                    .trim_start_matches("0x")
+                    .to_ascii_lowercase();
+                for h in 1..=tip {
+                    if let Some(block) = self.get_block_by_height(h)? {
+                        let already_signed = block.pbft_signatures.iter().any(|sig| {
+                            sig.validator_id == validator_id
+                                || sig.pubkey.eq_ignore_ascii_case(&normalized_pk)
+                        });
+                        if already_signed {
+                            anyhow::bail!(
+                                "nonempty validator chain already contains votes from {validator_id} at height {h} without a signing journal"
+                            );
+                        }
+                    }
+                }
+                tracing::info!(
+                    validator_id = %validator_id,
+                    activation_height,
+                    tip,
+                    "Initializing fresh PBFT safety journal for newly certified validator admission"
+                );
             }
             crate::pbft_safety::PbftSigningJournal::open(
                 &self.data_dir,
@@ -1032,9 +1077,8 @@ impl ChainStore {
         options.set_sync(true);
         self.db
             .put_opt(PBFT_JOURNAL_BINDING_KEY, binding, &options)?;
-        self.pbft_safety_journal
-            .set(Arc::new(journal))
-            .map_err(|_| anyhow::anyhow!("PBFT safety journal initialization raced"))
+        let _ = self.pbft_safety_journal.set(Arc::new(journal));
+        Ok(())
     }
 
     pub fn pbft_safety_journal(&self) -> Result<Arc<crate::pbft_safety::PbftSigningJournal>> {
@@ -1549,9 +1593,11 @@ impl ChainStore {
             .context("cf blocks_by_hash")?;
         let body_already_stored =
             if let Some(existing_bytes) = self.db.get_cf(&cf_hash, hash.as_bytes())? {
-                let existing_block: Block = serde_json::from_slice(&existing_bytes)
+                let mut existing_block: Block = serde_json::from_slice(&existing_bytes)
                     .context("decode block body stored under existing header hash")?;
-                if existing_block.hash() != hash
+                let existing_hash = existing_block.hash();
+                existing_block.header.view_change_certificate.clear();
+                if existing_hash != hash
                     || serde_json::to_value((&existing_block.header, &existing_block.transactions))?
                         != canonical_payload
                 {
@@ -5200,5 +5246,54 @@ mod tests {
             let tip_val = store.db.get_cf(&cf_pub, PUB_IDX_TIP_KEY).unwrap().unwrap();
             assert_eq!(u64::from_be_bytes(tip_val.try_into().unwrap()), 2);
         }
+    }
+
+    #[test]
+    fn rebuild_package_index_preserves_block_with_view_change_certificate() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let store = ChainStore::open(dir.path()).expect("open");
+        let genesis = store.get_block_by_height(0).expect("genesis").unwrap();
+
+        let txs = vec![Transaction::Publish(publish_record("vc-replay-pkg"))];
+        let mut blk = Block {
+            header: common::BlockHeader {
+                height: 1,
+                prev_hash: genesis.hash(),
+                merkle_root: common::merkle_root(&txs),
+                proposer_id: "validator-2".into(),
+                timestamp: genesis.header.timestamp + chrono::Duration::seconds(10),
+                validator_set_hash: genesis.header.validator_set_hash.clone(),
+                vrf_output: None,
+                vrf_proof: None,
+                view_number: 1,
+                view_change_certificate: vec![common::ViewChangeVote {
+                    height: 1,
+                    prev_hash: genesis.hash(),
+                    new_view: 1,
+                    validator_id: "validator-2".into(),
+                    prepared: None,
+                    signature: "sig-bytes".into(),
+                }],
+                status_root: None,
+            },
+            transactions: txs,
+            pbft_signatures: vec![],
+        };
+
+        store.insert_block(&blk).expect("insert block with view-change cert");
+        // Idempotent replay of the exact stored block (and with an empty cert) must succeed.
+        store.insert_block(&blk).expect("idempotent insert must succeed");
+        blk.header.view_change_certificate.clear();
+        store
+            .insert_block(&blk)
+            .expect("idempotent insert without cert must succeed");
+
+        store
+            .rebuild_package_index()
+            .expect("rebuild_package_index must replay blocks carrying view_change_certificate");
+        assert!(store
+            .get_package("npm:vc-replay-pkg@1.0.0")
+            .expect("read package")
+            .is_some());
     }
 }

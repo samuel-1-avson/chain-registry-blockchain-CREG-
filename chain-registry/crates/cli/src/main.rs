@@ -40,6 +40,7 @@ mod stake;
 mod supply_chain;
 mod testnet;
 mod update;
+mod validator_onboarding;
 mod validator_ops;
 mod verify;
 mod watch;
@@ -591,6 +592,46 @@ enum AiCommands {
 
 #[derive(Subcommand, Debug, Clone)]
 enum ValidatorCommands {
+    /// Open guided R7 wallet staking and dual-signed validator registration.
+    Onboard {
+        /// Existing operator node ID. Omit to derive an ID from the local validator key.
+        #[arg(long)]
+        node_id: Option<String>,
+
+        /// Existing runtime Ed25519 key file. The default is managed in your home directory.
+        #[arg(long, value_name = "PATH")]
+        key_file: Option<std::path::PathBuf>,
+
+        /// Override the automatically detected local validator HTTP origin.
+        #[arg(long, value_name = "URL")]
+        local_node_url: Option<String>,
+
+        /// Print the local session link without opening it.
+        #[arg(long)]
+        no_browser: bool,
+    },
+    /// Show live validator admission progress, approvals, Sepolia tx, activation height, and first vote.
+    Status {
+        /// Public or validator node HTTP URL (defaults to https://api.testnet.cregnet.dev or --node-url).
+        #[arg(long, value_name = "URL")]
+        node_url: Option<String>,
+
+        /// Optional local validator/observer HTTP URL to inspect alongside the network API.
+        #[arg(long, value_name = "URL")]
+        local_node_url: Option<String>,
+
+        /// Filter to a specific applicant EVM address (0x...).
+        #[arg(long)]
+        applicant: Option<String>,
+
+        /// Filter to a specific validator node ID (e.g. ext-val-...).
+        #[arg(long)]
+        node_id: Option<String>,
+
+        /// Emit machine-readable JSON.
+        #[arg(long)]
+        json: bool,
+    },
     /// Probe Gateway, Consensus, Sandbox, and AgentRunner zones via ZoneRequest::Capabilities.
     Doctor {
         /// Show detailed per-zone capability summaries.
@@ -1288,6 +1329,38 @@ async fn run(cli: Cli) -> Result<()> {
         Commands::Validator { command } => {
             let global_json = matches!(cli.output, OutputFormat::Json);
             match command {
+                ValidatorCommands::Onboard {
+                    node_id,
+                    key_file,
+                    local_node_url,
+                    no_browser,
+                } => {
+                    validator_onboarding::run(
+                        node_id,
+                        key_file,
+                        cli.node_url,
+                        local_node_url,
+                        no_browser,
+                    )
+                    .await?;
+                }
+                ValidatorCommands::Status {
+                    node_url,
+                    local_node_url,
+                    applicant,
+                    node_id,
+                    json,
+                } => {
+                    let effective_url = node_url.or(cli.node_url);
+                    validator_onboarding::show_status(
+                        effective_url.as_deref(),
+                        local_node_url.as_deref(),
+                        applicant.as_deref(),
+                        node_id.as_deref(),
+                        json || global_json,
+                    )
+                    .await?;
+                }
                 ValidatorCommands::Doctor {
                     zones,
                     operator_key_file,
@@ -1696,7 +1769,7 @@ async fn run(cli: Cli) -> Result<()> {
             }
         },
         Commands::Init => {
-            wizard::run().await?;
+            wizard::run(cli.node_url).await?;
         }
         Commands::ChainSpec { command } => {
             chain_spec::run(command).await?;
@@ -1826,6 +1899,26 @@ mod tests {
             Commands::Validator {
                 command: ValidatorCommands::Doctor {
                     zones: true,
+                    json: true,
+                    ..
+                }
+            }
+        ));
+
+        let val_status = Cli::try_parse_from([
+            "creg",
+            "validator",
+            "status",
+            "--node-id",
+            "ext-val-test",
+            "--json",
+        ])
+        .unwrap();
+        assert!(matches!(
+            val_status.command,
+            Commands::Validator {
+                command: ValidatorCommands::Status {
+                    node_id: Some(_),
                     json: true,
                     ..
                 }

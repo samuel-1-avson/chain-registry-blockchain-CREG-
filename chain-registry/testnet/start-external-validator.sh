@@ -2,8 +2,8 @@
 # ==============================================================================
 # Chain Registry (CREG) — Independent External Validator Launch Script
 # ==============================================================================
-# This script enables ANY independent operator to join the decentralized CREG
-# testnet as a full validator on their own server, cloud VM, or bare-metal host.
+# Launch an external validator for the coordinated R7 testnet. Voting requires
+# on-chain admission through the validator onboarding checklist.
 # ==============================================================================
 
 set -euo pipefail
@@ -26,10 +26,82 @@ if ! command -v docker >/dev/null 2>&1; then
 fi
 
 NODE_ID="${NODE_ID:-ext-val-primary}"
-ETH_RPC="${ETH_RPC:-https://ethereum-sepolia-rpc.publicnode.com}"
+ETH_RPC="${ETH_RPC:-${CREG_ETH_RPC:-https://sepolia.gateway.tenderly.co}}"
 HTTP_PORT="${HTTP_PORT:-8080}"
 P2P_PORT="${P2P_PORT:-9000}"
 CUSTOM_KEY="${CUSTOM_KEY:-}"
+CHAIN_ID="creg-phase-c-testnet-2026-09-26-r7"
+SPEC_URL="https://spec.testnet.cregnet.dev/phase-c/r7/chain-spec.json"
+CONTAINER_NAME="creg-validator-$NODE_ID"
+CREG_ONBOARDING_KEY_FILE="${CREG_ONBOARDING_KEY_FILE:-}"
+HTTP_BIND="$HTTP_PORT"
+if [ -n "$CREG_ONBOARDING_KEY_FILE" ]; then
+    EXISTING_CONTAINERS=$(docker container ls -a --format '{{.Names}}')
+    EXPECTED_LABEL="$CHAIN_ID/$CREG_ONBOARDING_PUBLIC_KEY"
+    if printf '%s\n' "$EXISTING_CONTAINERS" | grep -Fxq "$CONTAINER_NAME"; then
+        MATCHING_CONTAINERS=$(docker container ls -a --filter "label=dev.creg.validator=$EXPECTED_LABEL" --format '{{.Names}}')
+        if ! printf '%s\n' "$MATCHING_CONTAINERS" | grep -Fxq "$CONTAINER_NAME"; then
+            echo "Container $CONTAINER_NAME belongs to another configuration. Review it before starting this validator." >&2
+            exit 1
+        fi
+        docker start "$CONTAINER_NAME"
+        exit 0
+    fi
+    HTTP_BIND="127.0.0.1:"
+    if [ "$HTTP_PORT" != 0 ]; then
+        HTTP_BIND="127.0.0.1:$HTTP_PORT"
+    fi
+
+    # The enrollment key stays on the host while the observer syncs R7.
+    SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+    PROFILE="$SCRIPT_DIR/phase-c/r7/observer.docker-env"
+    REPO_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
+    SCANNER_DIR="$REPO_ROOT/docs/testnet-heal-evidence/2026-09-27-production-pipeline-cutover/scanner-r14-ansi-regex-bundle"
+    if [ ! -f "$PROFILE" ] || [ ! -f "$SCANNER_DIR/rules/supply_chain.yar" ] ||
+        [ ! -f "$SCANNER_DIR/known_malicious_hashes.json" ] || [ ! -f "$SCANNER_DIR/osv_snapshot.json" ]; then
+        echo "The reviewed R7 observer profile or scanner bundle is missing from the CREG checkout." >&2
+        exit 1
+    fi
+    REVIEWED_IMAGE_ID='sha256:2b472a089fe6ac651edfbae51b616456ed335f35992c0374f10c1ea80ce6caa3'
+    REVIEWED_CONFIG_ID='sha256:8731cc85c73e6267e2e00014e8df50aef3f4d60ce6cfcaddb8fd0a3584eb2ad9'
+    if docker image inspect "$REVIEWED_IMAGE_ID" >/dev/null 2>&1; then
+        IMAGE="$REVIEWED_IMAGE_ID"
+    elif docker image inspect "$REVIEWED_CONFIG_ID" >/dev/null 2>&1; then
+        IMAGE="$REVIEWED_CONFIG_ID"
+    else
+        IMAGE="us-central1-docker.pkg.dev/gen-lang-client-0022105784/creg-testnet/creg-node@$REVIEWED_IMAGE_ID"
+        if ! docker pull "$IMAGE"; then
+            echo "The reviewed R7 image is unavailable. Use the maintainer-provided image." >&2
+            exit 1
+        fi
+    fi
+    OBSERVER_DATA="$HOME/.creg-validator-$NODE_ID/onboarding-observer-r7"
+    if [ "$NODE_ID" = "ext-val-primary" ]; then
+        OBSERVER_DATA="$HOME/.creg-validator/onboarding-observer-r7"
+    fi
+    mkdir -p "$OBSERVER_DATA"
+    if [ -n "${CREG_OBSERVER_IMAGE:-}" ]; then
+        IMAGE="$CREG_OBSERVER_IMAGE"
+    fi
+    EXTRA_AUTO_ARGS=()
+    if [ "${CREG_ADMISSION_AUTO_ACTIVATE:-false}" = "true" ] || [ "${CREG_ADMISSION_AUTO_ACTIVATE:-}" = "1" ]; then
+        EXTRA_AUTO_ARGS+=(
+            --env "CREG_ADMISSION_AUTO_ACTIVATE=true"
+            --env "CREG_VALIDATOR_KEY_FILE=/keys/validator.key"
+            --mount "type=bind,source=$CREG_ONBOARDING_KEY_FILE,target=/keys/validator.key,readonly"
+        )
+    fi
+    docker run -d --name "$CONTAINER_NAME" --restart unless-stopped \
+        --label "dev.creg.validator=$EXPECTED_LABEL" --env-file "$PROFILE" \
+        --env "CREG_NODE_ID=$NODE_ID" --env "CREG_IS_VALIDATOR=false" \
+        --publish "$HTTP_BIND:8080" \
+        --user "$(id -u):$(id -g)" \
+        --mount "type=bind,source=$OBSERVER_DATA,target=/data" \
+        --mount "type=bind,source=$SCANNER_DIR,target=/scanner,readonly" \
+        "${EXTRA_AUTO_ARGS[@]}" "$IMAGE" >/dev/null
+    echo "R7 observer started. The onboarding page will show its sync status."
+    exit 0
+fi
 
 # Isolated data dir per node ID to allow running multiple nodes on one host
 if [ "${NODE_ID}" = "ext-val-primary" ]; then
@@ -37,13 +109,14 @@ if [ "${NODE_ID}" = "ext-val-primary" ]; then
 else
     DATA_DIR="${HOME}/.creg-validator-${NODE_ID}"
 fi
-mkdir -p "${DATA_DIR}"
-# Pre-create the chain data dir as the host user: if Docker daemon creates it on
-# first mount it lands root-owned and the node cannot open its RocksDB store.
-mkdir -p "${DATA_DIR}/chain-data"
+# Keep R7 state separate from the retired network's database. Pre-create the
+# bind mount as the host user so Docker does not create it as root.
+CHAIN_DATA_DIR="${DATA_DIR}/chain-data-r7"
+mkdir -p "${CHAIN_DATA_DIR}"
 ENV_FILE="${DATA_DIR}/validator.env"
 
 # Generate, load, or use custom Validator Key
+KEY_PATH="$DATA_DIR/validator.key"
 if [ -n "${CUSTOM_KEY}" ]; then
     VALIDATOR_KEY=$(echo "${CUSTOM_KEY}" | tr -d '\r\n ' | tr '[:upper:]' '[:lower:]')
     echo "${VALIDATOR_KEY}" > "${DATA_DIR}/validator.key"
@@ -69,11 +142,8 @@ else
     OPERATOR_KEY=$(cat "${DATA_DIR}/operator_api.key" | tr -d '\r\n ')
 fi
 
-# Bootnode seed: override with BOOTNODE="<multiaddr>" — the default below is only
-# correct while the published chain spec lists that peer. A stale ID here means
-# the node can never join the mesh (it rejects the handshake on peer-ID mismatch).
-BOOTNODE="${BOOTNODE:-/ip4/35.225.225.20/tcp/9000/p2p/12D3KooWSUsWkwq8vhF7UyfGPoTAJkt6ESXuDaLKZNcR9myF8UXx}"
-
+# creg-node verifies the spec against its pinned key and adopts its contracts
+# and bootnodes. Only an explicitly configured BOOTNODE overrides the seeds.
 cat <<EOF > "${ENV_FILE}"
 CREG_TESTNET=true
 CREG_NODE_ID=${NODE_ID}
@@ -83,25 +153,24 @@ CREG_NODE_ROLE=validator
 CREG_VALIDATOR_KEY=${VALIDATOR_KEY}
 CREG_OPERATOR_API_KEY=${OPERATOR_KEY}
 CREG_ETH_RPC=${ETH_RPC}
-CREG_EXPECTED_L1_CHAIN_ID=11155111
-CREG_CHAIN_ID=creg-testnet-1
-CREG_STAKING_ADDR=0x30604Aa6f763fbde6aDCffbd8960af3031037331
-CREG_REGISTRY_ADDR=0xD0F465ca185a99E268be0C4FF5A135Bdf89FAF3B
-CREG_CHAIN_SPEC_URL=https://spec.testnet.cregnet.dev/chain-spec.json
-CREG_SPEC_SIGNATURE_URL=https://spec.testnet.cregnet.dev/chain-spec.json.sig
+CREG_CHAIN_ID=${CHAIN_ID}
+CREG_CHAIN_SPEC_URL=${SPEC_URL}
+CREG_SPEC_SIGNATURE_URL=${SPEC_URL}.sig
 CREG_IPFS_URL=https://ipfs.testnet.cregnet.dev
 CREG_P2P_LISTEN=/ip4/0.0.0.0/tcp/9000
-CREG_P2P_SEEDS=${BOOTNODE}
 CREG_PEERS=https://api.testnet.cregnet.dev
 CREG_LISTEN=0.0.0.0:8080
 CREG_PBFT_ALLOW_SMALL_CLUSTER_QUORUM=false
 RUST_LOG=info,chain_registry_node=debug,consensus=info
 EOF
+if [ -n "${BOOTNODE:-}" ]; then
+    printf 'CREG_P2P_SEEDS=%s\n' "${BOOTNODE}" >> "${ENV_FILE}"
+fi
 chmod 600 "${ENV_FILE}"
 
 # Auto-detect available Docker image
 CHOSEN_IMAGE=""
-for candidate in creg-node:genesis2 chain-registry-node-secure:latest creg-node:fleet creg-node:latest creg-node:local-3node chain-registry-app:latest; do
+for candidate in chain-registry-node-secure:latest creg-node:fleet creg-node:latest; do
     if docker image inspect "${candidate}" >/dev/null 2>&1; then
         CHOSEN_IMAGE="${candidate}"
         break
@@ -118,40 +187,44 @@ fi
 
 echo -e "\n${YELLOW}Starting independent validator container using ${CHOSEN_IMAGE}...${NC}"
 
-# Remove old container if it exists
-docker rm -f "creg-validator-${NODE_ID}" >/dev/null 2>&1 || true
+docker rm -f "$CONTAINER_NAME" >/dev/null 2>&1 || true
 
 docker run -d \
-    --name "creg-validator-${NODE_ID}" \
+    --name "$CONTAINER_NAME" \
     --restart unless-stopped \
     --user "$(id -u):$(id -g)" \
     --env-file "${ENV_FILE}" \
-    -p "${HTTP_PORT}:8080" \
+    -p "$HTTP_BIND:8080" \
     -p "${P2P_PORT}:9000" \
-    -v "${DATA_DIR}/chain-data:/data" \
+    -v "${CHAIN_DATA_DIR}:/data" \
     "${CHOSEN_IMAGE}"
 
 echo -e "\n${GREEN}============================================================${NC}"
-echo -e "${GREEN}   Validator Node Successfully Launched!                    ${NC}"
+echo -e "${GREEN}   R7 Validator Container Started                          ${NC}"
 echo -e "${GREEN}============================================================${NC}"
 echo -e "Node ID:         ${CYAN}${NODE_ID}${NC}"
-echo -e "Data Directory:  ${CYAN}${DATA_DIR}${NC}"
-echo -e "Key Location:    ${CYAN}${DATA_DIR}/validator.key${NC}"
+echo -e "Chain Data:      ${CYAN}${CHAIN_DATA_DIR}${NC}"
+echo -e "Key Location:    ${CYAN}$KEY_PATH${NC}"
 echo -e "Docker Image:    ${CYAN}${CHOSEN_IMAGE}${NC}"
 echo -e "P2P Port:        ${CYAN}${P2P_PORT} (Firewall: OPEN TCP/UDP ${P2P_PORT})${NC}"
-echo -e "HTTP RPC Port:   ${CYAN}${HTTP_PORT} (Keep private or proxy with TLS)${NC}"
-echo -e "Bootnode Peer:   ${CYAN}${BOOTNODE}${NC}"
+if [ "$HTTP_PORT" = 0 ]; then
+    echo -e "HTTP RPC:        Docker-assigned loopback port"
+else
+    echo -e "HTTP RPC Port:   ${CYAN}${HTTP_PORT} (Keep private or proxy with TLS)${NC}"
+fi
+echo -e "P2P Seeds:       ${CYAN}${BOOTNODE:-from the signed R7 spec}${NC}"
 echo -e ""
 echo -e "${YELLOW}--- KEY BACKUP NOTICE ---${NC}"
 echo -e "Back up ${DATA_DIR}/validator.key through the operator's secret storage."
 echo -e "Do not print or paste the private key into terminal history."
 echo -e ""
 echo -e "${YELLOW}--- REMOTE VERIFICATION ---${NC}"
-echo -e "Local query:     curl http://localhost:${HTTP_PORT}/v1/health"
-echo -e "Remote query:    curl http://<YOUR_SERVER_IP>:${HTTP_PORT}/v1/health"
+if [ "$HTTP_PORT" != 0 ]; then
+    echo -e "Local query:     curl http://localhost:${HTTP_PORT}/v1/health"
+    echo -e "Remote query:    curl http://<YOUR_SERVER_IP>:${HTTP_PORT}/v1/health"
+fi
 echo -e "Global Explorer: https://explorer.testnet.cregnet.dev (Validators Tab)"
 echo -e ""
-echo -e "${YELLOW}--- STAKING FOR REWARDS ---${NC}"
-echo -e "1. Drip testnet tokens:  ${CYAN}creg testnet drip${NC}"
-echo -e "2. Deposit stake (100):  ${CYAN}creg stake 100${NC}"
-echo -e "3. Monitor live logs:    ${CYAN}docker logs -f creg-validator-${NODE_ID}${NC}\n"
+echo -e "${YELLOW}--- R7 VALIDATOR ADMISSION ---${NC}"
+echo -e "Follow docs/VALIDATOR_ONBOARDING_CHECKLIST.md for staking, registration, and approval."
+echo -e "Monitor live logs: ${CYAN}docker logs -f creg-validator-${NODE_ID}${NC}\n"

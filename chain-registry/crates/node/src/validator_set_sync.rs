@@ -401,6 +401,29 @@ async fn fetch_block_hash_quorum(
     }
 }
 
+const MAX_L1_LOG_CHUNK_BLOCKS: u64 = 10_000;
+
+/// Split an inclusive L1 block range `[from_block, to_block]` into chunks of
+/// at most `max_span` blocks so public RPC `eth_getLogs` range limits do not
+/// fail long catch-up scans.
+fn l1_log_block_chunks(from_block: u64, to_block: u64, max_span: u64) -> Vec<(u64, u64)> {
+    if from_block > to_block {
+        return Vec::new();
+    }
+    let span = max_span.max(1);
+    let mut chunks = Vec::new();
+    let mut start = from_block;
+    while start <= to_block {
+        let end = start.saturating_add(span - 1).min(to_block);
+        chunks.push((start, end));
+        if end == u64::MAX {
+            break;
+        }
+        start = end + 1;
+    }
+    chunks
+}
+
 /// Fetch staking deltas from all configured providers and require an identical
 /// response from a strict majority of the configured endpoints. A successful
 /// block-height/hash quorum alone cannot detect a provider that silently omits
@@ -412,16 +435,29 @@ async fn fetch_deltas_quorum(
     from_block: u64,
     to_block: u64,
 ) -> anyhow::Result<Vec<ValidatorSetDelta>> {
-    let mut responses: Vec<Vec<ValidatorSetDelta>> = Vec::new();
-    for ep in endpoints {
-        if let Ok(mut deltas) = fetch_deltas(client, ep, staking_addr, from_block, to_block).await {
-            deltas.sort_by_key(|delta| (delta.block_height, delta.log_index));
-            responses.push(deltas);
+    let mut all_deltas: Vec<ValidatorSetDelta> = Vec::new();
+    for (chunk_from, chunk_to) in l1_log_block_chunks(from_block, to_block, MAX_L1_LOG_CHUNK_BLOCKS)
+    {
+        let mut responses: Vec<Vec<ValidatorSetDelta>> = Vec::new();
+        for ep in endpoints {
+            if let Ok(mut deltas) =
+                fetch_deltas(client, ep, staking_addr, chunk_from, chunk_to).await
+            {
+                deltas.sort_by_key(|delta| (delta.block_height, delta.log_index));
+                responses.push(deltas);
+            }
         }
+        let chunk_deltas = crate::l1_quorum::identical_response_with_quorum(
+            &responses,
+            endpoints.len(),
+        )
+        .ok_or_else(|| {
+            anyhow::anyhow!("configured L1 RPC endpoints did not reach staking-log quorum")
+        })?;
+        all_deltas.extend(chunk_deltas);
     }
-    crate::l1_quorum::identical_response_with_quorum(&responses, endpoints.len()).ok_or_else(|| {
-        anyhow::anyhow!("configured L1 RPC endpoints did not reach staking-log quorum")
-    })
+    all_deltas.sort_by_key(|delta| (delta.block_height, delta.log_index));
+    Ok(all_deltas)
 }
 
 /// Mode for the worker. See module docstring for the phasing plan.
@@ -641,31 +677,55 @@ async fn reconcile_state_from_worker(
         }
     }
 
-    s.set_validator_set(common::ValidatorSet {
-        validators: next_validators,
-    });
+    // Phase C consensus history starts from the signed specification and
+    // advances through quorum-signed transitions. An L1 approval can appear
+    // before its certificate is installed, and once certified transitions exist
+    // they govern active membership and PBFT verification.
+    let has_certified_history = s
+        .chain
+        .tip_height()
+        .ok()
+        .and_then(|height| height.checked_add(1))
+        .and_then(|next_height| {
+            crate::validator_set_history::authenticated_at_checked(
+                &s.config.data_dir,
+                next_height,
+                &s.validator_set_bootstrap,
+            )
+            .ok()
+            .flatten()
+        })
+        .is_some();
 
-    // Record this set in the height-indexed history (effective from the next
-    // block) so blocks signed under it verify correctly after a later rotation
-    // (ISSUE-050). record() dedups when membership is unchanged.
-    let effective_from = s.chain.tip_height().unwrap_or(0).saturating_add(1);
-    let data_dir = s.config.data_dir.clone();
-    if let Err(e) =
-        crate::validator_set_history::record(&data_dir, effective_from, &s.validator_set)
-    {
-        tracing::warn!(
-            target: "validator_set_sync",
-            "failed to record validator-set history snapshot: {}",
-            e
-        );
-    }
+    if cfg!(feature = "phase-c-real-fleet") || has_certified_history {
+        if let Err(error) = s.refresh_runtime_validator_set_from_certified_history() {
+            tracing::warn!(
+                target: "validator_set_sync",
+                %error,
+                "failed to reconcile runtime validator set from certified history"
+            );
+        }
+    } else {
+        s.set_validator_set(common::ValidatorSet {
+            validators: next_validators,
+        });
 
-    for registration in s.validator_registrations.values_mut() {
-        let key = normalized_validator_key(&registration.identity.evm_address);
-        let is_active = !key.is_empty() && active_addresses.contains(&key);
-        registration.admitted_to_consensus = is_active;
-        registration.active = is_active;
-        registration.status = validator_registration_status_text(registration);
+        let effective_from = s.chain.tip_height().unwrap_or(0).saturating_add(1);
+        if let Err(error) = crate::validator_set_history::record(
+            &s.config.data_dir,
+            effective_from,
+            &s.validator_set,
+        ) {
+            tracing::warn!(target: "validator_set_sync", %error, "failed to record validator-set history snapshot");
+        }
+
+        for registration in s.validator_registrations.values_mut() {
+            let key = normalized_validator_key(&registration.identity.evm_address);
+            let is_active = !key.is_empty() && active_addresses.contains(&key);
+            registration.admitted_to_consensus = is_active;
+            registration.active = is_active;
+            registration.status = validator_registration_status_text(registration);
+        }
     }
 
     Ok(())
@@ -1817,5 +1877,15 @@ mod tests {
         };
         assert!(cursor_reorged(&worker_state, "0x2222"));
         assert!(!cursor_reorged(&worker_state, "0x1111"));
+    }
+
+    #[test]
+    fn l1_log_block_chunks_splits_large_ranges_inclusively() {
+        assert_eq!(l1_log_block_chunks(10, 9, 100), Vec::<(u64, u64)>::new());
+        assert_eq!(l1_log_block_chunks(100, 100, 10), vec![(100, 100)]);
+        assert_eq!(
+            l1_log_block_chunks(100, 124, 10),
+            vec![(100, 109), (110, 119), (120, 124)]
+        );
     }
 }

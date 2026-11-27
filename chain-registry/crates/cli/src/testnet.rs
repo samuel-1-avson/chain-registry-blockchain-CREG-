@@ -99,6 +99,49 @@ pub async fn status(node_url: Option<&str>) -> Result<()> {
                     }
                 }
             }
+            // Try to get admission summary
+            if let Ok(adm_resp) = client
+                .get(format!("{}/v1/public/validator/admission-status", url))
+                .send()
+                .await
+            {
+                if adm_resp.status().is_success() {
+                    if let Ok(report) = adm_resp
+                        .json::<crate::validator_onboarding::AdmissionStatusReport>()
+                        .await
+                    {
+                        println!(
+                            "  Admission: {} active validator(s) | L1 quorum {}/epoch {:?} | {} applicant(s)",
+                            report.network.active_validators,
+                            report.network.required_l1_approvals,
+                            report.network.validator_set_epoch,
+                            report.applicants.len()
+                        );
+                        if let Some(issue) = &report.local_node.admission_signer_issue {
+                            println!("  Signer issue: {}", issue.yellow());
+                        }
+                        for app in report.applicants.iter().take(5) {
+                            println!(
+                                "    - {} [{}]: L1 {}/{} | tx={} | act={:?} | vote={:?} — {}",
+                                app.node_id,
+                                app.stage,
+                                app.l1_approvals_collected,
+                                app.l1_approvals_required,
+                                app.l1_tx_status,
+                                app.voting_activation_height,
+                                app.first_finalized_vote_height,
+                                app.stage_reason
+                            );
+                        }
+                    }
+                } else if adm_resp.status() == reqwest::StatusCode::NOT_FOUND {
+                    println!(
+                        "  Admission: {}",
+                        "telemetry endpoint /v1/public/validator/admission-status not yet deployed (HTTP 404)"
+                            .yellow()
+                    );
+                }
+            }
         }
         _ => println!("{} Node: {}", "●".red(), "Offline".red()),
     }

@@ -1,0 +1,54 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Join CREG as a validator</title>
+  <link rel="stylesheet" href="/onboarding.css">
+  <script type="module" src="/onboarding.js"></script>
+</head>
+<body>
+  <main>
+    <header>
+      <p class="network">CREG <span>R7 · Sepolia testnet</span></p>
+      <h1>Join as a validator</h1>
+      <p>Approve transactions in your browser wallet. CREG uses your local validator key to sign the registration.</p>
+    </header>
+    <p id="status" class="notice" role="status">Checking the R7 network…</p>
+    <section>
+      <h2>Wallet</h2>
+      <button id="connect" disabled>Connect wallet</button>
+      <p id="wallet" class="mono"></p>
+      <p id="balance"></p>
+      <a id="faucet" href="https://faucet.testnet.cregnet.dev" target="_blank" rel="noopener noreferrer">Open tCREG faucet</a>
+    </section>
+    <section>
+      <h2>Stake and apply</h2>
+      <p id="stake-detail">The application uses Sepolia ETH for gas.</p>
+      <button id="stake" disabled>Apply as validator</button>
+      <p id="transaction" class="mono"></p>
+    </section>
+    <section>
+      <h2>Register validator identity</h2>
+      <p id="identity" class="mono"></p>
+      <button id="register" disabled>Sign and register</button>
+      <p id="registration">Connect your wallet to check registration.</p>
+    </section>
+    <section>
+      <h2>Approval and node sync</h2>
+      <dl>
+        <div><dt>Network membership</dt><dd id="admission">Awaiting application</dd></div>
+        <div><dt>Approvals</dt><dd id="approvals">—</dd></div>
+        <div><dt>Sepolia approval tx</dt><dd id="approval-tx" class="mono">—</dd></div>
+        <div><dt>Voting activation</dt><dd id="activation">—</dd></div>
+        <div><dt>Stage detail / blocker</dt><dd id="blocker">—</dd></div>
+        <div><dt>Local node</dt><dd id="local">Waiting for status</dd></div>
+        <div><dt>Finalized vote</dt><dd id="vote">Waiting for a matching commit</dd></div>
+      </dl>
+      <button id="refresh" class="secondary" disabled>Refresh status</button>
+      <button id="start" class="secondary" hidden disabled>Start local R7 sync</button>
+      <p id="launch" class="mono"></p>
+    </section>
+  </main>
+</body>
+</html>

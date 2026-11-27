@@ -66,8 +66,9 @@ testnet/**/*.pem
 testnet/**/*.p12
 testnet/**/*.pfx
 
-# Docker files (not needed in context)
+# The builder copies the primary Dockerfile for source verification.
 Dockerfile*
+!Dockerfile
 docker-compose*.yml
 !docker-compose.yml
 !docker-compose.light.yml

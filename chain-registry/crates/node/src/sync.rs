@@ -576,8 +576,24 @@ async fn import_transition_history_through(
     // Keep the state read guard through synchronous history persistence. That
     // makes the local tip/anchor snapshot and the resulting file replacement
     // one serialization interval with canonical writers.
-    let state = state.read().await;
-    import_transition_history_through_locked(&state, transitions, requested_effective_height)
+    let imported = {
+        let state_guard = state.read().await;
+        import_transition_history_through_locked(&state_guard, transitions, requested_effective_height)?
+    };
+    if imported > 0 {
+        {
+            let mut s = state.write().await;
+            if let Err(error) = s.refresh_runtime_validator_set_from_certified_history() {
+                tracing::warn!(%error, "Failed to refresh runtime validator set after transition import");
+            }
+        }
+        if let Err(error) =
+            crate::consensus_admission::try_activate_candidate_validator(state).await
+        {
+            tracing::warn!(%error, "Candidate auto-activation check failed after transition import");
+        }
+    }
+    Ok(imported)
 }
 
 pub async fn run(state: Arc<RwLock<NodeState>>) {

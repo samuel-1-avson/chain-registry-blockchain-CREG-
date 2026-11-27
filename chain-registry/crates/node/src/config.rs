@@ -315,6 +315,10 @@ pub struct NodeConfig {
     /// packages must be decrypted with t-of-n shares — single-node X25519 is
     /// refused. Sepolia keeps this false until share distribution ships.
     pub threshold_encryption: bool,
+    /// When true on a candidate node, the node starts in observer mode until
+    /// its identity appears in a certified validator-set transition anchored
+    /// to the local canonical chain, then activates PBFT voting automatically.
+    pub admission_auto_activate: bool,
 }
 
 impl Default for NodeConfig {
@@ -360,6 +364,7 @@ impl Default for NodeConfig {
             is_testnet: false,
             zk_validation: false,
             threshold_encryption: false,
+            admission_auto_activate: false,
         }
     }
 }
@@ -478,6 +483,7 @@ impl NodeConfig {
             is_testnet: common::parse_env_bool("CREG_TESTNET"),
             zk_validation: false,
             threshold_encryption: false,
+            admission_auto_activate: common::parse_env_bool("CREG_ADMISSION_AUTO_ACTIVATE"),
         };
 
         match chain_registry_secrets::SecretsProvider::from_env() {
@@ -504,6 +510,33 @@ impl NodeConfig {
                     Err(err) => config.secrets_config_errors.push(format!(
                         "failed to load validator key from secrets backend: {err}"
                     )),
+                }
+                if let Some(key_file) = nonempty_env("CREG_VALIDATOR_KEY_FILE") {
+                    if matches!(
+                        secrets.backend(),
+                        chain_registry_secrets::SecretsBackend::Vault
+                    ) {
+                        config.secrets_config_errors.push(
+                            "CREG_VALIDATOR_KEY_FILE must not be set when CREG_SECRETS_BACKEND=vault"
+                                .to_string(),
+                        );
+                    } else if config.validator_privkey.is_none() {
+                        match std::fs::read_to_string(&key_file) {
+                            Ok(raw) => {
+                                let trimmed = raw.trim().to_string();
+                                if trimmed.is_empty() {
+                                    config.secrets_config_errors.push(format!(
+                                        "CREG_VALIDATOR_KEY_FILE ({key_file}) is empty"
+                                    ));
+                                } else {
+                                    config.validator_privkey = Some(trimmed.into());
+                                }
+                            }
+                            Err(err) => config.secrets_config_errors.push(format!(
+                                "failed to read CREG_VALIDATOR_KEY_FILE ({key_file}): {err}"
+                            )),
+                        }
+                    }
                 }
                 match secrets
                     .try_signing_key_secret(chain_registry_secrets::HotKeyRole::ValidatorMlDsa44)
@@ -602,11 +635,16 @@ impl NodeConfig {
             }
         }
 
-        // A validator node must have a signing key.
+        // A validator node (or auto-activating candidate) must have a signing key.
         if self.is_validator && self.validator_privkey.is_none() {
             errors.push(
                 "CREG_IS_VALIDATOR=true but CREG_VALIDATOR_KEY is not set. \
                  Generate a key with `creg keygen` and set CREG_VALIDATOR_KEY."
+                    .into(),
+            );
+        } else if self.admission_auto_activate && self.validator_privkey.is_none() {
+            errors.push(
+                "CREG_ADMISSION_AUTO_ACTIVATE=true requires CREG_VALIDATOR_KEY or CREG_VALIDATOR_KEY_FILE."
                     .into(),
             );
         }
@@ -1211,6 +1249,7 @@ mod tests {
             is_testnet: true,
             zk_validation: false,
             threshold_encryption: false,
+            admission_auto_activate: false,
         }
     }
 

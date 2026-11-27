@@ -1,125 +1,175 @@
-# Rehearse Mechanical Validator Admission (approveByConsensus) on Sepolia
-#
-# Verifies the zero-admin, permissionless validator onboarding pipeline.
-# In CREG, validators are admitted by cryptographic threshold consensus (>= 2/3 of active validators)
-# via EIP-712 structured attestations, completely bypassing centralized administrative authority.
-#
-# Usage:
-#   .\testnet\rehearse-validator-admission.ps1 -CheckOnly
-#   .\testnet\rehearse-validator-admission.ps1 -Rehearse
-
+# Read R7 admission state, export wallet typed data, or simulate an approval bundle.
+# All Sepolia operations in this script are reads (eth_call for simulation).
+[CmdletBinding()]
 param(
-    [string]$Applicant = "",
-    [string]$RpcUrl = "",
-    [switch]$CheckOnly,
-    [switch]$Rehearse
+    [string]$Applicant,
+    [string]$RpcUrl,
+    [string]$TypedDataPath,
+    [string]$SignaturesPath,
+    [string[]]$SignerAddress = @(),
+    [Alias('Rehearse')]
+    [switch]$CheckOnly
 )
 
-$ErrorActionPreference = "Stop"
-$scriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
-$repoRoot = Split-Path -Parent $scriptDir
-Set-Location $repoRoot
+$ErrorActionPreference = 'Stop'
+$staking = '0x61c00EBe7C46f0bcE63942F7E15Bcc434DFC9B7C'
+$chainId = 11155111
+$addressPattern = '^0x[0-9a-fA-F]{40}$'
+$cast = Join-Path $PSScriptRoot '.tools/foundry/cast.exe'
+if (-not (Test-Path -LiteralPath $cast -PathType Leaf)) {
+    $cast = (Get-Command cast -ErrorAction SilentlyContinue).Source
+}
+if (-not $cast) { throw 'Install Foundry cast or use the bundled testnet executable.' }
+if (($TypedDataPath -or $SignaturesPath) -and -not $Applicant) {
+    throw 'Specify the pending applicant wallet with -Applicant.'
+}
+if ($Applicant -and $Applicant -cnotmatch $addressPattern) { throw 'Invalid applicant wallet address.' }
+if ($CheckOnly -and $TypedDataPath) { throw 'Omit -CheckOnly to write the typed-data file.' }
 
-$env:FOUNDRY_DISABLE_NIGHTLY_WARNING = "1"
-$toolsCast = Join-Path $scriptDir ".tools\foundry\cast.exe"
-$castCmd = Get-Command cast -ErrorAction SilentlyContinue
-$cast = if (Test-Path $toolsCast) { $toolsCast } elseif ($castCmd) { $castCmd.Source } else { $null }
-if (-not $cast) { throw "cast.exe not found at $toolsCast" }
+function Invoke-Cast([string[]]$CastArgs) {
+    # Windows PowerShell can treat harmless native stderr as a terminating error.
+    $ErrorActionPreference = 'Continue'
+    $PSNativeCommandUseErrorActionPreference = $false
+    $output = & $cast @CastArgs 2>$null
+    if ($LASTEXITCODE -ne 0) { throw "Foundry $($CastArgs[0]) failed." }
+    return ($output -join "`n").Trim()
+}
 
-function Import-DotEnv {
-    param([string]$Path)
-    if (-not (Test-Path $Path)) { return }
-    Get-Content $Path | ForEach-Object {
-        if ($_ -match '^\s*([^#\s][^=]*)\s*=\s*(.*)\s*$') {
-            $k = $matches[1].Trim()
-            $v = $matches[2].Trim().Trim('"')
-            if ($v -and $v -notmatch 'YOUR_') {
-                Set-Item -Path "Env:$k" -Value $v
-            }
-        }
+function Read-Staking([string]$Signature, [string[]]$Values = @(), [string]$AtBlock = $blockNumber) {
+    $value = Invoke-Cast (@('call', $staking, $Signature) + $Values + @('--block', $AtBlock))
+    if ($value -cnotmatch '^0x(?:[0-9a-fA-F]{64})*$') {
+        throw "Unexpected staking response for $Signature."
     }
+    return $value.Substring(2).ToLowerInvariant()
 }
 
-Import-DotEnv (Join-Path $scriptDir ".env.sepolia")
-
-if (-not $RpcUrl) {
-    $RpcUrl = $env:SEPOLIA_RPC_URL
-    if (-not $RpcUrl) { $RpcUrl = "https://ethereum-sepolia-rpc.publicnode.com" }
-}
-$StakingAddr = $env:CREG_STAKING_ADDR
-if (-not $StakingAddr) { $StakingAddr = "0x30604Aa6f763fbde6aDCffbd8960af3031037331" }
-$GovAddr = $env:CREG_GOVERNANCE_ADDR
-if (-not $GovAddr) { $GovAddr = "0x122Bc2C704B966C74004506F98F13bf7b5F75b9D" }
-
-Write-Host ""
-Write-Host "============================================================" -ForegroundColor Cyan
-Write-Host " CREG Mechanical Validator Admission Pipeline (Sepolia L1)  " -ForegroundColor Cyan
-Write-Host "============================================================" -ForegroundColor Cyan
-Write-Host "Staking Contract    : $StakingAddr"
-Write-Host "Governance Contract : $GovAddr"
-Write-Host "Sepolia RPC         : $RpcUrl"
-Write-Host ""
-
-function Call-Staking {
-    param([string]$Sig, [string[]]$MethodArgs = @())
-    $cmdArgs = @("call", $StakingAddr, $Sig) + $MethodArgs + @("--rpc-url", $RpcUrl)
-    $res = & $cast @cmdArgs 2>&1 | Out-String
-    return $res.Trim()
+function Read-Word([string]$Hex, [int]$Index = 0) {
+    if ($Hex.Length -lt (($Index + 1) * 64)) { throw 'Incomplete staking contract response.' }
+    return [bigint]::Parse(('0' + $Hex.Substring($Index * 64, 64)), [Globalization.NumberStyles]::AllowHexSpecifier)
 }
 
-# 1. Query L1 State
-$activeCountRaw = Call-Staking "activeValidatorCount()(uint256)"
-$activeCount = [uint64]($activeCountRaw -replace '\D', '')
-$epochRaw = Call-Staking "validatorSetEpoch()(uint256)"
-$epoch = [uint64]($epochRaw -replace '\D', '')
-$minStakeRaw = Call-Staking "minValidatorStake()(uint256)"
-$ruleVersionRaw = Call-Staking "RULE_SET_VERSION()(uint256)"
-$ruleVersion = [uint64]($ruleVersionRaw -replace '\D', '')
-$emergencyRaw = Call-Staking "emergencyGovernanceEnabled()(bool)"
-$emergencyEnabled = $emergencyRaw -match "true"
+$oldRpc = $env:ETH_RPC_URL
+if (-not $RpcUrl) { $RpcUrl = $env:SEPOLIA_RPC_URL }
+if (-not $RpcUrl) { $RpcUrl = $oldRpc }
+if (-not $RpcUrl) { $RpcUrl = 'https://sepolia.gateway.tenderly.co' }
+$env:ETH_RPC_URL = $RpcUrl
+try {
+    if ((Invoke-Cast @('chain-id')) -cne "$chainId") { throw 'The RPC must serve Ethereum Sepolia.' }
+    $block = Invoke-Cast @('block', 'finalized', '--json') | ConvertFrom-Json
+    $blockNumber = [Convert]::ToUInt64($block.number.Substring(2), 16).ToString()
+    $active = Read-Word (Read-Staking 'activeValidatorCount()')
+    if ($active -eq 0) { throw 'The R7 staking contract reports zero active validators.' }
+    $required = [int][Math]::Ceiling(([double]$active * 2) / 3)
+    $epoch = Read-Word (Read-Staking 'validatorSetEpoch()')
+    $ruleVersion = Read-Word (Read-Staking 'RULE_SET_VERSION()')
+    $report = [ordered]@{
+        network = 'R7 Sepolia'
+        staking_contract = $staking
+        finalized_sepolia_block = $blockNumber
+        active_validators = [int]$active
+        required_approvals = $required
+        validator_set_epoch = [long]$epoch
+        rule_set_version = "$ruleVersion"
+    }
+    if ($SignerAddress.Count -gt 0) {
+        $report.signer_checks = @(
+            foreach ($address in $SignerAddress) {
+                if ($address -cnotmatch $addressPattern) { throw 'Invalid signer wallet address.' }
+                [ordered]@{
+                    address = $address.ToLowerInvariant()
+                    active = (Read-Word (Read-Staking 'isActiveValidator(address)' @($address))) -eq 1
+                }
+            }
+        )
+    }
+    if (-not $Applicant) {
+        $report | ConvertTo-Json
+        return
+    }
 
-# Threshold calculation
-$requiredApprovals = if ($activeCount -gt 0) { [Math]::Ceiling(($activeCount * 2) / 3) } else { 0 }
+    $Applicant = $Applicant.ToLowerInvariant()
+    $entry = Read-Staking 'validators(address)' @($Applicant)
+    $stake = Read-Word $entry
+    $state = Read-Word $entry 1
+    $nonce = Read-Word $entry 5
+    $minimum = Read-Word (Read-Staking 'minValidatorStake()')
+    $timeout = Read-Word (Read-Staking 'APPLICATION_TIMEOUT()')
+    $expires = [DateTimeOffset]::FromUnixTimeSeconds([long]($nonce + $timeout))
+    if ($state -ne 1 -or $stake -lt $minimum -or [DateTimeOffset]::UtcNow -ge $expires) {
+        throw 'The applicant must have a pending, funded application within its approval window.'
+    }
+    $digest = Read-Staking 'consensusMessageHash(address,uint256,uint256)' @($Applicant, "$stake", "$nonce")
+    $report.applicant = $Applicant
+    $report.application_nonce = [long]$nonce
+    $report.stake_wei = "$stake"
+    $report.expires_utc = $expires.ToString('o')
+    $report.digest = "0x$digest"
 
-Write-Host "Current Staking System Parameters:" -ForegroundColor Cyan
-Write-Host "  Active Validator Count : $activeCount"
-Write-Host "  Validator Set Epoch    : $epoch"
-Write-Host "  Rule Set Version       : $ruleVersion"
-Write-Host "  Required Quorum (>=2/3): $requiredApprovals approvals"
-Write-Host "  Emergency Gov Enabled  : $emergencyEnabled"
-Write-Host ""
+    if ($TypedDataPath) {
+        $typedData = @{
+            types = @{
+                EIP712Domain = @(
+                    @{name='name'; type='string'}
+                    @{name='version'; type='string'}
+                    @{name='chainId'; type='uint256'}
+                    @{name='verifyingContract'; type='address'}
+                )
+                ValidatorAdmission = @(
+                    @{name='applicant'; type='address'}
+                    @{name='stake'; type='uint256'}
+                    @{name='nonce'; type='uint256'}
+                    @{name='ruleSetVersion'; type='uint256'}
+                    @{name='validatorSetEpoch'; type='uint256'}
+                )
+            }
+            primaryType = 'ValidatorAdmission'
+            domain = @{name='Chain Registry Validator Admission'; version='1'; chainId=$chainId; verifyingContract=$staking}
+            message = @{applicant=$Applicant; stake="$stake"; nonce="$nonce"; ruleSetVersion="$ruleVersion"; validatorSetEpoch="$epoch"}
+        }
+        $path = $ExecutionContext.SessionState.Path.GetUnresolvedProviderPathFromPSPath($TypedDataPath)
+        $file = [IO.File]::Open($path, [IO.FileMode]::CreateNew)
+        try {
+            $json = $typedData | ConvertTo-Json -Depth 7
+            $bytes = [Text.Encoding]::UTF8.GetBytes($json)
+            $file.Write($bytes, 0, $bytes.Length)
+        } finally {
+            $file.Dispose()
+        }
+        $report.typed_data_file = $path
+    }
 
-if (-not $Applicant) {
-    # Generate a dummy applicant address for demonstration
-    $Applicant = "0x70997970C51812dc3A010C7d01b50e0d17dc79C8"
+    if ($SignaturesPath) {
+        $entries = @(Get-Content -Raw -LiteralPath $SignaturesPath | ConvertFrom-Json)
+        $signatures = @{}
+        foreach ($item in $entries) {
+            if ($item.signer -cnotmatch $addressPattern -or $item.signature -cnotmatch '^0x[0-9a-fA-F]{130}$') {
+                throw 'Each approval must contain a signer address and a 65-byte hex signature.'
+            }
+            $signer = $item.signer.ToLowerInvariant()
+            if ($signatures.ContainsKey($signer)) { throw "Duplicate approval from $signer." }
+            $signatures[$signer] = $item.signature
+        }
+        if ($signatures.Count -lt $required) {
+            throw "The bundle contains $($signatures.Count) distinct approvals. R7 requires $required."
+        }
+        $signers = @($signatures.Keys | Sort-Object)
+        $values = @($signers | ForEach-Object { $signatures[$_] })
+        # The deployed contract checks EIP-712 recovery, exact epoch, active
+        # membership, nonce, and quorum. Use latest state for this final simulation.
+        $calldata = Invoke-Cast (@('calldata', 'approveByConsensus(address,uint256,address[],bytes[])') + @(
+            $Applicant, "$nonce", ('[' + ($signers -join ',') + ']'), ('[' + ($values -join ',') + ']')
+        ))
+        try {
+            $null = Invoke-Cast @('call', $staking, '--data', $calldata, '--block', 'latest')
+        } catch {
+            throw 'Sepolia approval simulation failed. Check the signatures and current validator-set epoch.'
+        }
+        $report.simulation = 'passed'
+        $report.signers = $signers
+        $report.approval_calldata = $calldata
+    }
+
+    $report | ConvertTo-Json -Depth 5
+} finally {
+    $env:ETH_RPC_URL = $oldRpc
 }
-
-Write-Host "Simulating Candidate Applicant: $Applicant" -ForegroundColor Yellow
-$stakeWei = "100000000000000000000" # 100 CREG
-$nonce = 0
-
-# 2. Compute EIP-712 Structured Hash on L1
-Write-Host "Computing EIP-712 Structured Digest via consensusMessageHash()..." -ForegroundColor Cyan
-$digest = Call-Staking "consensusMessageHash(address,uint256,uint256)(bytes32)" -MethodArgs @($Applicant, $stakeWei, $nonce.ToString())
-Write-Host "  -> EIP-712 Consensus Digest: $digest" -ForegroundColor Green
-Write-Host ""
-
-Write-Host "Decentralization Invariants Enforced by Staking.sol:" -ForegroundColor Cyan
-Write-Host "  [x] Binds exact ValidatorSetEpoch ($epoch) -> Prevents replay across membership changes"
-Write-Host "  [x] Binds RuleSetVersion ($ruleVersion)       -> Prevents cross-fork replay"
-Write-Host "  [x] Binds Nonce ($nonce)                     -> Prevents re-submitting old bundles"
-Write-Host "  [x] Strict ascending signer sorting          -> Guarantees O(n) deduplication and integrity"
-Write-Host "  [x] Direct ecrecover verification            -> Zero foundation admin intervention"
-Write-Host ""
-
-if ($activeCount -eq 0) {
-    Write-Host "[NOTE] Bootstrap State: activeValidatorCount is 0." -ForegroundColor Yellow
-    Write-Host "Genesis validators initialize the network via the 2-of-3 Governance Multi-Sig."
-    Write-Host "Once initialized, activeValidatorCount >= 1 and all admissions occur via approveByConsensus."
-} else {
-    Write-Host "[OK] Operational State: activeValidatorCount = $activeCount." -ForegroundColor Green
-    Write-Host "External nodes collect $requiredApprovals signatures and call approveByConsensus()."
-}
-
-Write-Host ""
-Write-Host "[SUCCESS] Mechanical Validator Admission pipeline fully validated on Sepolia!" -ForegroundColor Green

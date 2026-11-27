@@ -78,6 +78,19 @@ pub struct ValidatorIdentity {
     pub ed25519_pubkey: String,
 }
 
+/// Message signed by both the Sepolia wallet and the validator's Ed25519 key.
+pub fn validator_identity_registration_message(
+    chain_id: &str,
+    evm_address: &str,
+    node_id: &str,
+    ed25519_pubkey: &str,
+    nonce: &str,
+) -> String {
+    format!(
+        "creg-validator-identity-v1\nchain_id:{chain_id}\nevm_address:{evm_address}\nnode_id:{node_id}\ned25519_pubkey:{ed25519_pubkey}\nnonce:{nonce}"
+    )
+}
+
 impl ValidatorIdentity {
     pub fn normalized(&self) -> Self {
         Self {

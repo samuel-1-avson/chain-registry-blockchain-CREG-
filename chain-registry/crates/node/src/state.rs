@@ -10,6 +10,7 @@ use std::{
 };
 
 use alloy::primitives::{Address, U256};
+use anyhow::Context;
 pub use arc_swap::ArcSwap;
 use chrono::{DateTime, Utc};
 use serde::Serialize;
@@ -350,6 +351,52 @@ impl NodeState {
     pub fn set_validator_set(&mut self, next: common::ValidatorSet) {
         self.validator_set = next;
         self.sync_validator_set_snapshot();
+    }
+
+    /// Reconcile `validator_set`, `validator_set_snapshot`, and
+    /// `validator_registrations` from certified validator-set history.
+    pub fn refresh_runtime_validator_set_from_certified_history(&mut self) -> anyhow::Result<()> {
+        let next_height = self
+            .chain
+            .tip_height()?
+            .checked_add(1)
+            .context("invalid chain tip height")?;
+        let mut authority = crate::validator_set_history::verification_set_at(
+            &self.config.data_dir,
+            next_height,
+            &self.validator_set_bootstrap,
+        )
+        .map_err(anyhow::Error::msg)?;
+        let node_id = self.config.node_id.clone();
+        for validator in &mut authority.validators {
+            if common::validator_status_is_active(&validator.status) {
+                validator.status = if validator.id == node_id {
+                    "self".to_string()
+                } else {
+                    "online".to_string()
+                };
+            }
+        }
+        let active_set = authority.clone();
+        self.set_validator_set(authority);
+        for registration in self.validator_registrations.values_mut() {
+            let identity = registration.identity.normalized();
+            let certified = identity.is_complete()
+                && active_set.validators.iter().any(|validator| {
+                    validator.id == identity.node_id
+                        && validator
+                            .pubkey
+                            .eq_ignore_ascii_case(&identity.ed25519_pubkey)
+                        && validator
+                            .eth_address
+                            .eq_ignore_ascii_case(&identity.evm_address)
+                        && common::validator_status_is_active(&validator.status)
+                });
+            registration.admitted_to_consensus = certified;
+            registration.active = certified;
+            registration.status = validator_registration_status_text(registration);
+        }
+        Ok(())
     }
 
     /// Retrieve cached publisher stake if present and unexpired.

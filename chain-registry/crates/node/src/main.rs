@@ -650,7 +650,7 @@ async fn main() -> Result<()> {
     } else {
         chain_store::ChainStore::open(&config.data_dir)?
     };
-    if config.is_validator {
+    if config.is_validator || config.admission_auto_activate {
         let genesis = chain
             .get_block_by_height(0)?
             .context("validator startup cannot load the canonical genesis block")?;
@@ -666,22 +666,60 @@ async fn main() -> Result<()> {
         )
         .context("validator PBFT signing key must contain 32 bytes")?;
         let validator_pubkey = signing_key.public_key().to_hex();
-        if cfg!(feature = "phase-c-real-fleet")
-            && !config.validator_set.validators.iter().any(|validator| {
-                validator.id == config.node_id
-                    && validator.pubkey == validator_pubkey
-                    && common::validator_status_is_active(&validator.status)
-            })
-        {
-            anyhow::bail!(
-                "local Phase C signing identity is outside the signed active bootstrap set"
-            );
-        }
-        chain.initialize_pbft_safety_journal(
-            &genesis.hash(),
+        let next_height = chain
+            .tip_height()?
+            .checked_add(1)
+            .context("invalid validator tip height")?;
+        let membership = validator_set_history::require_phase_c_signing_membership(
+            &config.data_dir,
+            next_height,
+            &config.validator_set,
             &config.node_id,
             &validator_pubkey,
-        )?;
+            |height| Ok(chain.get_block_by_height(height)?.map(|block| block.hash())),
+        );
+        if config.admission_auto_activate {
+            match membership {
+                Ok(()) => {
+                    let activation_height =
+                        validator_set_history::load_checked(&config.data_dir)?
+                            .into_iter()
+                            .filter_map(|entry| entry.certificate)
+                            .find(|cert| {
+                                cert.validators.validators.iter().any(|validator| {
+                                    validator.id == config.node_id
+                                        && validator.pubkey == validator_pubkey
+                                        && common::validator_status_is_active(&validator.status)
+                                })
+                            })
+                            .map(|cert| cert.effective_from_height);
+                    chain.initialize_pbft_safety_journal_at_height(
+                        &genesis.hash(),
+                        &config.node_id,
+                        &validator_pubkey,
+                        activation_height,
+                    )?;
+                    config.is_validator = true;
+                }
+                Err(error) => {
+                    tracing::info!(
+                        node_id = %config.node_id,
+                        reason = %error,
+                        "Starting in observer mode; waiting for certified validator-set admission to activate voting"
+                    );
+                    config.is_validator = false;
+                }
+            }
+        } else {
+            if cfg!(feature = "phase-c-real-fleet") {
+                membership?;
+            }
+            chain.initialize_pbft_safety_journal(
+                &genesis.hash(),
+                &config.node_id,
+                &validator_pubkey,
+            )?;
+        }
     }
     chain.configure_namespace_consensus(
         namespace_consensus::NamespaceConsensusConfig::from_node_config(&config),
@@ -825,7 +863,7 @@ async fn main() -> Result<()> {
     for (seed, error) in &invalid_seeds {
         tracing::warn!(seed = %seed, error = %error, "Ignoring invalid P2P seed multiaddr");
     }
-    if config.is_validator
+    if (config.is_validator || config.admission_auto_activate)
         && dialable_seeds.is_empty()
         && !config::allow_isolated_empty_p2p_seeds(config.is_testnet)
     {
@@ -924,7 +962,15 @@ async fn main() -> Result<()> {
         }
     });
 
-    tokio::spawn(p2p_node.run(Arc::clone(&state), Arc::clone(&event_bus)));
+    let admission_store = consensus_admission::AttestationStore::for_chain_in_dir(
+        chain_spec.as_ref().map(|spec| spec.l1.chain_id),
+        Some(config.data_dir.clone()),
+    );
+    tokio::spawn(p2p_node.run(
+        Arc::clone(&state),
+        Arc::clone(&event_bus),
+        Arc::clone(&admission_store),
+    ));
     tokio::spawn(revocation_gossip::run(
         Arc::clone(&state),
         p2p_handle.clone(),
@@ -985,10 +1031,10 @@ async fn main() -> Result<()> {
 
     tokio::spawn(sync_validator_registrations(Arc::clone(&state)));
 
-    let admission_store = consensus_admission::AttestationStore::new();
     tokio::spawn(consensus_admission::run(
         Arc::clone(&state),
         Arc::clone(&admission_store),
+        p2p_handle.clone(),
     ));
 
     // â”€â”€ Validator set sync (chain-authoritative with static bootstrap) â”€â”€â”€â”€â”€â”€

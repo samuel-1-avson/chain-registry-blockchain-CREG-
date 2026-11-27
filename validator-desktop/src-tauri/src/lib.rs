@@ -5,15 +5,29 @@ pub mod zones;
 use ai_config::AiConfigCheckReportV1;
 use chain_client::{NodeOverview, PackageEvidenceBundle, SseStreamHandle};
 use registry_view::index::{CommitteeDiversityV1, QuarantineQueueV1};
-use runtime::{EnvironmentInfo, RuntimeMode, RuntimeState, RuntimeStatus};
+use runtime::{EnvironmentInfo, R7RuntimeStatus, RuntimeMode, RuntimeState, RuntimeStatus};
 use std::path::PathBuf;
-use tauri::{AppHandle, Manager, State};
+use tauri::{AppHandle, Manager, State, WebviewUrl, WebviewWindowBuilder};
 use zone_ipc::ProviderProbeReportV1;
 use zones::DesktopDoctorReport;
 
 #[tauri::command]
 async fn detect_environment() -> EnvironmentInfo {
     runtime::detect_environment().await
+}
+
+#[tauri::command]
+async fn open_validator_onboarding() -> Result<(), String> {
+    runtime::open_validator_onboarding()
+        .await
+        .map_err(|error| format!("{error:#}"))
+}
+
+#[tauri::command]
+async fn get_r7_runtime_status() -> Result<Vec<R7RuntimeStatus>, String> {
+    runtime::get_r7_runtime_status()
+        .await
+        .map_err(|error| error.to_string())
 }
 
 #[tauri::command]
@@ -182,22 +196,73 @@ async fn stop_sse_stream(sse: State<'_, SseStreamHandle>) -> Result<(), String> 
     Ok(())
 }
 
+fn build_main_window(
+    app: &tauri::App,
+    data_dir: Option<PathBuf>,
+) -> tauri::Result<tauri::WebviewWindow> {
+    let mut builder = WebviewWindowBuilder::new(app, "main", WebviewUrl::App("index.html".into()))
+        .title("CREG Validator Node")
+        .inner_size(1280.0, 820.0)
+        .min_inner_size(960.0, 640.0)
+        .center()
+        .visible(true)
+        .focused(true);
+    if let Some(dir) = data_dir {
+        builder = builder.data_directory(dir);
+    }
+    builder.build()
+}
+
 pub fn run() {
     let runtime_state = RuntimeState::default();
     let sse_handle = SseStreamHandle::default();
     let result = tauri::Builder::default()
         .setup(|app| {
-            if let Some(window) = app.get_webview_window("main") {
-                let _ = window.unminimize();
-                let _ = window.show();
-                let _ = window.set_focus();
-            }
+            let window = match build_main_window(app, None) {
+                Ok(window) => window,
+                Err(primary_err) => {
+                    let base_dir = app
+                        .path()
+                        .app_local_data_dir()
+                        .unwrap_or_else(|_| std::env::temp_dir().join("dev.cregnet.validator-desktop"));
+                    let fallback_dir = base_dir.join(format!("EBWebView-{}", std::process::id()));
+                    let _ = std::fs::create_dir_all(&fallback_dir);
+                    tracing::warn!(
+                        error = %primary_err,
+                        fallback = %fallback_dir.display(),
+                        "Primary WebView2 window creation failed; retrying with isolated data directory"
+                    );
+                    eprintln!(
+                        "Primary WebView2 window creation failed ({primary_err}); retrying with {}",
+                        fallback_dir.display()
+                    );
+                    build_main_window(app, Some(fallback_dir))?
+                }
+            };
+            let _ = window.unminimize();
+            let _ = window.show();
+            let _ = window.set_focus();
+
+            let handle = app.handle().clone();
+            tauri::async_runtime::spawn(async move {
+                tokio::time::sleep(std::time::Duration::from_millis(300)).await;
+                let handle_inner = handle.clone();
+                let _ = handle.run_on_main_thread(move || {
+                    if let Some(w) = handle_inner.get_webview_window("main") {
+                        let _ = w.unminimize();
+                        let _ = w.show();
+                        let _ = w.set_focus();
+                    }
+                });
+            });
             Ok(())
         })
         .manage(runtime_state)
         .manage(sse_handle)
         .invoke_handler(tauri::generate_handler![
             detect_environment,
+            open_validator_onboarding,
+            get_r7_runtime_status,
             get_runtime_status,
             start_validator,
             stop_validator,
@@ -217,5 +282,16 @@ pub fn run() {
         .run(tauri::generate_context!());
     if let Err(err) = result {
         eprintln!("error while running CREG Validator Console: {err}");
+        if let Some(local_data) = dirs::data_local_dir() {
+            let log_dir = local_data.join("dev.cregnet.validator-desktop");
+            let _ = std::fs::create_dir_all(&log_dir);
+            let _ = std::fs::write(
+                log_dir.join("startup-error.log"),
+                format!(
+                    "[{}] error while running CREG Validator Console: {err}\n",
+                    chrono::Utc::now().to_rfc3339()
+                ),
+            );
+        }
     }
 }

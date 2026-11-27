@@ -218,9 +218,22 @@ fn durable_remove_history(data_dir: &Path) -> anyhow::Result<()> {
 /// another local history writer.
 fn persist_history_bytes(data_dir: &Path, bytes: &[u8]) -> anyhow::Result<()> {
     validate_history_bytes(bytes)?;
-    std::fs::create_dir_all(data_dir)?;
-    let path = history_path(data_dir);
-    let tmp = path.with_extension("json.tmp");
+    atomic_write_bytes(&history_path(data_dir), bytes)
+}
+
+/// Durably write `bytes` to `path` via a sibling temporary file, `sync_all`,
+/// and platform-specific atomic replacement.
+pub(crate) fn atomic_write_bytes(path: &Path, bytes: &[u8]) -> anyhow::Result<()> {
+    let parent = path
+        .parent()
+        .filter(|dir| !dir.as_os_str().is_empty())
+        .unwrap_or_else(|| Path::new("."));
+    std::fs::create_dir_all(parent)?;
+    let file_name = path
+        .file_name()
+        .and_then(|name| name.to_str())
+        .unwrap_or("state.json");
+    let tmp = parent.join(format!(".{file_name}.tmp.{}", uuid::Uuid::new_v4()));
     let mut file = std::fs::File::create(&tmp)?;
     if let Err(error) = file.write_all(bytes).and_then(|_| file.sync_all()) {
         drop(file);
@@ -228,7 +241,7 @@ fn persist_history_bytes(data_dir: &Path, bytes: &[u8]) -> anyhow::Result<()> {
         return Err(error.into());
     }
     drop(file);
-    if let Err(error) = durable_replace(&tmp, &path, data_dir) {
+    if let Err(error) = durable_replace(&tmp, path, parent) {
         let _ = std::fs::remove_file(&tmp);
         return Err(error);
     }
@@ -588,6 +601,89 @@ pub fn verification_set_at(
 ) -> Result<ValidatorSet, String> {
     let checkpoint = checkpoint_from_env()?;
     verification_set_at_with_checkpoint(data_dir, height, trusted_bootstrap, checkpoint.as_ref())
+}
+
+/// Return the highest-height certified validator-set transition in `data_dir`.
+pub fn latest_certified_transition(
+    data_dir: &Path,
+) -> anyhow::Result<Option<AuthenticatedValidatorSetSnapshot>> {
+    let snapshots = load_checked(data_dir)?;
+    Ok(snapshots
+        .into_iter()
+        .filter_map(|entry| entry.certificate)
+        .max_by_key(|cert| cert.effective_from_height))
+}
+
+/// Return the earliest certified transition height at which `(node_id, pubkey, evm_address)`
+/// appears as an active member.
+pub fn certified_activation_height_for(
+    data_dir: &Path,
+    node_id: &str,
+    pubkey: &str,
+    evm_address: &str,
+) -> anyhow::Result<Option<u64>> {
+    let snapshots = load_checked(data_dir)?;
+    let normalized_pk = pubkey.trim().trim_start_matches("0x").to_ascii_lowercase();
+    let normalized_evm = evm_address.trim().to_ascii_lowercase();
+    Ok(snapshots
+        .into_iter()
+        .filter_map(|entry| entry.certificate)
+        .find(|cert| {
+            cert.validators.validators.iter().any(|validator| {
+                validator.id == node_id
+                    && validator.pubkey.to_ascii_lowercase() == normalized_pk
+                    && validator.eth_address.to_ascii_lowercase() == normalized_evm
+                    && common::validator_status_is_active(&validator.status)
+            })
+        })
+        .map(|cert| cert.effective_from_height))
+}
+
+/// A new signing node must already have verified the chain block anchoring its
+/// admission and the preceding validators' quorum certificate. L1 status and
+/// unsigned history alone cannot enable a local signing key.
+pub(crate) fn require_phase_c_signing_membership(
+    data_dir: &Path,
+    next_height: u64,
+    trusted_bootstrap: &ValidatorSet,
+    node_id: &str,
+    pubkey: &str,
+    canonical_block_hash: impl FnOnce(u64) -> anyhow::Result<Option<String>>,
+) -> anyhow::Result<()> {
+    let matches = |set: &ValidatorSet| {
+        set.validators.iter().any(|validator| {
+            validator.id == node_id
+                && validator.pubkey == pubkey
+                && common::validator_status_is_active(&validator.status)
+        })
+    };
+    if matches(trusted_bootstrap) {
+        return Ok(());
+    }
+    let Some(certificate) = authenticated_at_checked(data_dir, next_height, trusted_bootstrap)?
+    else {
+        anyhow::bail!("local Phase C signing identity has no certified validator admission");
+    };
+    if !matches(&certificate.validators) {
+        anyhow::bail!("local Phase C signing identity is outside the certified validator set");
+    }
+    let parent_height = certificate
+        .effective_from_height
+        .checked_sub(1)
+        .ok_or_else(|| anyhow::anyhow!("validator admission certificate has no parent height"))?;
+    if canonical_block_hash(parent_height)?.as_deref()
+        != Some(certificate.previous_block_hash.as_str())
+    {
+        anyhow::bail!(
+            "validator admission certificate does not anchor to the local canonical chain"
+        );
+    }
+    let authority = verification_set_at(data_dir, next_height, trusted_bootstrap)
+        .map_err(anyhow::Error::msg)?;
+    if common::canonical_validator_set_hash(&authority) != certificate.validator_set_hash {
+        anyhow::bail!("validator admission certificate conflicts with the configured authority");
+    }
+    Ok(())
 }
 
 pub(crate) fn verification_set_at_with_checkpoint(
@@ -975,6 +1071,41 @@ mod tests {
         record(dir.path(), 0, &set(&["aa", "bb"])).expect("record");
         let got = set_at(dir.path(), 50).expect("set present");
         assert_eq!(got.validators.len(), 2);
+    }
+
+    #[test]
+    fn external_signing_requires_a_certified_admission_on_the_local_chain() {
+        let data = tempfile::tempdir().unwrap();
+        let keys: Vec<_> = (0..5).map(|_| SigningKey::generate(&mut OsRng)).collect();
+        let bootstrap = keyed_set(&keys[..4]);
+        let admitted = keyed_set(&keys);
+        let candidate = &admitted.validators[4];
+        let certificate = signed_transition(22, &bootstrap, &admitted, &keys);
+        let require = |height, key: &str, block_hash: &str| {
+            require_phase_c_signing_membership(
+                data.path(),
+                height,
+                &bootstrap,
+                &candidate.id,
+                key,
+                |parent_height| {
+                    assert_eq!(parent_height, 21);
+                    Ok(Some(block_hash.to_string()))
+                },
+            )
+        };
+        record(data.path(), 0, &bootstrap).unwrap();
+        assert!(require(22, &candidate.pubkey, &certificate.previous_block_hash).is_err());
+        record_authenticated(data.path(), certificate.clone(), &bootstrap).unwrap();
+        assert!(require(21, &candidate.pubkey, &certificate.previous_block_hash).is_err());
+        assert!(require(22, &candidate.pubkey, &"0".repeat(64)).is_err());
+        assert!(require(
+            22,
+            &bootstrap.validators[0].pubkey,
+            &certificate.previous_block_hash
+        )
+        .is_err());
+        require(22, &candidate.pubkey, &certificate.previous_block_hash).unwrap();
     }
 
     #[test]

@@ -112,5 +112,9 @@ path = "tests/multi_node_testnet_simulation.rs"
 name = "high_throughput_stress_test"
 path = "tests/high_throughput_stress_test.rs"
 
+[[test]]
+name = "admission_rehearsal"
+path = "tests/admission_rehearsal.rs"
+
 [lints]
 workspace = true

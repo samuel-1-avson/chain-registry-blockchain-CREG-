@@ -44,6 +44,7 @@ anyhow     = { workspace = true }
 tracing    = { workspace = true }
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 reqwest    = { workspace = true, features = ["stream", "multipart", "json"] }
+axum       = { workspace = true }
 futures    = { workspace = true }
 chrono     = { workspace = true }
 ed25519-dalek = { workspace = true }
@@ -74,8 +75,6 @@ urlencoding  = "2.1"
 whoami       = "1"
 semver       = "1"
 base64       = "0.22"
-
-[dev-dependencies]
 tempfile = "3"
 
 [lints]

@@ -30,6 +30,333 @@ pub struct NodeOverview {
     pub status_text: String,
 }
 
+#[derive(Debug, Serialize)]
+pub struct R7NodeHealth {
+    pub is_validator: bool,
+    pub synced: bool,
+    pub finalized_height: u64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct R7AdmissionSummary {
+    pub stage: String,
+    pub stage_reason: String,
+    pub l1_approvals_collected: u64,
+    pub l1_approvals_required: u64,
+    pub transition_approvals_collected: u64,
+    pub transition_approvals_required: u64,
+    pub l1_tx_status: String,
+    pub l1_tx_hash: Option<String>,
+    pub l1_confirmed_block: Option<u64>,
+    pub voting_activation_height: Option<u64>,
+    pub first_finalized_vote_height: Option<u64>,
+    pub missing_signer_setup: Vec<String>,
+    pub unavailable_reason: Option<String>,
+}
+
+#[derive(Deserialize)]
+struct AdmissionStatusResponse {
+    #[serde(default)]
+    local_node: AdmissionLocalNodeResponse,
+    #[serde(default)]
+    applicants: Vec<AdmissionApplicantResponse>,
+}
+
+#[derive(Deserialize, Default)]
+struct AdmissionLocalNodeResponse {
+    #[serde(default)]
+    is_validator: bool,
+    #[serde(default)]
+    admission_signer_configured: bool,
+    #[serde(default)]
+    admission_signer_issue: Option<String>,
+}
+
+#[derive(Deserialize, Default)]
+struct AdmissionApplicantResponse {
+    #[serde(default)]
+    stage: String,
+    #[serde(default)]
+    stage_reason: String,
+    #[serde(default)]
+    l1_approvals_collected: u64,
+    #[serde(default)]
+    l1_approvals_required: u64,
+    #[serde(default)]
+    transition_approvals_collected: u64,
+    #[serde(default)]
+    transition_approvals_required: u64,
+    #[serde(default)]
+    l1_tx_status: String,
+    #[serde(default)]
+    l1_tx_hash: Option<String>,
+    #[serde(default)]
+    l1_confirmed_block: Option<u64>,
+    #[serde(default)]
+    voting_activation_height: Option<u64>,
+    #[serde(default)]
+    first_finalized_vote_height: Option<u64>,
+    #[serde(default)]
+    missing_signer_setup: Vec<String>,
+}
+
+enum AdmissionFetchOutcome {
+    Applicant(R7AdmissionSummary),
+    NotFound,
+    Unavailable,
+}
+
+async fn fetch_admission_endpoint(
+    client: &reqwest::Client,
+    url: &str,
+) -> AdmissionFetchOutcome {
+    let Ok(resp) = client.get(url).send().await else {
+        return AdmissionFetchOutcome::Unavailable;
+    };
+    if resp.status() == reqwest::StatusCode::NOT_FOUND {
+        return AdmissionFetchOutcome::NotFound;
+    }
+    if !resp.status().is_success() {
+        return AdmissionFetchOutcome::Unavailable;
+    }
+    let Ok(parsed) = resp.json::<AdmissionStatusResponse>().await else {
+        return AdmissionFetchOutcome::Unavailable;
+    };
+    let Some(app) = parsed.applicants.into_iter().next() else {
+        return AdmissionFetchOutcome::Unavailable;
+    };
+    let mut missing = app.missing_signer_setup;
+    if parsed.local_node.is_validator && !parsed.local_node.admission_signer_configured {
+        if let Some(issue) = parsed.local_node.admission_signer_issue {
+            if !missing.contains(&issue) {
+                missing.push(issue);
+            }
+        }
+    }
+    AdmissionFetchOutcome::Applicant(R7AdmissionSummary {
+        stage: app.stage,
+        stage_reason: app.stage_reason,
+        l1_approvals_collected: app.l1_approvals_collected,
+        l1_approvals_required: app.l1_approvals_required,
+        transition_approvals_collected: app.transition_approvals_collected,
+        transition_approvals_required: app.transition_approvals_required,
+        l1_tx_status: app.l1_tx_status,
+        l1_tx_hash: app.l1_tx_hash,
+        l1_confirmed_block: app.l1_confirmed_block,
+        voting_activation_height: app.voting_activation_height,
+        first_finalized_vote_height: app.first_finalized_vote_height,
+        missing_signer_setup: missing,
+        unavailable_reason: None,
+    })
+}
+
+fn merge_admission_summaries(
+    local: Option<R7AdmissionSummary>,
+    public: Option<R7AdmissionSummary>,
+) -> Option<R7AdmissionSummary> {
+    match (local, public) {
+        (Some(loc), Some(pub_)) => {
+            let prefer_public_stage =
+                pub_.stage == "active_voting" && loc.stage != "active_voting";
+            let (stage, stage_reason) = if prefer_public_stage {
+                (pub_.stage, pub_.stage_reason)
+            } else {
+                (loc.stage, loc.stage_reason)
+            };
+
+            let l1_tx_hash = loc.l1_tx_hash.or(pub_.l1_tx_hash);
+            let l1_confirmed_block = loc.l1_confirmed_block.or(pub_.l1_confirmed_block);
+            let l1_tx_status = if l1_tx_hash.is_some()
+                && (loc.l1_tx_status == "confirmed_on_chain"
+                    || loc.l1_tx_status == "unknown"
+                    || loc.l1_tx_status.is_empty())
+                && !pub_.l1_tx_status.is_empty()
+                && pub_.l1_tx_status != "unknown"
+            {
+                pub_.l1_tx_status
+            } else if loc.l1_tx_status == "unknown" || loc.l1_tx_status.is_empty() {
+                pub_.l1_tx_status
+            } else {
+                loc.l1_tx_status
+            };
+
+            let mut missing_signer_setup = loc.missing_signer_setup;
+            for item in pub_.missing_signer_setup {
+                if !missing_signer_setup.contains(&item) {
+                    missing_signer_setup.push(item);
+                }
+            }
+
+            Some(R7AdmissionSummary {
+                stage,
+                stage_reason,
+                l1_approvals_collected: loc
+                    .l1_approvals_collected
+                    .max(pub_.l1_approvals_collected),
+                l1_approvals_required: loc.l1_approvals_required.max(pub_.l1_approvals_required),
+                transition_approvals_collected: loc
+                    .transition_approvals_collected
+                    .max(pub_.transition_approvals_collected),
+                transition_approvals_required: loc
+                    .transition_approvals_required
+                    .max(pub_.transition_approvals_required),
+                l1_tx_status,
+                l1_tx_hash,
+                l1_confirmed_block,
+                voting_activation_height: match (
+                    loc.voting_activation_height,
+                    pub_.voting_activation_height,
+                ) {
+                    (Some(a), Some(b)) => Some(a.max(b)),
+                    (Some(a), None) | (None, Some(a)) => Some(a),
+                    (None, None) => None,
+                },
+                first_finalized_vote_height: match (
+                    loc.first_finalized_vote_height,
+                    pub_.first_finalized_vote_height,
+                ) {
+                    (Some(a), Some(b)) => Some(a.max(b)),
+                    (Some(a), None) | (None, Some(a)) => Some(a),
+                    (None, None) => None,
+                },
+                missing_signer_setup,
+                unavailable_reason: loc.unavailable_reason.and(pub_.unavailable_reason),
+            })
+        }
+        (Some(loc), None) => Some(loc),
+        (None, Some(pub_)) => Some(pub_),
+        (None, None) => None,
+    }
+}
+
+pub(crate) async fn fetch_r7_admission_status(
+    local_port: Option<u16>,
+    node_id: &str,
+) -> Option<R7AdmissionSummary> {
+    let local_client = reqwest::Client::builder()
+        .timeout(Duration::from_secs(4))
+        .no_proxy()
+        .redirect(reqwest::redirect::Policy::none())
+        .build()
+        .ok()?;
+    let public_client = reqwest::Client::builder()
+        .timeout(Duration::from_secs(5))
+        .redirect(reqwest::redirect::Policy::none())
+        .build()
+        .ok()?;
+
+    let encoded = encode_segment(node_id);
+    let public_url =
+        format!("https://api.testnet.cregnet.dev/v1/public/validator/admission-status?node_id={encoded}");
+    let local_fut = async {
+        match local_port {
+            Some(port) => {
+                let local_url = format!(
+                    "http://127.0.0.1:{port}/v1/public/validator/admission-status?node_id={encoded}"
+                );
+                fetch_admission_endpoint(&local_client, &local_url).await
+            }
+            None => AdmissionFetchOutcome::Unavailable,
+        }
+    };
+    let public_fut = fetch_admission_endpoint(&public_client, &public_url);
+    let (local_outcome, public_outcome) = tokio::join!(local_fut, public_fut);
+
+    let saw_not_found = matches!(local_outcome, AdmissionFetchOutcome::NotFound)
+        || matches!(public_outcome, AdmissionFetchOutcome::NotFound);
+    let local_summary = match local_outcome {
+        AdmissionFetchOutcome::Applicant(summary) => Some(summary),
+        _ => None,
+    };
+    let public_summary = match public_outcome {
+        AdmissionFetchOutcome::Applicant(summary) => Some(summary),
+        _ => None,
+    };
+
+    if let Some(merged) = merge_admission_summaries(local_summary, public_summary) {
+        return Some(merged);
+    }
+
+    saw_not_found.then(|| R7AdmissionSummary {
+        stage: "rollout_pending".to_string(),
+        stage_reason:
+            "R7 node does not yet expose /v1/public/validator/admission-status (HTTP 404); validator fleet rollout is pending"
+                .to_string(),
+        l1_approvals_collected: 0,
+        l1_approvals_required: 0,
+        transition_approvals_collected: 0,
+        transition_approvals_required: 0,
+        l1_tx_status: "unknown".to_string(),
+        l1_tx_hash: None,
+        l1_confirmed_block: None,
+        voting_activation_height: None,
+        first_finalized_vote_height: None,
+        missing_signer_setup: Vec::new(),
+        unavailable_reason: Some(
+            "Admission telemetry endpoint returned HTTP 404 (pending fleet rollout)".to_string(),
+        ),
+    })
+}
+
+#[derive(Deserialize)]
+struct R7HealthResponse {
+    status: String,
+    node_id: String,
+    is_validator: bool,
+    sync: R7SyncResponse,
+}
+
+#[derive(Deserialize)]
+struct R7SyncResponse {
+    lag_blocks: u64,
+    healthy: bool,
+}
+
+#[derive(Deserialize)]
+struct R7StatsResponse {
+    chain_id: String,
+    spec_signature_verified: bool,
+    finalized_height: u64,
+    validator_set_sync_state: String,
+    peer_count: u64,
+}
+
+pub(crate) async fn fetch_r7_health(
+    port: u16,
+    node_id: &str,
+    chain_id: &str,
+) -> Result<R7NodeHealth> {
+    let client = reqwest::Client::builder()
+        .timeout(Duration::from_secs(4))
+        .no_proxy()
+        .redirect(reqwest::redirect::Policy::none())
+        .build()?;
+    let base = format!("http://127.0.0.1:{port}");
+    let (health, stats) = tokio::try_join!(
+        client.get(format!("{base}/v1/health")).send(),
+        client.get(format!("{base}/v1/public/chain/stats")).send(),
+    )?;
+    let (health, stats) = tokio::try_join!(
+        health.error_for_status()?.json::<R7HealthResponse>(),
+        stats.error_for_status()?.json::<R7StatsResponse>(),
+    )?;
+    anyhow::ensure!(
+        health.status == "ok"
+            && health.node_id == node_id
+            && stats.chain_id == chain_id
+            && stats.spec_signature_verified,
+        "R7 health check did not confirm the expected node and signed chain"
+    );
+    Ok(R7NodeHealth {
+        is_validator: health.is_validator,
+        synced: health.sync.healthy
+            && health.sync.lag_blocks == 0
+            && stats.validator_set_sync_state == "synced"
+            && stats.peer_count > 0,
+        finalized_height: stats.finalized_height,
+    })
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PackageEvidenceBundle {
     pub canonical: String,
@@ -442,5 +769,48 @@ mod tests {
         let (id, env) = parse_sse_v2_frame(frame).expect("valid frame");
         assert_eq!(id.as_deref(), Some("12.0"));
         assert_eq!(env.height, 12);
+    }
+
+    #[test]
+    fn merge_admission_summaries_fills_public_sepolia_tx_into_local_active_status() {
+        let local = R7AdmissionSummary {
+            stage: "active_voting".to_string(),
+            stage_reason: "Certified at block #22; first finalized vote recorded at block #22".to_string(),
+            l1_approvals_collected: 4,
+            l1_approvals_required: 4,
+            transition_approvals_collected: 4,
+            transition_approvals_required: 4,
+            l1_tx_status: "confirmed_on_chain".to_string(),
+            l1_tx_hash: None,
+            l1_confirmed_block: None,
+            voting_activation_height: Some(22),
+            first_finalized_vote_height: Some(22),
+            missing_signer_setup: vec!["Validator admission signer not configured".to_string()],
+            unavailable_reason: None,
+        };
+        let public = R7AdmissionSummary {
+            stage: "active_voting".to_string(),
+            stage_reason: "Certified at block #22; first finalized vote recorded at block #22".to_string(),
+            l1_approvals_collected: 4,
+            l1_approvals_required: 4,
+            transition_approvals_collected: 4,
+            transition_approvals_required: 4,
+            l1_tx_status: "confirmed".to_string(),
+            l1_tx_hash: Some("0xb0e823c0829dd0076cb86a2a2828d1d968b4d23c9f21aa090e71c6987c192225".to_string()),
+            l1_confirmed_block: Some(12_219_746),
+            voting_activation_height: Some(22),
+            first_finalized_vote_height: Some(22),
+            missing_signer_setup: Vec::new(),
+            unavailable_reason: None,
+        };
+
+        let merged = merge_admission_summaries(Some(local), Some(public)).expect("merged");
+        assert_eq!(merged.l1_tx_status, "confirmed");
+        assert_eq!(
+            merged.l1_tx_hash.as_deref(),
+            Some("0xb0e823c0829dd0076cb86a2a2828d1d968b4d23c9f21aa090e71c6987c192225")
+        );
+        assert_eq!(merged.l1_confirmed_block, Some(12_219_746));
+        assert_eq!(merged.missing_signer_setup.len(), 1);
     }
 }

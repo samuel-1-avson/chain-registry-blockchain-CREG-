@@ -23,6 +23,7 @@ type Props = {
   setBusy: (b: string | null) => void;
   errorMsg: string | null;
   setErrorMsg: (e: string | null) => void;
+  hasActiveR7Node?: boolean;
 };
 
 function renderCapabilities(caps: ZoneCapabilitiesV1) {
@@ -97,7 +98,14 @@ export function ZonesView(props: Props) {
     setBusy,
     errorMsg,
     setErrorMsg,
+    hasActiveR7Node,
   } = props;
+
+  const isCollapsedForR7 = Boolean(hasActiveR7Node) && !runtimeStatus?.running;
+  const lastError =
+    runtimeStatus?.last_error && errorMsg !== runtimeStatus.last_error
+      ? runtimeStatus.last_error
+      : null;
 
   const refreshRuntime = async () => {
     setErrorMsg(null);
@@ -114,7 +122,7 @@ export function ZonesView(props: Props) {
 
   const handleStart = async () => {
     setErrorMsg(null);
-    setBusy("Starting validator node...");
+    setBusy("Starting configured runtime...");
     try {
       const s = await desktopApi.startValidator({
         mode,
@@ -131,7 +139,7 @@ export function ZonesView(props: Props) {
 
   const handleStop = async () => {
     setErrorMsg(null);
-    setBusy("Stopping validator node...");
+    setBusy("Stopping the four-zone runtime…");
     try {
       const s = await desktopApi.stopValidator(mode, composeFile || undefined);
       setRuntimeStatus(s);
@@ -158,18 +166,18 @@ export function ZonesView(props: Props) {
     }
   };
 
-  return (
+  const panels = (
     <div className="panel-stack">
       <section className="card">
         <div className="card-header">
           <div>
-            <h2>Validator Runtime Controller</h2>
+            <h2>Advanced four-zone runtime</h2>
             <p className="muted">
-              Start, stop, and inspect either the 4-zone Docker Compose stack or the native supervisor binary.
+              Manage a configured development stack or native supervisor.
             </p>
           </div>
-          <span className={`pill ${runtimeStatus?.running ? "pill-ok" : "pill-warn"}`}>
-            {runtimeStatus?.running ? "RUNNING" : "STOPPED"}
+          <span className={`pill ${runtimeStatus?.running ? "pill-ok" : hasActiveR7Node ? "" : "pill-warn"}`}>
+            {runtimeStatus?.running ? "RUNNING" : hasActiveR7Node ? "NOT USED FOR R7" : "STOPPED"}
           </span>
         </div>
 
@@ -185,10 +193,10 @@ export function ZonesView(props: Props) {
             </select>
           </label>
           <button type="button" className="btn btn-primary" disabled={Boolean(busy)} onClick={handleStart}>
-            Start Validator
+            Start runtime
           </button>
           <button type="button" className="btn btn-danger" disabled={Boolean(busy)} onClick={handleStop}>
-            Stop Validator
+            Stop runtime
           </button>
           <button type="button" className="btn" disabled={Boolean(busy)} onClick={refreshRuntime}>
             Refresh Status
@@ -196,9 +204,7 @@ export function ZonesView(props: Props) {
         </div>
 
         {errorMsg && <div className="alert alert-err">{errorMsg}</div>}
-        {runtimeStatus?.last_error && (
-          <div className="alert alert-warn">{runtimeStatus.last_error}</div>
-        )}
+        {lastError && <div className="alert alert-warn">{lastError}</div>}
 
         <div className="meta-strip">
           <span>Docker CLI: <strong>{env?.docker_available ? "available" : "not detected"}</strong></span>
@@ -279,4 +285,17 @@ export function ZonesView(props: Props) {
       </section>
     </div>
   );
+
+  if (isCollapsedForR7) {
+    return (
+      <details className="card">
+        <summary className="muted" style={{ cursor: "pointer", fontWeight: 600 }}>
+          Advanced four-zone development stack (Linux KVM — not needed for your running R7 validator)
+        </summary>
+        {panels}
+      </details>
+    );
+  }
+
+  return panels;
 }

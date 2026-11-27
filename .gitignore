@@ -42,6 +42,9 @@ secrets/
 # SEC-301b: hot-key loader crate (source only — not credential files)
 !chain-registry/crates/secrets/
 !chain-registry/crates/secrets/**
+# CipherVault local vault state (encrypted DB, policy, operator list — never commit)
+.ciphervault/
+**/.ciphervault/
 !.gitignore
 
 # =============================================================================

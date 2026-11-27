@@ -12,7 +12,8 @@ use axum::{
     Json, Router,
 };
 use common::{
-    sign_tree_head, PackageStatus, PublishRequest, Transaction, ValidatorIdentity, ValidatorVote,
+    sign_tree_head, validator_identity_registration_message, PackageStatus, PublishRequest,
+    Transaction, ValidatorIdentity, ValidatorVote,
 };
 use futures::{future::join_all, StreamExt};
 use k256::ecdsa::{RecoveryId, Signature as K256Signature, VerifyingKey as K256VerifyingKey};
@@ -224,6 +225,10 @@ fn public_routes(sse_bus: EventBus, ws_bus: EventBus) -> Router<SharedState> {
             "/v1/public/validator-set-transitions",
             get(public_validator_set_transitions),
         )
+        .route(
+            "/v1/public/validator/admission-status",
+            get(get_validator_admission_status),
+        )
         .route("/v1/public/blocks/:height", get(get_block_by_height))
         .route("/v1/public/blocks/hash/:hash", get(get_block_by_hash))
         .route("/v1/public/transactions/:canonical", get(get_transaction))
@@ -320,6 +325,10 @@ fn validator_routes() -> Router<SharedState> {
         .route(
             "/v1/validator/registrations",
             get(list_validator_registrations),
+        )
+        .route(
+            "/v1/validator/admission-status",
+            get(get_validator_admission_status),
         )
         .route(
             "/v1/validator/consensus/vote",
@@ -1255,18 +1264,6 @@ fn node_chain_id(config: &crate::config::NodeConfig) -> String {
     }
 }
 
-fn validator_identity_registration_message(
-    chain_id: &str,
-    evm_address: &str,
-    node_id: &str,
-    ed25519_pubkey: &str,
-    nonce: &str,
-) -> String {
-    format!(
-        "creg-validator-identity-v1\nchain_id:{chain_id}\nevm_address:{evm_address}\nnode_id:{node_id}\ned25519_pubkey:{ed25519_pubkey}\nnonce:{nonce}"
-    )
-}
-
 fn parse_ecdsa_signature_bytes(signature_hex: &str) -> Result<[u8; 65], String> {
     let normalized = signature_hex.trim().trim_start_matches("0x");
     let decoded =
@@ -1461,6 +1458,7 @@ pub(crate) async fn apply_validator_registration(
 
 async fn register_validator_identity(
     State(state): State<SharedState>,
+    Extension(p2p_handle): Extension<crate::p2p::P2PHandle>,
     Json(request): Json<RegisterValidatorIdentityRequest>,
 ) -> Response {
     let proof = crate::validator_registry_gossip::RegistrationProof {
@@ -1484,7 +1482,15 @@ async fn register_validator_identity(
             if let Err(e) = crate::validator_registry_gossip::persist(&data_dir, &proof) {
                 tracing::warn!("Failed to persist validator registration: {}", e);
             }
-            crate::validator_registry_gossip::broadcast(proof).await;
+            if let Ok(data) = serde_json::to_vec(&proof.into_gossip()) {
+                let _ = p2p_handle
+                    .sender
+                    .send(crate::p2p::P2PCommand::Broadcast {
+                        topic: crate::validator_registry_gossip::REGISTRATION_TOPIC.to_string(),
+                        data,
+                    })
+                    .await;
+            }
             (StatusCode::ACCEPTED, Json(response)).into_response()
         }
         Err((code, error)) => (code, Json(ErrorResponse { error })).into_response(),
@@ -1531,12 +1537,70 @@ async fn list_validator_registrations(State(state): State<SharedState>) -> impl 
     let s = state.read().await;
     let mut registrations: Vec<ValidatorRegistrationStatus> =
         s.validator_registrations.values().cloned().collect();
+    if cfg!(feature = "phase-c-real-fleet")
+        && registrations
+            .iter()
+            .any(|record| record.active || record.admitted_to_consensus)
+    {
+        let authority = s
+            .chain
+            .tip_height()
+            .ok()
+            .and_then(|height| height.checked_add(1))
+            .and_then(|height| {
+                crate::validator_set_history::verification_set_at(
+                    &s.config.data_dir,
+                    height,
+                    &s.validator_set_bootstrap,
+                )
+                .ok()
+            });
+        for record in &mut registrations {
+            let identity = record.identity.normalized();
+            let certified = authority.as_ref().is_some_and(|set| {
+                set.validators.iter().any(|validator| {
+                    validator.id == identity.node_id
+                        && validator
+                            .pubkey
+                            .eq_ignore_ascii_case(&identity.ed25519_pubkey)
+                        && validator
+                            .eth_address
+                            .eq_ignore_ascii_case(&identity.evm_address)
+                        && common::validator_status_is_active(&validator.status)
+                })
+            });
+            record.active &= certified;
+            record.admitted_to_consensus &= certified;
+            record.status = validator_registration_status_text(record);
+        }
+    }
     registrations.sort_by(|left, right| {
         left.alias
             .cmp(&right.alias)
             .then(left.identity.node_id.cmp(&right.identity.node_id))
     });
     Json(registrations)
+}
+
+#[derive(Deserialize)]
+struct AdmissionStatusParams {
+    applicant: Option<String>,
+    node_id: Option<String>,
+}
+
+async fn get_validator_admission_status(
+    State(state): State<SharedState>,
+    axum::extract::Extension(store): axum::extract::Extension<Arc<AttestationStore>>,
+    Query(params): Query<AdmissionStatusParams>,
+) -> impl IntoResponse {
+    let report = crate::consensus_admission::build_admission_status_report(
+        &state,
+        &store,
+        params.applicant.as_deref(),
+        params.node_id.as_deref(),
+    )
+    .await;
+    Json(report)
 }
 
 async fn public_validator_set_transitions(state: State<SharedState>) -> Response {
@@ -1778,6 +1842,17 @@ async fn submit_validator_set_transition(
     };
     match persistence {
         Ok(()) => {
+            {
+                let mut s = state.write().await;
+                if let Err(error) = s.refresh_runtime_validator_set_from_certified_history() {
+                    tracing::warn!(%error, "Failed to refresh runtime validator set after transition POST");
+                }
+            }
+            if let Err(error) =
+                crate::consensus_admission::try_activate_candidate_validator(&state).await
+            {
+                tracing::warn!(%error, "Candidate auto-activation check failed after transition POST");
+            }
             crate::validator_registry_gossip::broadcast_validator_set_transition(gossip_snapshot)
                 .await;
             (

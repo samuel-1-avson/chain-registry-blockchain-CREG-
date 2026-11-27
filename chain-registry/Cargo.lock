@@ -1869,6 +1869,7 @@ dependencies = [
  "ai-config",
  "anyhow",
  "arboard",
+ "axum",
  "base64 0.22.1",
  "bip39",
  "chrono",

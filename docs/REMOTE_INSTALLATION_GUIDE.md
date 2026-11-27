@@ -221,18 +221,15 @@ creg testnet drip --address 0xYourEthAddress
 
 ## 4. Running a Remote Validator Node
 
-For users setting up an **independent remote validator** system:
+Coordinate R7 admission and the fleet scanner configuration with the maintainer before launching a voting node. See the [validator onboarding checklist](./VALIDATOR_ONBOARDING_CHECKLIST.md).
+
+Run the launcher from a checkout of this repository.
 
 ```bash
-# Download and execute the automated validator onboarding script:
-curl -fsSL https://raw.githubusercontent.com/samuel-1-avson/chain-registry-blockchain-CREG-/main/chain-registry/testnet/start-external-validator.sh | bash
+./chain-registry/testnet/start-external-validator.sh
 ```
 
-The script will:
-1. Automatically provision an isolated data directory at `~/.creg-validator`.
-2. Generate consensus keys (`validator.key`) and an operator API key.
-3. Fetch the signed `chain-spec.sepolia.json` from the spec server.
-4. Launch the validator container connected to the live bootnodes (`35.225.225.20:9000`).
+The launcher creates or reuses the node's keys in `~/.creg-validator` and stores R7 chain state in its `chain-data-r7` subdirectory. The node verifies the [signed R7 chain spec](https://spec.testnet.cregnet.dev/phase-c/r7/chain-spec.json) at startup and takes its contract addresses and default P2P seeds from the spec. Set `CREG_ETH_RPC` to a Sepolia RPC with full log history.
 
 ---
 
@@ -244,4 +241,4 @@ The script will:
 | **Verify Installation** | `creg --version` | `creg --version` |
 | **Check Network** | `creg blocks` | `creg blocks` |
 | **Create Key** | `creg keygen publisher` | `creg keygen publisher` |
-| **Run Validator** | `bash <(curl -fsSL https://spec.testnet.cregnet.dev/start-external-validator.sh)` | `.\testnet\start-external-validator.ps1` |
+| **Run Validator** | `./chain-registry/testnet/start-external-validator.sh` | `.\chain-registry\testnet\start-external-validator.ps1` |

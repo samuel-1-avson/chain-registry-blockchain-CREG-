@@ -899,8 +899,6 @@ pub async fn run(
             }
         };
 
-        let reproposal = ctx.reproposal.clone();
-
         let prepared_transactions = ctx.prepared_transactions.clone();
         let carrying_prepared_value = prepared_transactions.is_some();
         if prepared_transactions.is_none() {
@@ -966,23 +964,6 @@ pub async fn run(
                     block.header.height,
                     block.transactions.len()
                 );
-
-                // Broadcast PbftPrePrepare to start the consensus round
-                let msg = reproposal.unwrap_or(common::GossipMessage::PbftPrePrepare { block });
-                match serde_json::to_vec(&msg) {
-                    Ok(data) => {
-                        let _ = p2p_handle
-                            .sender
-                            .send(crate::p2p::P2PCommand::Broadcast {
-                                topic: "creg/v1/blocks".into(),
-                                data,
-                            })
-                            .await;
-                    }
-                    Err(e) => {
-                        tracing::error!("Failed to serialize PbftPrePrepare gossip: {}", e);
-                    }
-                }
             }
             Err(e) => {
                 if carrying_prepared_value
@@ -1539,6 +1520,26 @@ async fn produce_block(
 
     drop(s);
 
+    // Broadcast PRE-PREPARE strictly before local PREPARE / COMMIT so followers
+    // open the PBFT round before validating our PREPARE vote.
+    let pre_prepare_msg = reproposal.unwrap_or_else(|| common::GossipMessage::PbftPrePrepare {
+        block: block.clone(),
+    });
+    match serde_json::to_vec(&pre_prepare_msg) {
+        Ok(data) => {
+            let _ = p2p
+                .sender
+                .send(crate::p2p::P2PCommand::Broadcast {
+                    topic: "creg/v1/blocks".into(),
+                    data,
+                })
+                .await;
+        }
+        Err(e) => {
+            tracing::error!("Failed to serialize PbftPrePrepare gossip: {}", e);
+        }
+    }
+
     if let Some(cmd) = prep_cmd {
         let _ = p2p.sender.send(cmd).await;
     }
@@ -1720,7 +1721,7 @@ mod tests {
     }
 
     fn noop_p2p() -> P2PHandle {
-        let (sender, _rx) = tokio::sync::mpsc::channel::<P2PCommand>(1);
+        let (sender, _rx) = tokio::sync::mpsc::channel::<P2PCommand>(8);
         P2PHandle { sender }
     }
 
@@ -1932,6 +1933,69 @@ mod tests {
         assert!(block.header.timestamp > genesis.header.timestamp);
         assert_eq!(block.header.timestamp.timestamp_subsec_nanos(), 0);
         assert!(pending_txs.is_empty());
+    }
+
+    #[tokio::test]
+    async fn produce_block_broadcasts_pre_prepare_before_prepare() {
+        let (state, _dir, primary_sk, secondary_sk) =
+            two_validator_state("validator-a", "validator-b").await;
+        let (rank0, _rank1) = proposer_ranking(&state).await.expect("proposer ranking");
+        let (sender, mut rx) = tokio::sync::mpsc::channel::<P2PCommand>(8);
+        let p2p = P2PHandle { sender };
+
+        {
+            let mut s = state.write().await;
+            s.config.node_id = rank0.clone();
+            s.config.validator_privkey = Some(
+                privkey_for_id(
+                    &rank0,
+                    "validator-a",
+                    &primary_sk,
+                    "validator-b",
+                    &secondary_sk,
+                )
+                .into(),
+            );
+            let pubkey = s
+                .validator_set
+                .validators
+                .iter()
+                .find(|validator| validator.id == rank0)
+                .unwrap()
+                .pubkey
+                .clone();
+            let genesis_hash = s.chain.tip_hash().unwrap();
+            s.chain
+                .initialize_pbft_safety_journal(&genesis_hash, &rank0, &pubkey)
+                .unwrap();
+        }
+
+        let txs = vec![signed_publish_tx(
+            "ordered-broadcast",
+            &[("validator-a", &primary_sk), ("validator-b", &secondary_sk)],
+        )];
+        let ctx = prepare_proposer_context(Arc::clone(&state), &p2p, 0)
+            .await
+            .unwrap();
+        let _block = produce_block(Arc::clone(&state), txs, p2p, ctx)
+            .await
+            .unwrap();
+
+        let mut seen = Vec::new();
+        while let Ok(cmd) = rx.try_recv() {
+            if let P2PCommand::Broadcast { topic, data } = cmd {
+                if topic == "creg/v1/blocks" {
+                    let msg: common::GossipMessage = serde_json::from_slice(&data).unwrap();
+                    seen.push(match msg {
+                        common::GossipMessage::PbftPrePrepare { .. } => "pre_prepare",
+                        common::GossipMessage::PbftPrepare { .. } => "prepare",
+                        common::GossipMessage::PbftCommit { .. } => "commit",
+                        _ => "other",
+                    });
+                }
+            }
+        }
+        assert_eq!(seen, vec!["pre_prepare", "prepare"]);
     }
 }
 

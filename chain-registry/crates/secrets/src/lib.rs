@@ -77,6 +77,8 @@ pub enum HotKeyRole {
     ValidatorMlDsa44,
     /// Governance.sol execution signer key (node only, `VNA-32`).
     Governance,
+    /// The active staking wallet used for validator admission attestations.
+    ValidatorAdmission,
 }
 
 impl HotKeyRole {
@@ -88,6 +90,7 @@ impl HotKeyRole {
             Self::ValidatorEd25519 => "CREG_VALIDATOR_KEY",
             Self::ValidatorMlDsa44 => "CREG_VALIDATOR_PQ_KEY",
             Self::Governance => "CREG_GOVERNANCE_KEY",
+            Self::ValidatorAdmission => "CREG_VALIDATOR_ADMISSION_KEY",
         }
     }
 
@@ -99,6 +102,7 @@ impl HotKeyRole {
             Self::ValidatorEd25519 => "secret/data/creg/validator",
             Self::ValidatorMlDsa44 => "secret/data/creg/validator-pq",
             Self::Governance => "secret/data/creg/governance",
+            Self::ValidatorAdmission => "secret/data/creg/validator-admission",
         }
     }
 
@@ -110,6 +114,7 @@ impl HotKeyRole {
             Self::ValidatorEd25519 => "CREG_VAULT_SECRET_PATH_VALIDATOR",
             Self::ValidatorMlDsa44 => "CREG_VAULT_SECRET_PATH_VALIDATOR_PQ",
             Self::Governance => "CREG_VAULT_SECRET_PATH_GOVERNANCE",
+            Self::ValidatorAdmission => "CREG_VAULT_SECRET_PATH_VALIDATOR_ADMISSION",
         }
     }
 
@@ -121,6 +126,7 @@ impl HotKeyRole {
             Self::ValidatorEd25519 => &["validator_key", "private_key", "key"],
             Self::ValidatorMlDsa44 => &["validator_pq_key", "pq_seed", "key"],
             Self::Governance => &["governance_key", "private_key", "key"],
+            Self::ValidatorAdmission => &["validator_admission_key", "private_key", "key"],
         }
     }
 
@@ -266,6 +272,7 @@ pub fn validate_vault_exclusivity(backend: SecretsBackend) -> Vec<String> {
         HotKeyRole::ValidatorMlDsa44,
         HotKeyRole::Bridge,
         HotKeyRole::Governance,
+        HotKeyRole::ValidatorAdmission,
     ] {
         if let Ok(value) = std::env::var(role.env_var()) {
             if !value.trim().is_empty() {

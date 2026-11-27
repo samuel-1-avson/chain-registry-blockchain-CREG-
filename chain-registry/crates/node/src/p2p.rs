@@ -738,6 +738,7 @@ impl P2PNode {
         mut self,
         state: crate::SharedState,
         _event_bus: crate::events::EventBus,
+        admission_store: Arc<crate::consensus_admission::AttestationStore>,
     ) -> Result<()> {
         crate::p2p_rate_limit::spawn_purge_task(self.rate_limiter.clone());
         let validator_set_snapshot = state.read().await.validator_set_snapshot.clone();
@@ -793,6 +794,18 @@ impl P2PNode {
             .behaviour_mut()
             .gossipsub
             .subscribe(&gossipsub::IdentTopic::new(crate::revocation_gossip::TOPIC))?;
+        self.swarm
+            .behaviour_mut()
+            .gossipsub
+            .subscribe(&gossipsub::IdentTopic::new(
+                crate::consensus_admission::TOPIC,
+            ))?;
+        self.swarm
+            .behaviour_mut()
+            .gossipsub
+            .subscribe(&gossipsub::IdentTopic::new(
+                crate::consensus_admission::TRANSITION_TOPIC,
+            ))?;
 
         // Offload heavy IPFS download & YARA scanning for prechecked P2P submissions
         // off the single-threaded libp2p Swarm event loop (VNA-03).
@@ -935,7 +948,11 @@ impl P2PNode {
                         }
 
                         let max_message_bytes: usize =
-                            if topic_str.contains("blocks") || topic_str.contains("view-change") {
+                            if topic_str == crate::consensus_admission::TOPIC {
+                                crate::consensus_admission::MAX_GOSSIP_BYTES
+                            } else if topic_str == crate::consensus_admission::TRANSITION_TOPIC {
+                                crate::consensus_admission::MAX_TRANSITION_GOSSIP_BYTES
+                            } else if topic_str.contains("blocks") || topic_str.contains("view-change") {
                                 4 * 1024 * 1024
                             } else {
                                 1024 * 1024
@@ -954,6 +971,29 @@ impl P2PNode {
                             continue;
                         }
                         let _ = requires_payload_validation_before_acceptance(topic_str);
+
+                        if topic_str == crate::consensus_admission::TOPIC {
+                            let acceptance = match crate::consensus_admission::accept_gossip(
+                                &admission_store, &state, &message.data,
+                            ).await {
+                                Ok(true) => gossipsub::MessageAcceptance::Accept,
+                                Ok(false) => gossipsub::MessageAcceptance::Ignore,
+                                Err(_) => gossipsub::MessageAcceptance::Reject,
+                            };
+                            report_validation_result(&mut self.swarm, &id, &peer_id, acceptance);
+                            continue;
+                        }
+                        if topic_str == crate::consensus_admission::TRANSITION_TOPIC {
+                            let acceptance = match crate::consensus_admission::accept_transition_gossip(
+                                &admission_store, &state, &message.data,
+                            ).await {
+                                Ok(true) => gossipsub::MessageAcceptance::Accept,
+                                Ok(false) => gossipsub::MessageAcceptance::Ignore,
+                                Err(_) => gossipsub::MessageAcceptance::Reject,
+                            };
+                            report_validation_result(&mut self.swarm, &id, &peer_id, acceptance);
+                            continue;
+                        }
 
                         // Forward message to the node's internal event bus
                         if topic_str.contains("submissions") {
@@ -1202,6 +1242,13 @@ impl P2PNode {
                                 }
                             };
 
+                            let snapshot_addresses: Vec<String> = snapshot
+                                .validators
+                                .validators
+                                .iter()
+                                .map(|v| v.eth_address.trim().to_ascii_lowercase())
+                                .filter(|a| !a.is_empty())
+                                .collect();
                             let persistence = {
                                 // Serialize the canonical-tip check and
                                 // synchronous history replacement with reorg
@@ -1243,6 +1290,23 @@ impl P2PNode {
                                 Ok(acceptance) => {
                                     if matches!(acceptance, gossipsub::MessageAcceptance::Accept) {
                                         peer_scores.record_valid_message(&peer_id);
+                                        admission_store
+                                            .record_transition_certified_batch(&snapshot_addresses)
+                                            .await;
+                                        {
+                                            let mut s = state.write().await;
+                                            if let Err(error) =
+                                                s.refresh_runtime_validator_set_from_certified_history()
+                                            {
+                                                tracing::warn!(%error, "Failed to refresh runtime validator set after transition gossip");
+                                            }
+                                        }
+                                        if let Err(error) =
+                                            crate::consensus_admission::try_activate_candidate_validator(&state)
+                                                .await
+                                        {
+                                            tracing::warn!(%error, "Candidate auto-activation check failed after transition gossip");
+                                        }
                                     }
                                     report_validation_result(
                                         &mut self.swarm,
@@ -1750,9 +1814,10 @@ impl P2PNode {
                                                 &peer_id,
                                                 gossipsub::MessageAcceptance::Accept,
                                             );
-                                            // Sign the block and broadcast PREPARE
-                                            if let Some(our_id) = s.config.node_id.clone().into() {
-                                                if let Some(our_privkey_hex) = &s.config.validator_privkey {
+                                            // Sign the block and broadcast PREPARE (validators only; observers never sign)
+                                            if s.config.is_validator {
+                                                if let Some(our_id) = s.config.node_id.clone().into() {
+                                                    if let Some(our_privkey_hex) = &s.config.validator_privkey {
                                                     let bh = block.hash();
                                                     if let Ok(pk_bytes) = hex::decode(our_privkey_hex) {
                                                         if let Ok(sk) = common::crypto::SigningKey::from_seed(common::crypto::SignatureScheme::Ed25519, &pk_bytes) {
@@ -1812,15 +1877,49 @@ impl P2PNode {
                                                 }
                                             }
                                         }
+                                        }
                                     }
                                     common::GossipMessage::PbftPrepare { block_hash, validator_id, signature } => {
-                                        let sig = match validate_pbft_phase_message(
+                                        let validation = match validate_pbft_phase_message(
                                             &vs_snapshot,
                                             "prepare",
                                             &block_hash,
                                             &validator_id,
                                             &signature,
                                         ) {
+                                            Ok(sig) => Ok(sig),
+                                            Err(PbftValidationError::UnknownValidator) => {
+                                                let certified = {
+                                                    let s = state.read().await;
+                                                    s.chain.tip_height().ok().and_then(|h| h.checked_add(1)).and_then(|next_h| {
+                                                        crate::validator_set_history::verification_set_at(
+                                                            &s.config.data_dir,
+                                                            next_h,
+                                                            &s.validator_set_bootstrap,
+                                                        )
+                                                        .ok()
+                                                    })
+                                                };
+                                                if let Some(authority) = certified {
+                                                    let res = validate_pbft_phase_message(
+                                                        &authority,
+                                                        "prepare",
+                                                        &block_hash,
+                                                        &validator_id,
+                                                        &signature,
+                                                    );
+                                                    if res.is_ok() {
+                                                        let mut s = state.write().await;
+                                                        let _ = s.refresh_runtime_validator_set_from_certified_history();
+                                                    }
+                                                    res
+                                                } else {
+                                                    Err(PbftValidationError::UnknownValidator)
+                                                }
+                                            }
+                                            Err(other) => Err(other),
+                                        };
+                                        let sig = match validation {
                                             Ok(sig) => {
                                                 if let Some(src) = message.source {
                                                     peer_validators.insert(src, validator_id.clone());
@@ -1867,7 +1966,8 @@ impl P2PNode {
                                             &sig,
                                         );
                                         if let Ok(true) = s.pbft_engine.prepare(&block_hash, &validator_id, sig) {
-                                            if let Some(private_key_hex) = &s.config.validator_privkey {
+                                            if s.config.is_validator {
+                                                if let Some(private_key_hex) = &s.config.validator_privkey {
                                                 if let Ok(key_bytes) = hex::decode(private_key_hex) {
                                                     if let Ok(signing_key) = common::crypto::SigningKey::from_seed(common::crypto::SignatureScheme::Ed25519, &key_bytes) {
                                                         let our_id = s.config.node_id.clone();
@@ -1889,15 +1989,49 @@ impl P2PNode {
                                                 }
                                             }
                                         }
+                                        }
                                     }
                                     common::GossipMessage::PbftCommit { block_hash, validator_id, signature } => {
-                                        let sig = match validate_pbft_phase_message(
+                                        let validation = match validate_pbft_phase_message(
                                             &vs_snapshot,
                                             "commit",
                                             &block_hash,
                                             &validator_id,
                                             &signature,
                                         ) {
+                                            Ok(sig) => Ok(sig),
+                                            Err(PbftValidationError::UnknownValidator) => {
+                                                let certified = {
+                                                    let s = state.read().await;
+                                                    s.chain.tip_height().ok().and_then(|h| h.checked_add(1)).and_then(|next_h| {
+                                                        crate::validator_set_history::verification_set_at(
+                                                            &s.config.data_dir,
+                                                            next_h,
+                                                            &s.validator_set_bootstrap,
+                                                        )
+                                                        .ok()
+                                                    })
+                                                };
+                                                if let Some(authority) = certified {
+                                                    let res = validate_pbft_phase_message(
+                                                        &authority,
+                                                        "commit",
+                                                        &block_hash,
+                                                        &validator_id,
+                                                        &signature,
+                                                    );
+                                                    if res.is_ok() {
+                                                        let mut s = state.write().await;
+                                                        let _ = s.refresh_runtime_validator_set_from_certified_history();
+                                                    }
+                                                    res
+                                                } else {
+                                                    Err(PbftValidationError::UnknownValidator)
+                                                }
+                                            }
+                                            Err(other) => Err(other),
+                                        };
+                                        let sig = match validation {
                                             Ok(sig) => {
                                                 if let Some(src) = message.source {
                                                     peer_validators.insert(src, validator_id.clone());
@@ -2054,8 +2188,14 @@ impl P2PNode {
                         match cmd {
                             P2PCommand::Broadcast { topic, data } => {
                                 let t = gossipsub::IdentTopic::new(topic);
-                                if let Err(e) = self.swarm.behaviour_mut().gossipsub.publish(t, data) {
-                                    tracing::error!("P2P broadcast failed: {}", e);
+                                match self.swarm.behaviour_mut().gossipsub.publish(t, data) {
+                                    Ok(_) => {}
+                                    Err(gossipsub::PublishError::Duplicate) => {
+                                        tracing::debug!("P2P broadcast skipped duplicate message");
+                                    }
+                                    Err(e) => {
+                                        tracing::error!("P2P broadcast failed: {}", e);
+                                    }
                                 }
                             }
                             P2PCommand::Dial { addr } => {
@@ -2066,6 +2206,14 @@ impl P2PNode {
                                         addr.clone(),
                                         kad_bootstrapped,
                                     );
+                                    if peer_id == self.peer_id || self.swarm.is_connected(&peer_id) {
+                                        tracing::trace!(
+                                            %peer_id,
+                                            %addr,
+                                            "Skipping dial to self or already-connected seed peer"
+                                        );
+                                        continue;
+                                    }
                                 }
                                 tracing::info!("P2P Dialing {}...", addr);
                                 if let Err(e) = self.swarm.dial(addr) {
@@ -2898,6 +3046,87 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn admission_gossip_delivers_a_validated_staking_wallet_signature() -> anyhow::Result<()>
+    {
+        use crate::consensus_admission::{
+            gossip_payload, sign_attestation, AttestationStore, TOPIC,
+        };
+        use alloy::primitives::{Address, U256};
+        use alloy::signers::local::PrivateKeySigner;
+
+        let wallet_seed = "01".repeat(32);
+        let wallet: PrivateKeySigner = wallet_seed.parse()?;
+        let staking = Address::repeat_byte(0x42);
+        let applicant = Address::repeat_byte(0x12);
+        let signing_key = SigningKey::from_bytes(&[7u8; 32]);
+        let mut signer = validator("node-1", &signing_key);
+        signer.eth_address = format!("0x{:040x}", wallet.address());
+        let validators = common::ValidatorSet::new(vec![signer]);
+        let state_a = make_test_state(validators.clone()).await?;
+        let state_b = make_test_state(validators).await?;
+        {
+            let mut receiver = state_b.write().await;
+            receiver.config.staking_addr = format!("0x{:040x}", staking);
+            receiver.validator_registrations.insert(
+                format!("0x{:040x}", applicant),
+                crate::state::ValidatorRegistrationStatus {
+                    registered_with_node: true,
+                    staking_state: "pending".into(),
+                    ..Default::default()
+                },
+            );
+        }
+        let listen_a = reserve_listen_addr();
+        let listen_b = reserve_listen_addr();
+        let (node_a, handle_a) = P2PNode::new(&listen_a)?;
+        let (node_b, _handle_b) = P2PNode::new(&listen_b)?;
+        let store = AttestationStore::for_chain(Some(31337));
+        let task_a = tokio::spawn(node_a.run(
+            state_a,
+            crate::events::new_event_bus(),
+            AttestationStore::new(),
+        ));
+        let task_b =
+            tokio::spawn(node_b.run(state_b, crate::events::new_event_bus(), store.clone()));
+        tokio::time::sleep(Duration::from_millis(200)).await;
+        handle_a
+            .sender
+            .send(P2PCommand::Dial {
+                addr: listen_b.parse()?,
+            })
+            .await?;
+        let attestation = sign_attestation(
+            &wallet_seed,
+            31337,
+            staking,
+            applicant,
+            U256::from(100u64),
+            U256::from(42u64),
+            U256::from(1u64),
+            U256::from(4u64),
+        )
+        .await?;
+        let result = tokio::time::timeout(Duration::from_secs(6), async {
+            while !store.contains(&attestation).await {
+                handle_a
+                    .sender
+                    .send(P2PCommand::Broadcast {
+                        topic: TOPIC.into(),
+                        data: gossip_payload(attestation.clone())?,
+                    })
+                    .await?;
+                tokio::time::sleep(Duration::from_millis(350)).await;
+            }
+            Ok::<_, anyhow::Error>(())
+        })
+        .await;
+        task_a.abort();
+        task_b.abort();
+        result??;
+        Ok(())
+    }
+
+    #[tokio::test]
     async fn gossipsub_vote_broadcast_updates_peer_round_state() -> anyhow::Result<()> {
         let signing_key = SigningKey::from_bytes(&[7u8; 32]);
         let validator_set = common::ValidatorSet::new(vec![validator("node-1", &signing_key)]);
@@ -2916,8 +3145,16 @@ mod tests {
         let event_bus_a = crate::events::new_event_bus();
         let event_bus_b = crate::events::new_event_bus();
 
-        let task_a = tokio::spawn(node_a.run(state_a, event_bus_a));
-        let task_b = tokio::spawn(node_b.run(state_b.clone(), event_bus_b));
+        let task_a = tokio::spawn(node_a.run(
+            state_a,
+            event_bus_a,
+            crate::consensus_admission::AttestationStore::new(),
+        ));
+        let task_b = tokio::spawn(node_b.run(
+            state_b.clone(),
+            event_bus_b,
+            crate::consensus_admission::AttestationStore::new(),
+        ));
 
         tokio::time::sleep(Duration::from_millis(200)).await;
         handle_a
@@ -2990,8 +3227,16 @@ mod tests {
         let event_bus_b = crate::events::new_event_bus();
         let receiver_data_dir = state_b.read().await.config.data_dir.clone();
 
-        let task_a = tokio::spawn(node_a.run(state_a, event_bus_a));
-        let task_b = tokio::spawn(node_b.run(state_b, event_bus_b));
+        let task_a = tokio::spawn(node_a.run(
+            state_a,
+            event_bus_a,
+            crate::consensus_admission::AttestationStore::new(),
+        ));
+        let task_b = tokio::spawn(node_b.run(
+            state_b,
+            event_bus_b,
+            crate::consensus_admission::AttestationStore::new(),
+        ));
 
         tokio::time::sleep(Duration::from_millis(200)).await;
         handle_a

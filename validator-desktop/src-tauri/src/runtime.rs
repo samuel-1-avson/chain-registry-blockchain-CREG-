@@ -1,17 +1,32 @@
 use anyhow::{bail, Context, Result};
 use chrono::Utc;
+use futures_util::future::join_all;
 use serde::{Deserialize, Serialize};
 use std::collections::VecDeque;
+use std::ffi::OsStr;
 use std::path::{Path, PathBuf};
-use std::process::Stdio;
+use std::process::{Output, Stdio};
 use std::sync::Arc;
+use std::time::Duration;
 use tokio::io::{AsyncBufReadExt, BufReader};
-use tokio::process::Child;
+use tokio::process::{Child, Command};
 use tokio::sync::Mutex;
 
+use crate::chain_client::{
+    fetch_r7_admission_status, fetch_r7_health, R7AdmissionSummary, R7NodeHealth,
+};
 use crate::zones::default_operator_key_file;
 
 const MAX_LOG_LINES: usize = 1_000;
+const R7_CHAIN_ID: &str = "creg-phase-c-testnet-2026-09-26-r7";
+
+fn background_command(program: impl AsRef<OsStr>) -> Command {
+    #[allow(unused_mut)]
+    let mut command = Command::new(program);
+    #[cfg(windows)]
+    command.creation_flags(0x0800_0000); // CREATE_NO_WINDOW
+    command
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -46,6 +61,91 @@ pub struct RuntimeStatus {
     pub started_at_unix: Option<i64>,
     pub containers: Vec<RuntimeContainerStatus>,
     pub last_error: Option<String>,
+}
+
+#[derive(Debug, Serialize)]
+pub struct R7RuntimeStatus {
+    pub node_id: String,
+    pub container_state: String,
+    pub health: Option<R7NodeHealth>,
+    pub admission: Option<R7AdmissionSummary>,
+}
+
+fn parse_r7_container(line: &str) -> Option<(&str, &str, &str)> {
+    let mut fields = line.split_whitespace();
+    let name = fields.next()?;
+    let node_id = name.strip_prefix("creg-validator-")?;
+    let state = fields.next()?;
+    let (chain_id, public_key) = fields.next()?.split_once('/')?;
+    (fields.next().is_none()
+        && !node_id.is_empty()
+        && chain_id == R7_CHAIN_ID
+        && public_key.len() == 64
+        && public_key.bytes().all(|byte| byte.is_ascii_hexdigit()))
+    .then_some((name, node_id, state))
+}
+
+fn r7_loopback_port(output: &str) -> Option<u16> {
+    output.lines().find_map(|line| {
+        let port = line
+            .trim()
+            .strip_prefix("127.0.0.1:")?
+            .parse::<u16>()
+            .ok()?;
+        (port != 0).then_some(port)
+    })
+}
+
+async fn docker_status_output(args: &[&str]) -> Result<Output> {
+    let mut command = background_command("docker");
+    command.args(args).kill_on_drop(true);
+    let output = tokio::time::timeout(Duration::from_secs(4), command.output())
+        .await
+        .context("Docker status check timed out")?
+        .context("Docker CLI is unavailable")?;
+    anyhow::ensure!(
+        output.status.success(),
+        "Docker could not report the local R7 node status"
+    );
+    Ok(output)
+}
+
+pub async fn get_r7_runtime_status() -> Result<Vec<R7RuntimeStatus>> {
+    let output = docker_status_output(&[
+        "container",
+        "ls",
+        "-a",
+        "--filter",
+        "label=dev.creg.validator",
+        "--format",
+        r#"{{.Names}} {{.State}} {{.Label "dev.creg.validator"}}"#,
+    ])
+    .await?;
+    let stdout = String::from_utf8(output.stdout)?;
+    let mut runtimes = join_all(stdout.lines().filter_map(parse_r7_container).map(
+        |(name, node_id, state)| async move {
+            let mut local_port = None;
+            let mut health = None;
+            if state == "running" {
+                if let Ok(output) = docker_status_output(&["port", name, "8080/tcp"]).await {
+                    if let Some(port) = r7_loopback_port(&String::from_utf8_lossy(&output.stdout)) {
+                        local_port = Some(port);
+                        health = fetch_r7_health(port, node_id, R7_CHAIN_ID).await.ok();
+                    }
+                }
+            }
+            let admission = fetch_r7_admission_status(local_port, node_id).await;
+            R7RuntimeStatus {
+                node_id: node_id.to_owned(),
+                container_state: state.to_owned(),
+                health,
+                admission,
+            }
+        },
+    ))
+    .await;
+    runtimes.sort_by(|a, b| a.node_id.cmp(&b.node_id));
+    Ok(runtimes)
 }
 
 #[derive(Debug)]
@@ -114,6 +214,8 @@ pub fn find_repo_root() -> Option<PathBuf> {
             candidates.push(dir.to_path_buf());
         }
     }
+    // A local build can find its source checkout when launched from Explorer.
+    candidates.push(PathBuf::from(env!("CARGO_MANIFEST_DIR")));
 
     for start in candidates {
         let mut cursor = Some(start.as_path());
@@ -186,7 +288,7 @@ pub async fn detect_environment() -> EnvironmentInfo {
         .filter(|p| p.exists())
         .map(|p| p.display().to_string());
 
-    let docker_available = tokio::process::Command::new("docker")
+    let docker_available = background_command("docker")
         .arg("--version")
         .stdout(Stdio::null())
         .stderr(Stdio::null())
@@ -223,6 +325,54 @@ pub async fn detect_environment() -> EnvironmentInfo {
     }
 }
 
+pub async fn open_validator_onboarding() -> Result<()> {
+    let repo_root = find_repo_root();
+    let bundled_cli = std::env::current_exe()
+        .ok()
+        .map(|application| {
+            application.with_file_name(format!("creg{}", std::env::consts::EXE_SUFFIX))
+        })
+        .filter(|candidate| candidate.is_file());
+    let cli = bundled_cli
+        .or_else(|| find_binary_on_disk(repo_root.as_deref(), &["creg"]).map(PathBuf::from))
+        .context("Install a CREG CLI build that includes 'creg validator onboard'")?;
+    let mut command = background_command(cli);
+    command
+        .args(["validator", "onboard"])
+        .env_remove("CREG_NODE_URL")
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped());
+    if let Some(root) = &repo_root {
+        command.current_dir(root);
+    }
+    let mut child = command
+        .spawn()
+        .context("Could not start CREG validator onboarding")?;
+    let stdout = child
+        .stdout
+        .take()
+        .context("Onboarding output unavailable")?;
+    let mut lines = BufReader::new(stdout).lines();
+    let started = tokio::time::timeout(std::time::Duration::from_secs(10), lines.next_line())
+        .await
+        .context("Timed out starting CREG validator onboarding")??;
+    if !started.is_some_and(|line| line.starts_with("Validator onboarding: http://127.0.0.1:")) {
+        let output = child.wait_with_output().await?;
+        let reason: String = String::from_utf8_lossy(&output.stderr)
+            .chars()
+            .filter(|ch| !ch.is_control())
+            .take(400)
+            .collect();
+        anyhow::bail!("Could not start validator onboarding. {reason}");
+    }
+    tokio::spawn(async move {
+        while let Ok(Some(_)) = lines.next_line().await {}
+        let _ = child.wait().await;
+    });
+    Ok(())
+}
+
 pub fn compose_up_args(compose_file: &str) -> Vec<String> {
     vec![
         "compose".to_string(),
@@ -243,7 +393,7 @@ pub fn compose_down_args(compose_file: &str) -> Vec<String> {
 }
 
 async fn query_compose_ps(compose_file: &str) -> Result<Vec<RuntimeContainerStatus>> {
-    let out = tokio::process::Command::new("docker")
+    let out = background_command("docker")
         .args(["compose", "-f", compose_file, "ps", "--format", "json"])
         .output()
         .await
@@ -366,7 +516,17 @@ pub async fn start_validator(
                 .map(str::to_string)
                 .or(env.compose_file)
                 .context("docker-compose.validator-v2.yml path not found")?;
-            let out = tokio::process::Command::new("docker")
+            if cfg!(windows)
+                && std::fs::read_to_string(&compose)
+                    .is_ok_and(|raw| raw.contains("/dev/kvm"))
+            {
+                let msg = "The four-zone Docker Compose stack requires Linux KVM (/dev/kvm) and is not supported on Windows Docker Desktop. Your R7 testnet validator is managed separately under 'Join the R7 testnet' above.".to_string();
+                let mut mgr = state.inner.lock().await;
+                mgr.mode = RuntimeMode::DockerCompose;
+                mgr.last_error = Some(msg.clone());
+                bail!("{msg}");
+            }
+            let out = background_command("docker")
                 .args(compose_up_args(&compose))
                 .output()
                 .await
@@ -397,7 +557,7 @@ pub async fn start_validator(
                 .or(env.supervisor_binary)
                 .context("no creg-node-supervisor or creg-consensusd binary found")?;
 
-            let mut cmd = tokio::process::Command::new(&binary);
+            let mut cmd = background_command(&binary);
             if let Some(extra_args) = args {
                 cmd.args(extra_args);
             }
@@ -455,7 +615,7 @@ pub async fn stop_validator(
                 .map(str::to_string)
                 .or(env.compose_file)
                 .context("docker-compose.validator-v2.yml path not found")?;
-            let out = tokio::process::Command::new("docker")
+            let out = background_command("docker")
                 .args(compose_down_args(&compose))
                 .output()
                 .await
@@ -503,7 +663,7 @@ pub async fn get_runtime_logs(
                 .map(str::to_string)
                 .or(env.compose_file)
                 .context("docker-compose.validator-v2.yml path not found")?;
-            let out = tokio::process::Command::new("docker")
+            let out = background_command("docker")
                 .args([
                     "compose",
                     "-f",
@@ -539,6 +699,29 @@ pub async fn get_runtime_logs(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn r7_status_only_discovers_labeled_nodes_on_the_launcher_loopback_port() {
+        let public_key = "f".repeat(64);
+        let entry = format!("creg-validator-example running {R7_CHAIN_ID}/{public_key}");
+        assert_eq!(
+            parse_r7_container(&entry),
+            Some(("creg-validator-example", "example", "running"))
+        );
+        assert!(
+            parse_r7_container(&format!("creg-validator-example running old/{public_key}"))
+                .is_none()
+        );
+        assert!(parse_r7_container(&format!(
+            "creg-phase-c-r7-v1 running {R7_CHAIN_ID}/{public_key}"
+        ))
+        .is_none());
+        assert_eq!(
+            r7_loopback_port("0.0.0.0:8080\n127.0.0.1:59567\n"),
+            Some(59567)
+        );
+        assert_eq!(r7_loopback_port("0.0.0.0:8080\n127.0.0.1:0\n"), None);
+    }
 
     #[test]
     fn log_buffer_evicts_oldest_beyond_capacity() {

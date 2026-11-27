@@ -1,7 +1,7 @@
 # Validator Onboarding Checklist
 
 > Tracks: VAL-001 (admission policy), VAL-002 (operator checklist), MAL-001 (sandbox requirement)  
-> Network: `creg-testnet-1` (Sepolia-anchored public alpha)  
+> Network: `creg-phase-c-testnet-2026-09-26-r7` (Sepolia-anchored public alpha)
 > Audience: external validator operators joining the CREG testnet
 >
 > **Current status (2026-11-14):** the live network is the R7 testnet
@@ -14,6 +14,17 @@
 > §10 and §17.
 
 This is the single runbook a new validator operator follows to register, stake, configure, and pass health checks. Completing every item in this document is a requirement for participating in public verification quorum.
+
+## Guided R7 enrollment
+
+- Windows Validator Console users can select **Open validator onboarding**. The console uses a `creg` binary with `validator onboard` support.
+- In `creg console`, press `:` and select **Join R7 as a validator**. From the CLI, run `creg validator onboard`.
+
+The flow opens a local browser page for an Ethereum wallet extension. The wallet approves the R7 token transfer and signs its half of the registration. The CLI keeps the enrollment key at `~/.creg-validator/onboarding.key`, signs the same challenge, and submits both proofs. Reopening the flow with that key restores the same validator identity. Keep the session open to see on-chain approval, local node sync, and any matching commit observed in recent finalized blocks.
+
+Open the flow from the CREG checkout and select **Start local R7 sync**. The launcher uses the reviewed R7 image and scanner bundle to sync an observer with the registered node ID. The enrollment key stays on the host. If Docker cannot pull the image, import the maintainer-provided image. Existing operators can use `creg validator onboard --node-id <id> --key-file <path>` to watch their own validator. Keep an established validator's data and signing journal together.
+
+The deployed R7 image starts voting nodes from the original signed roster. The external signing path in source also accepts a prior-set quorum certificate for the node's exact identity, anchored to its local canonical chain. A voting trial requires that runtime and a coordinated certified validator-set transition. Confirm observer readiness and the transition plan before changing governance or quorum.
 
 Running several nodes for the same person or organization does not create
 Byzantine fault tolerance. An operator counts as independent only when its
@@ -45,7 +56,7 @@ Votes from nodes that do not meet the sandbox and scanner-profile requirements a
 - [ ] Linux host (bare metal, VM, or Docker) or Windows host with Docker Desktop.
 - [ ] Docker installed, or ability to run a release `creg-node` binary.
 - [ ] Staking CLI tool (`creg stake` or `.\testnet\stake-validator.cmd`).
-- [ ] Sepolia RPC URL (e.g. `https://ethereum-sepolia-rpc.publicnode.com` or custom RPC).
+- [ ] A Sepolia RPC that can return staking logs from the R7 deployment onward. The reviewed observer profile uses `https://sepolia.gateway.tenderly.co`.
 - [ ] Sepolia ETH for gas and tCREG for stake (faucet: `creg testnet drip --address 0x...` or web faucet).
 - [ ] Read [PUBLIC_TESTNET_QUICKSTART.md](./PUBLIC_TESTNET_QUICKSTART.md).
 
@@ -79,7 +90,9 @@ Two distinct key types — do not mix them (see [WALLET_KEY_DERIVATION.md](./WAL
 export SEPOLIA_RPC_URL=https://sepolia.infura.io/v3/YOUR_KEY
 creg stake 100 --role validator \
   --key-file ~/.creg/validator-eoa.key \
-  --rpc-url "$SEPOLIA_RPC_URL"
+  --rpc-url "$SEPOLIA_RPC_URL" \
+  --staking-addr 0x61c00EBe7C46f0bcE63942F7E15Bcc434DFC9B7C \
+  --token-addr 0xbC2a72107C6765364D0A822a88A6e6C61f30EAa6
 ```
 
 - [ ] Register identity (binds EVM address, node ID, Ed25519 pubkey with both signatures):
@@ -90,8 +103,31 @@ creg stake 100 --role validator \
 export CREG_NODE_URL=http://127.0.0.1:8080
 ```
 
-- [ ] Request consensus admission (an active validator runs `approveByConsensus`); coordinate via the support channel in `chain-spec.sepolia.json` → `support.issues`.
+- [ ] Coordinate with the maintainer to collect the signatures for `approveByConsensus` on R7.
 - [ ] Confirm membership: your address appears in the explorer validator list and `validator_set_sync_state` is healthy.
+
+### Prepare a consensus approval with existing validator wallets
+
+An operator can collect Sepolia approvals from the wallets that already hold active R7 validator stakes. With four active validators, the contract requires three distinct wallet signatures. The wallet's signing key stays in its existing keystore or hardware wallet.
+
+1. Confirm that the applicant's identity is registered and its observer has synced. Coordinate the certified validator-set transition and the signing-runtime rollout before collecting a quorum of approvals.
+2. Export the current application, nonce, and membership epoch using the Windows rehearsal tool from the checkout root.
+
+   ```powershell
+   .\chain-registry\testnet\rehearse-validator-admission.ps1 -Applicant <applicant-wallet> -TypedDataPath .\r7-admission.json
+   ```
+
+   Pass `-SignerAddress` with the operators' public wallet addresses to check their active staking status.
+3. Each operator verifies the applicant wallet and R7 staking address in the JSON and signs the typed data with their active Sepolia wallet. For example, an operator with a local encrypted Foundry account can run `cast wallet sign --data --from-file --account <account-name> .\r7-admission.json`. Collect the public signer address and the signature in a JSON array of objects with `signer` and `signature` fields. Keep the bundle with the designated submitter. Anyone holding a valid quorum bundle can submit it.
+4. Run the rehearsal tool with the same `-Applicant` and `-SignaturesPath <bundle.json>`. It checks signer uniqueness, simulates the exact call against Sepolia, and prints the calldata when the contract accepts it. The designated submitter can use that calldata in an authorized Sepolia transaction to the reported staking contract. Regenerate the typed data if the validator-set epoch or application nonce changes.
+
+### Enable automatic consensus approval
+
+1. Deploy a reviewed R7 image that includes the new admission runtime to the validators and their P2P relays. The original R7 launch scripts pin an older image. Preserve each node's data and P2P identity, roll validators one at a time, and verify chain and staking sync after each restart.
+2. Provision each participating validator's **own active Sepolia staking wallet** in its admission signer role. With Vault, set `CREG_VAULT_SECRET_PATH_VALIDATOR_ADMISSION` to that node's KV path. The role reads `validator_admission_key`. The testnet environment backend uses `CREG_VALIDATOR_ADMISSION_KEY`. Set only the signer first. The startup log **Validator admission signer verified in check-only mode** confirms the wallet matches that node's active staking identity and the signed Sepolia network.
+3. Coordinate the candidate signing runtime and prepare a prior-set quorum-signed transition anchored to the current finalized CREG tip. The transition must add the exact registered wallet, node ID, and Ed25519 key while preserving the rest of the roster. Stage the same plan on at least three current R7 validators. The JSON fields are `applicant` and `submitter` (Sepolia wallet addresses), `application_nonce` and `validator_set_epoch` (JSON integers from the rehearsal), and `transition` (the full `AuthenticatedValidatorSetSnapshot`). Keep the transition staged until the coordinated activation.
+4. Fund the designated submitter's active validator wallet with Sepolia ETH and set `CREG_VALIDATOR_ADMISSION_PLAN` to the staged file on the participating nodes. In Docker, use a path readable inside the container, such as `/data/admission-plan.json` on the existing data mount. On restart, the nodes validate the certificate and exchange EIP-712 attestations over CREG P2P. The designated wallet simulates the exact approval call before submitting it when quorum arrives. If the CREG tip moves before submission, stage a fresh plan anchored to the new tip and reload it on the participating nodes.
+5. Verify the successful Sepolia receipt. Complete the certified validator-set transition and confirm the applicant's first vote before ending the trial.
 
 ## 5. Configure The Node
 
