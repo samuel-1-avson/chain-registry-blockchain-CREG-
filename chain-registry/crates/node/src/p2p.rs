@@ -571,6 +571,18 @@ fn validate_and_persist_transition(
             anyhow::bail!("validator-set transition is outside the configured checkpoint history");
         }
     }
+    if snapshot.effective_from_height <= tip_height {
+        if let Some(existing) =
+            crate::validator_set_history::authenticated_at(data_dir, snapshot.effective_from_height)
+        {
+            if existing.effective_from_height == snapshot.effective_from_height
+                && common::validator_snapshot_certificate_hash(&existing)
+                    == common::validator_snapshot_certificate_hash(&snapshot)
+            {
+                return Ok(gossipsub::MessageAcceptance::Ignore);
+            }
+        }
+    }
     crate::validator_set_history::validate_transition_at_tip(&snapshot, tip_height, tip_hash)?;
     if is_configured_checkpoint {
         crate::validator_set_history::record_configured_checkpoint(data_dir, &snapshot)?;
@@ -2725,6 +2737,95 @@ mod tests {
             Some(common::validator_snapshot_witness_hash(&checkpoint)),
             "the configured witness must replace unverifiable received bytes"
         );
+        Ok(())
+    }
+
+    #[test]
+    fn validate_and_persist_transition_ignores_exact_replay_after_height_finalized(
+    ) -> anyhow::Result<()> {
+        let signing_keys: Vec<_> = (1u8..=4)
+            .map(|seed| SigningKey::from_bytes(&[seed; 32]))
+            .collect();
+        let validator_set = common::ValidatorSet::new(
+            signing_keys
+                .iter()
+                .enumerate()
+                .map(|(index, key)| validator(&format!("node-{}", index + 1), key))
+                .collect(),
+        );
+        let dir = tempfile::tempdir()?;
+        crate::validator_set_history::record(dir.path(), 0, &validator_set)?;
+        let tip_hash = common::Block::genesis().hash();
+        let valid = signed_transition(
+            &validator_set,
+            &signing_keys,
+            &[0, 1, 2],
+            1,
+            tip_hash.clone(),
+        );
+        validate_and_persist_transition(
+            dir.path(),
+            valid.clone(),
+            &validator_set,
+            0,
+            &tip_hash,
+            None,
+        )?;
+
+        let block_1_hash = "b".repeat(64);
+        let replay = validate_and_persist_transition(
+            dir.path(),
+            valid.clone(),
+            &validator_set,
+            1,
+            &block_1_hash,
+            None,
+        )?;
+        assert!(matches!(replay, gossipsub::MessageAcceptance::Ignore));
+
+        let mut conflicting = valid;
+        conflicting.validators.validators[0].stake += 1;
+        conflicting.validator_set_hash =
+            common::canonical_validator_set_hash(&conflicting.validators);
+        conflicting.transition_signatures.clear();
+        let conflicting_message = common::validator_set_transition_message(&conflicting);
+        for index in [0usize, 1, 2] {
+            let v = &validator_set.validators[index];
+            conflicting
+                .transition_signatures
+                .push(common::ValidatorSetTransitionSignature {
+                    validator_id: v.id.clone(),
+                    validator_pubkey: v.pubkey.clone(),
+                    signature: hex::encode(
+                        signing_keys[index]
+                            .sign(conflicting_message.as_bytes())
+                            .to_bytes(),
+                    ),
+                });
+        }
+        assert!(validate_and_persist_transition(
+            dir.path(),
+            conflicting,
+            &validator_set,
+            1,
+            &block_1_hash,
+            None,
+        )
+        .is_err());
+
+        let unpersisted_past =
+            signed_transition(&validator_set, &signing_keys, &[0, 1, 2], 1, tip_hash);
+        let empty_dir = tempfile::tempdir()?;
+        crate::validator_set_history::record(empty_dir.path(), 0, &validator_set)?;
+        assert!(validate_and_persist_transition(
+            empty_dir.path(),
+            unpersisted_past,
+            &validator_set,
+            1,
+            &block_1_hash,
+            None,
+        )
+        .is_err());
         Ok(())
     }
 

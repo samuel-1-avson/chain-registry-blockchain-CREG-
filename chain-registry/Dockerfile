@@ -162,6 +162,8 @@ RUN ln -sf /usr/bin/clang-17 /usr/bin/clang && \
 COPY --from=rust-toolchain /usr/local/cargo /usr/local/cargo
 COPY --from=rust-toolchain /usr/local/rustup /usr/local/rustup
 
+ARG CARGO_BUILD_JOBS=2
+
 ENV CARGO_HOME=/usr/local/cargo \
     RUSTUP_HOME=/usr/local/rustup \
     PATH="/usr/local/cargo/bin:$PATH" \
@@ -169,7 +171,7 @@ ENV CARGO_HOME=/usr/local/cargo \
     LLVM_CONFIG_PATH=/usr/bin/llvm-config-17 \
     CLANG_PATH=/usr/bin/clang-17 \
     CARGO_REGISTRIES_CRATES_IO_PROTOCOL=sparse \
-    CARGO_BUILD_JOBS=2 \
+    CARGO_BUILD_JOBS=${CARGO_BUILD_JOBS} \
     CARGO_INCREMENTAL=0 \
     CREG_SPEC_SIGNING_PUBKEY=${CREG_SPEC_SIGNING_PUBKEY} \
     SOURCE_DATE_EPOCH=${SOURCE_DATE_EPOCH}

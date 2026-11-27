@@ -639,6 +639,23 @@ pub fn certified_activation_height_for(
         .map(|cert| cert.effective_from_height))
 }
 
+/// Return the certified transition targeting `tip_height + 1` anchored to `tip_hash`, if any.
+pub fn pending_next_height_transition(
+    data_dir: &Path,
+    tip_height: u64,
+    tip_hash: &str,
+) -> Option<AuthenticatedValidatorSetSnapshot> {
+    let next_height = tip_height.saturating_add(1);
+    load(data_dir).into_iter().find_map(|snapshot| {
+        let cert = snapshot.certificate?;
+        if cert.effective_from_height == next_height && cert.previous_block_hash == tip_hash {
+            Some(cert)
+        } else {
+            None
+        }
+    })
+}
+
 /// A new signing node must already have verified the chain block anchoring its
 /// admission and the preceding validators' quorum certificate. L1 status and
 /// unsigned history alone cannot enable a local signing key.
@@ -1577,5 +1594,27 @@ mod tests {
         enforce_retention_for_checkpoint_hash(&mut compatibility_history, None);
         assert_eq!(compatibility_history.len(), MAX_SNAPSHOTS);
         assert_eq!(compatibility_history[0].effective_from_height, 2);
+    }
+
+    #[test]
+    fn pending_next_height_transition_matches_only_pending_tip_transition() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let keys: Vec<_> = (0..4).map(|_| SigningKey::generate(&mut OsRng)).collect();
+        let initial = keyed_set(&keys[..3]);
+        let expanded = keyed_set(&keys);
+        record(dir.path(), 0, &initial).expect("record bootstrap");
+        let cert = signed_transition(1, &initial, &expanded, &keys[..3]);
+        let prev_hash = cert.previous_block_hash.clone();
+        record_authenticated(dir.path(), cert.clone(), &initial)
+            .expect("record certified transition");
+
+        let found = pending_next_height_transition(dir.path(), 0, &prev_hash)
+            .expect("pending next-height transition should match");
+        assert_eq!(
+            common::validator_snapshot_certificate_hash(&found),
+            common::validator_snapshot_certificate_hash(&cert)
+        );
+        assert!(pending_next_height_transition(dir.path(), 0, &"f".repeat(64)).is_none());
+        assert!(pending_next_height_transition(dir.path(), 1, &prev_hash).is_none());
     }
 }

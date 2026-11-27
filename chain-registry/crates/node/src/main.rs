@@ -1009,6 +1009,39 @@ async fn main() -> Result<()> {
         });
     }
 
+    // Periodically rebroadcast any pending next-height certified validator-set
+    // transition so peers that missed the initial gossipsub push converge
+    // before the next block quorum without manual intervention.
+    {
+        let state_for_transitions = Arc::clone(&state);
+        let data_dir = config.data_dir.clone();
+        tokio::spawn(async move {
+            tokio::time::sleep(Duration::from_secs(8)).await;
+            let mut ticker = interval(Duration::from_secs(70));
+            ticker.tick().await;
+            loop {
+                ticker.tick().await;
+                let tip = {
+                    let s = state_for_transitions.read().await;
+                    match (s.chain.tip_height(), s.chain.tip_hash()) {
+                        (Ok(height), Ok(hash)) => Some((height, hash)),
+                        _ => None,
+                    }
+                };
+                if let Some((tip_height, tip_hash)) = tip {
+                    if let Some(snapshot) = validator_set_history::pending_next_height_transition(
+                        &data_dir,
+                        tip_height,
+                        &tip_hash,
+                    ) {
+                        validator_registry_gossip::broadcast_validator_set_transition(snapshot)
+                            .await;
+                    }
+                }
+            }
+        });
+    }
+
     // â”€â”€ Spawn background tasks â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
     tracing::info!("Starting subsystems...");
 
