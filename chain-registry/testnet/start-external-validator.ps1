@@ -17,7 +17,7 @@ $ErrorActionPreference = "Stop"
 $chainId = "creg-phase-c-testnet-2026-09-26-r7"
 $specUrl = "https://spec.testnet.cregnet.dev/phase-c/r7/chain-spec.json"
 if (-not $EthRpc) {
-    $EthRpc = if ($env:CREG_ETH_RPC) { $env:CREG_ETH_RPC } else { "https://sepolia.gateway.tenderly.co" }
+    $EthRpc = if ($env:CREG_ETH_RPC) { $env:CREG_ETH_RPC } else { "https://ethereum-sepolia-rpc.publicnode.com" }
 }
 
 Write-Host "============================================================" -ForegroundColor Cyan
@@ -137,33 +137,64 @@ if (-not (Test-Path $operatorKeyFile)) {
     $opKey = (Get-Content $operatorKeyFile -Raw).Trim()
 }
 
-# creg-node verifies the spec against its pinned key and adopts its contracts
-# and bootnodes. Only an explicitly configured BOOTNODE overrides the seeds.
+$repoRoot = (Resolve-Path (Join-Path $PSScriptRoot "../..")).Path
+$scannerDir = Join-Path $repoRoot "docs/testnet-heal-evidence/2026-09-27-production-pipeline-cutover/scanner-r14-ansi-regex-bundle"
+$scannerFiles = @("rules/supply_chain.yar", "known_malicious_hashes.json", "osv_snapshot.json")
+if (@($scannerFiles | Where-Object { -not (Test-Path -LiteralPath (Join-Path $scannerDir $_) -PathType Leaf) }).Count -ne 0) {
+    throw "The reviewed Phase C R7 scanner bundle is missing at $scannerDir."
+}
+
+$explicitValidator = ($env:CREG_IS_VALIDATOR -eq "true" -or $env:CREG_IS_VALIDATOR -eq "1")
+$isValidatorEnv = if ($explicitValidator) { "true" } else { "false" }
+$nodeRoleEnv = if ($explicitValidator) { "validator" } else { "observer" }
+$defaultSeeds = "/ip4/34.156.122.19/tcp/9000/p2p/12D3KooW9ygmUCoS7BPxkJRxz8trK7nxDwidTJU7DMe8VBqXs8W8,/ip4/34.124.165.97/tcp/9000/p2p/12D3KooWFEhFCeFgfxmJzatpgeiCGHfocDLGS336vH1ouESfM3qb"
+$p2pSeedsEnv = if ($env:BOOTNODE) { $env:BOOTNODE } else { $defaultSeeds }
+
+# creg-node verifies the spec against its pinned key and starts as an
+# auto-activating observer until certified validator membership takes effect.
 $envLines = @(
     "CREG_TESTNET=true",
     "CREG_NODE_ID=$NodeId",
     "CREG_DATA_DIR=/data",
-    "CREG_IS_VALIDATOR=true",
-    "CREG_NODE_ROLE=validator",
+    "CREG_IS_VALIDATOR=$isValidatorEnv",
+    "CREG_NODE_ROLE=$nodeRoleEnv",
+    "CREG_ADMISSION_AUTO_ACTIVATE=true",
     "CREG_VALIDATOR_KEY=$validatorKey",
     "CREG_OPERATOR_API_KEY=$opKey",
     "CREG_ETH_RPC=$EthRpc",
+    "CREG_EXPECTED_L1_CHAIN_ID=11155111",
     "CREG_CHAIN_ID=$chainId",
     "CREG_CHAIN_SPEC_URL=$specUrl",
     "CREG_SPEC_SIGNATURE_URL=$specUrl.sig",
     "CREG_IPFS_URL=https://ipfs.testnet.cregnet.dev",
     "CREG_P2P_LISTEN=/ip4/0.0.0.0/tcp/9000",
+    "CREG_P2P_SEEDS=$p2pSeedsEnv",
     "CREG_PEERS=https://api.testnet.cregnet.dev",
     "CREG_LISTEN=0.0.0.0:8080",
     "CREG_PBFT_ALLOW_SMALL_CLUSTER_QUORUM=false",
+    "CREG_DEV_SANDBOX=false",
+    "CREG_YARA_RULES_DIR=/scanner/rules",
+    "CREG_THREAT_DB_PATH=/scanner/known_malicious_hashes.json",
+    "CREG_OSV_SNAPSHOT_PATH=/scanner/osv_snapshot.json",
+    "CREG_OSV_CONSENSUS=true",
+    "CREG_OSV_BLOCK_CRITICAL=true",
+    "CREG_OSV_LIVE_FALLBACK=false",
+    "CREG_OSV_SNAPSHOT_EPOCH=osv-2026-09-28-phase-c-ansi-regex-r14-live",
+    "CREG_SCANNER_PROFILE_DIGEST=7e1d95f9c8423778211944a1dea46674d8cbd3f0aee3b0eea6b5250f11d009cd",
     "RUST_LOG=info,chain_registry_node=debug,consensus=info"
 )
-if ($env:BOOTNODE) { $envLines += "CREG_P2P_SEEDS=$env:BOOTNODE" }
 $envContent = $envLines -join [Environment]::NewLine
 [System.IO.File]::WriteAllText($envFile, $envContent)
 
 # Auto-detect available Docker image
-$imageCandidates = @("chain-registry-node-secure:latest", "creg-node:fleet", "creg-node:latest")
+$imageCandidates = @()
+if ($env:CREG_OBSERVER_IMAGE) { $imageCandidates += $env:CREG_OBSERVER_IMAGE }
+$imageCandidates += @(
+    "us-central1-docker.pkg.dev/gen-lang-client-0022105784/creg-testnet/creg-node:r7-auto-admission-20261126-v3",
+    "chain-registry-node-secure:latest",
+    "creg-node:fleet",
+    "creg-node:latest"
+)
 $chosenImage = $null
 foreach ($cand in $imageCandidates) {
     $imgId = docker images -q $cand 2>$null
@@ -192,10 +223,13 @@ $dockerArgs = @(
     "-d",
     "--name", $containerName,
     "--restart", "unless-stopped",
+    "--user", "10002:10002",
+    "--privileged",
     "--env-file", "$envFile",
     "-p", "${httpBind}:8080",
     "-p", "$($P2pPort):9000",
     "-v", "${chainDataDir}:/data",
+    "-v", "${scannerDir}:/scanner:ro",
     $chosenImage
 )
 & docker @dockerArgs | Out-Null
