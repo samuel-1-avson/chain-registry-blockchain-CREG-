@@ -30,7 +30,7 @@ import hub.caddy
 			header @rpc_gateway_loop Content-Type application/json
 			respond @rpc_gateway_loop `{"jsonrpc":"2.0","id":null,"error":{"code":-32603,"message":"RPC gateway loop refused: the explorer RPC upstream points back at the edge"}}` 508
 			rewrite * /rpc
-			reverse_proxy {$CREG_EXPLORER_RPC_GATEWAY:creg-explorer-public-r27-stage:80} {
+			reverse_proxy {$CREG_EXPLORER_RPC_GATEWAY:creg-explorer-public-r28:80} {
 				header_up X-CREG-Edge-Hop sepolia
 				flush_interval -1
 			}
@@ -105,7 +105,7 @@ import hub.caddy
 {$CREG_PUBLIC_EXPLORER_HOST} {
 	encode zstd gzip
 	handle {
-		reverse_proxy creg-explorer-public-r27-stage:80 {
+		reverse_proxy creg-explorer-public-r28:80 {
 			flush_interval -1
 		}
 	}
