@@ -104,7 +104,14 @@ How Phase 1 was done:
 
 **Done when:** the new tests pass, 31 calls in a minute from one IP return 200, a 429 parses as a JSON-RPC error, and `creg_health` shows tip age.
 
-**Status, 2026-11-27: implemented and tested in Linux Docker.** The laptop has no Visual Studio Build Tools, so the run used a test image that mirrors the builder stage of `chain-registry/Dockerfile` (Ubuntu 24.04, Rust 1.98.1, clang-17).
+**Deployed, 2026-11-27 21:47Z, to the public observer o1.**
+- Image: `creg-node@sha256:403144636cb1…`, source `b02c765`, Dockerfile target `node-runtime`, with `CREG_TRUSTED_PROXIES=172.21.0.0/16`.
+- The public probe is **PASS 47 / FAIL 0**. R-03, R-06 and R-08 are closed on the live node, and R-04 and R-23 are closed for o1, which now rate-limits per real client.
+- Evidence: [`docs/testnet-heal-evidence/2026-11-27-rpc-phase2-deploy/`](testnet-heal-evidence/2026-11-27-rpc-phase2-deploy/README.md).
+- Rollback: `bash ~/creg-rpc-phase2/rollback-o1-image.sh 20261127T214703Z`.
+- Still on v4, unchanged: the validators and the legacy `creg-unified-node`. They serve no public RPC.
+
+**Status before deploy: implemented and tested in Linux Docker.** The laptop has no Visual Studio Build Tools, so the run used a test image that mirrors the builder stage of `chain-registry/Dockerfile` (Ubuntu 24.04, Rust 1.98.1, clang-17).
 - Filtered node lib tests (`json_rpc rate_limit metrics public_v4`): **56 passed, 0 failed.** Every new test ran.
 - Full node lib suite: **363 passed, 1 failed.** The failure, `authority_adapter::…rejection_sidecar…`, needs a Node.js runtime, which the image does not have. It is unrelated.
 - `cargo check --bins`: passes (this includes the uncommitted `main.rs` / `p2p.rs` edits).
