@@ -73,7 +73,15 @@ Phases 2 and 3 touch different crates (`node` and `common`) and can run in paral
 
 **Done when:** the probe passes on `api`, `rpc`, `explorer` and `faucet` hosts: `eth_getLogs` and `web3_clientVersion` return 403, the descriptors say "allowlisted", and `creg_*` is unchanged. **Rollback:** restore the saved Caddy files and the previous explorer digest.
 
-**Status, 2026-11-27: staged; cutover not yet run.**
+**Status, 2026-11-27 17:01Z: done.**
+- The cutover ran with stamp `20261127T170110Z`. The public probe went from PASS 13 / FAIL 33 to **PASS 41 / FAIL 5**, and every R-01 and R-14 check passes on all four Sepolia surfaces.
+- `api…/metrics` now returns 403, which closes R-24.
+- The explorer, faucet, spec and API health endpoints all answer 200.
+- Evidence: [`docs/testnet-heal-evidence/2026-11-27-rpc-phase1-cutover/`](testnet-heal-evidence/2026-11-27-rpc-phase1-cutover/README.md).
+- Rollback on the VM: `bash ~/creg-rpc-phase1/rollback-r28-allowlist.sh 20261127T170110Z`.
+- R-13 (legacy cloud-edge nginx configs) affects no running container (the capture found no `creg-cloud-*` explorer), so it moves to the Phase 6 cleanup.
+
+How Phase 1 was done:
 - **Staging:** `testnet/phase-c/stage-r28-allowlist.sh` started a copy of r28 on `127.0.0.1:3031` (same image, same node and indexer settings, upstream publicnode). It passed all 12 checks: explorer page, node health, GET 405, `eth_chainId`, `eth_blockNumber`, `eth_call`, `eth_getLogs` 403, `web3_clientVersion` 403, batch with a denied method 403, batch of 21 400, malformed body 400, and 70 KiB 413.
 - **Cutover:** `testnet/phase-c/cutover-r28-allowlist.sh` recreates r28 with that upstream and checks it before touching Caddy. It then installs the repo's `Caddyfile.unified` and `sepolia-public-rpc.caddy` in place, with backups, validates, and reloads. The same reload closes R-24 (`/metrics` becomes 403).
 - **Rollback:** `testnet/phase-c/rollback-r28-allowlist.sh STAMP`.
