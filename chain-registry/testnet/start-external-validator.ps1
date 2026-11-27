@@ -190,6 +190,7 @@ $envContent = $envLines -join [Environment]::NewLine
 $imageCandidates = @()
 if ($env:CREG_OBSERVER_IMAGE) { $imageCandidates += $env:CREG_OBSERVER_IMAGE }
 $imageCandidates += @(
+    "us-central1-docker.pkg.dev/gen-lang-client-0022105784/creg-testnet/creg-node:r7-auto-admission-20261127-v4",
     "us-central1-docker.pkg.dev/gen-lang-client-0022105784/creg-testnet/creg-node:r7-auto-admission-20261126-v3",
     "chain-registry-node-secure:latest",
     "creg-node:fleet",
