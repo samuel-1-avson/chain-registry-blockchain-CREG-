@@ -24,6 +24,18 @@
 //!   the caller. The caller's durable transaction journal owns that recovery
 //!   decision.
 //!
+//! A quorum read returns as soon as a strict majority agrees, without waiting
+//! for the remaining endpoints, and fails as soon as no majority is possible.
+//!
+//! Endpoint health is remembered for the life of the process, per ordered
+//! endpoint list ([`endpoint_health`]). Providers are often built per
+//! operation, so health kept inside one provider would be forgotten at once.
+//! An endpoint whose transport failed moves to the back of the failover order
+//! for a cool-down (`CREG_L1_RPC_COOLDOWN_SECS`, default 15 s, 0 disables),
+//! then leads again. Quorum reads still go to every endpoint, and primary-only
+//! calls still go to the primary exactly once. [`endpoint_stats`] exposes
+//! per-endpoint counters by position.
+//!
 //! Two entry points apply these policies:
 //!
 //! * [`build_provider_from_urls`] returns an alloy provider whose transport is
@@ -47,11 +59,17 @@ use alloy::{
     },
 };
 use anyhow::{anyhow, bail, Context, Result};
+use futures::stream::{FuturesUnordered, StreamExt};
 use serde_json::Value;
 use std::{
+    collections::HashMap,
     future::{poll_fn, Future},
+    sync::{
+        atomic::{AtomicU64, Ordering},
+        Arc, Mutex, MutexGuard, OnceLock,
+    },
     task::{Context as TaskContext, Poll},
-    time::Duration,
+    time::{Duration, Instant},
 };
 use tower::Service;
 
@@ -93,16 +111,233 @@ pub fn configured_quorum_size(configured: usize) -> usize {
     }
 }
 
+/// How long a failing endpoint stays at the back of the failover order.
+pub const DEFAULT_ENDPOINT_COOLDOWN: Duration = Duration::from_secs(15);
+const COOLDOWN_ENV: &str = "CREG_L1_RPC_COOLDOWN_SECS";
+/// Upper bound on distinct endpoint lists whose health is remembered, so a
+/// caller that builds endpoint lists dynamically cannot grow the registry
+/// without limit. Lists beyond it get health that is not shared.
+const MAX_TRACKED_ENDPOINT_LISTS: usize = 64;
+
+/// Outcome counters for one configured endpoint. Endpoints are identified by
+/// their 1-based position only: URLs often embed provider API keys.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct EndpointStats {
+    pub position: usize,
+    /// Calls this endpoint answered without a transport error.
+    pub successes: u64,
+    /// Calls that failed at the transport level (connection, timeout, HTTP
+    /// error). A JSON-RPC error answer is a success here.
+    pub failures: u64,
+    /// Times a failover read moved this endpoint to the back while it was
+    /// cooling down.
+    pub skips: u64,
+    pub cooling_down: bool,
+}
+
+#[derive(Debug, Default)]
+struct EndpointState {
+    successes: AtomicU64,
+    failures: AtomicU64,
+    skips: AtomicU64,
+    cooling_until: Mutex<Option<Instant>>,
+}
+
+/// Health of one ordered endpoint list: outcome counters and the failover
+/// cool-down. Shared through [`endpoint_health`].
+#[derive(Debug)]
+pub struct EndpointHealth {
+    cooldown: Duration,
+    endpoints: Vec<EndpointState>,
+}
+
+fn lock<T>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
+    mutex
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
+}
+
+impl EndpointHealth {
+    /// Health for `endpoints` endpoints. A zero `cooldown` disables
+    /// reordering; the counters still run.
+    pub fn new(endpoints: usize, cooldown: Duration) -> Self {
+        Self {
+            cooldown,
+            endpoints: (0..endpoints).map(|_| EndpointState::default()).collect(),
+        }
+    }
+
+    fn record(&self, index: usize, ok: bool) {
+        let Some(state) = self.endpoints.get(index) else {
+            return;
+        };
+        if ok {
+            state.successes.fetch_add(1, Ordering::Relaxed);
+            *lock(&state.cooling_until) = None;
+        } else {
+            state.failures.fetch_add(1, Ordering::Relaxed);
+            if !self.cooldown.is_zero() {
+                *lock(&state.cooling_until) = Instant::now().checked_add(self.cooldown);
+            }
+        }
+    }
+
+    fn is_cooling(&self, index: usize, now: Instant) -> bool {
+        self.endpoints
+            .get(index)
+            .and_then(|state| *lock(&state.cooling_until))
+            .is_some_and(|until| until > now)
+    }
+
+    /// Endpoint indexes to try for a failover read: configured order, with
+    /// endpoints that are cooling down moved to the back (still in configured
+    /// order) so they remain a last resort rather than being dropped.
+    fn failover_order(&self) -> Vec<usize> {
+        let now = Instant::now();
+        let (cooling, ready): (Vec<usize>, Vec<usize>) =
+            (0..self.endpoints.len()).partition(|&index| self.is_cooling(index, now));
+        for &index in &cooling {
+            self.endpoints[index].skips.fetch_add(1, Ordering::Relaxed);
+        }
+        ready.into_iter().chain(cooling).collect()
+    }
+
+    /// Counters for every endpoint, in configured order.
+    pub fn stats(&self) -> Vec<EndpointStats> {
+        let now = Instant::now();
+        self.endpoints
+            .iter()
+            .enumerate()
+            .map(|(index, state)| EndpointStats {
+                position: index + 1,
+                successes: state.successes.load(Ordering::Relaxed),
+                failures: state.failures.load(Ordering::Relaxed),
+                skips: state.skips.load(Ordering::Relaxed),
+                cooling_down: self.is_cooling(index, now),
+            })
+            .collect()
+    }
+}
+
+/// Keyed by the ordered endpoint list. The URLs live only in this map; they
+/// are never logged or returned.
+type HealthRegistry = Mutex<HashMap<Vec<String>, Arc<EndpointHealth>>>;
+
+fn health_registry() -> &'static HealthRegistry {
+    static REGISTRY: OnceLock<HealthRegistry> = OnceLock::new();
+    REGISTRY.get_or_init(Default::default)
+}
+
+fn configured_cooldown() -> Duration {
+    static COOLDOWN: OnceLock<Duration> = OnceLock::new();
+    *COOLDOWN.get_or_init(|| match std::env::var(COOLDOWN_ENV) {
+        Err(_) => DEFAULT_ENDPOINT_COOLDOWN,
+        Ok(raw) => match raw.trim().parse::<u64>() {
+            Ok(seconds) => Duration::from_secs(seconds),
+            Err(_) => {
+                tracing::warn!(
+                    "{COOLDOWN_ENV} must be a whole number of seconds; using the default"
+                );
+                DEFAULT_ENDPOINT_COOLDOWN
+            }
+        },
+    })
+}
+
+/// The process-wide health for this exact ordered endpoint list, created on
+/// first use.
+pub fn endpoint_health(endpoints: &[String]) -> Arc<EndpointHealth> {
+    let mut registry = lock(health_registry());
+    if let Some(health) = registry.get(endpoints) {
+        return Arc::clone(health);
+    }
+    let health = Arc::new(EndpointHealth::new(endpoints.len(), configured_cooldown()));
+    if registry.len() < MAX_TRACKED_ENDPOINT_LISTS {
+        registry.insert(endpoints.to_vec(), Arc::clone(&health));
+    }
+    health
+}
+
+/// Counters for an endpoint list that has been used in this process, by
+/// position. `None` if the list was never used.
+pub fn endpoint_stats(endpoints: &[String]) -> Option<Vec<EndpointStats>> {
+    lock(health_registry())
+        .get(endpoints)
+        .map(|health| health.stats())
+}
+
+/// Answers collected so far by one quorum read.
+struct QuorumTally<T> {
+    configured: usize,
+    answers: Vec<T>,
+    keys: Vec<Option<Value>>,
+    failed: usize,
+}
+
+impl<T> QuorumTally<T> {
+    fn new(configured: usize) -> Self {
+        Self {
+            configured,
+            answers: Vec::with_capacity(configured),
+            keys: Vec::with_capacity(configured),
+            failed: 0,
+        }
+    }
+
+    /// Record an answer. Returns the winning answer once a strict majority of
+    /// the configured endpoints agree.
+    fn answer(&mut self, answer: T, key: Option<Value>) -> Option<T> {
+        self.answers.push(answer);
+        self.keys.push(key);
+        let index = select_quorum_index(&self.keys, self.configured)?;
+        Some(self.answers.swap_remove(index))
+    }
+
+    fn fail(&mut self) {
+        self.failed += 1;
+    }
+
+    /// Whether the endpoints still outstanding could complete a majority.
+    /// Unparseable answers never match, so they cannot help.
+    fn still_possible(&self) -> bool {
+        let outstanding = self
+            .configured
+            .saturating_sub(self.answers.len() + self.failed);
+        let best = self
+            .keys
+            .iter()
+            .flatten()
+            .map(|key| {
+                self.keys
+                    .iter()
+                    .filter(|other| other.as_ref() == Some(key))
+                    .count()
+            })
+            .max()
+            .unwrap_or(0);
+        best + outstanding >= configured_quorum_size(self.configured)
+    }
+
+    fn responded(&self) -> usize {
+        self.answers.len()
+    }
+
+    fn distinct(&self) -> usize {
+        distinct_answer_count(&self.keys)
+    }
+}
+
 /// An HTTP JSON-RPC transport that enforces a configured-endpoint quorum for
 /// security-relevant state reads and fails over for other safe reads.
 #[derive(Clone, Debug)]
 pub struct FailoverTransport {
     upstreams: Vec<BoxTransport>,
+    health: Arc<EndpointHealth>,
 }
 
 impl FailoverTransport {
-    fn new(upstreams: Vec<BoxTransport>) -> Self {
-        Self { upstreams }
+    fn new(upstreams: Vec<BoxTransport>, health: Arc<EndpointHealth>) -> Self {
+        Self { upstreams, health }
     }
 }
 
@@ -121,10 +356,11 @@ impl Service<RequestPacket> for FailoverTransport {
 
     fn call(&mut self, request: RequestPacket) -> Self::Future {
         let upstreams = self.upstreams.clone();
+        let health = Arc::clone(&self.health);
         match request_policy(&request) {
-            ReadPolicy::Quorum => Box::pin(quorum_call(upstreams, request)),
-            ReadPolicy::Failover => Box::pin(sequential_call(upstreams, request, true)),
-            ReadPolicy::PrimaryOnly => Box::pin(sequential_call(upstreams, request, false)),
+            ReadPolicy::Quorum => Box::pin(quorum_call(upstreams, health, request)),
+            ReadPolicy::Failover => Box::pin(failover_call(upstreams, health, request)),
+            ReadPolicy::PrimaryOnly => Box::pin(primary_call(upstreams, health, request)),
         }
     }
 }
@@ -137,19 +373,25 @@ async fn upstream_call(
     upstream.call(request).await
 }
 
-/// Try endpoints in configured order. Without failover only the primary is
-/// attempted.
-async fn sequential_call(
+fn no_endpoint_error() -> TransportError {
+    TransportErrorKind::custom_str("no Ethereum RPC endpoint is configured")
+}
+
+/// Try endpoints in failover order (healthy ones first, see
+/// [`EndpointHealth::failover_order`]) until one answers.
+async fn failover_call(
     upstreams: Vec<BoxTransport>,
+    health: Arc<EndpointHealth>,
     request: RequestPacket,
-    can_fail_over: bool,
 ) -> std::result::Result<ResponsePacket, TransportError> {
     let mut last_error = None;
-    let last_attempt = if can_fail_over { upstreams.len() } else { 1 };
-
-    for (index, upstream) in upstreams.into_iter().take(last_attempt).enumerate() {
+    for index in health.failover_order() {
+        let Some(upstream) = upstreams.get(index).cloned() else {
+            continue;
+        };
         match upstream_call(upstream, request.clone()).await {
             Ok(response) => {
+                health.record(index, true);
                 if index > 0 {
                     tracing::warn!(
                         endpoint_index = index + 1,
@@ -158,56 +400,82 @@ async fn sequential_call(
                 }
                 return Ok(response);
             }
-            Err(error) => last_error = Some(error),
+            Err(error) => {
+                health.record(index, false);
+                last_error = Some(error);
+            }
         }
     }
-
-    Err(last_error.unwrap_or_else(|| {
-        TransportErrorKind::custom_str("no Ethereum RPC endpoint is configured")
-    }))
+    Err(last_error.unwrap_or_else(no_endpoint_error))
 }
 
-/// Send the request to every endpoint in parallel and return a response only
-/// when a strict majority of the configured endpoints agree on it.
+/// Send a call with possible side effects to the primary exactly once,
+/// whatever its health: a retry elsewhere could hide an ambiguous send.
+async fn primary_call(
+    upstreams: Vec<BoxTransport>,
+    health: Arc<EndpointHealth>,
+    request: RequestPacket,
+) -> std::result::Result<ResponsePacket, TransportError> {
+    let Some(primary) = upstreams.into_iter().next() else {
+        return Err(no_endpoint_error());
+    };
+    let result = upstream_call(primary, request).await;
+    health.record(0, result.is_ok());
+    result
+}
+
+/// Send the request to every endpoint in parallel and return a response once
+/// a strict majority of the configured endpoints agree on it. Endpoints still
+/// outstanding at that point are no longer waited for. The read fails closed as
+/// soon as no majority is possible.
 async fn quorum_call(
     upstreams: Vec<BoxTransport>,
+    health: Arc<EndpointHealth>,
     request: RequestPacket,
 ) -> std::result::Result<ResponsePacket, TransportError> {
     let configured = upstreams.len();
     if configured == 0 {
-        return Err(TransportErrorKind::custom_str(
-            "no Ethereum RPC endpoint is configured",
-        ));
+        return Err(no_endpoint_error());
     }
 
-    let results = futures::future::join_all(
-        upstreams
-            .into_iter()
-            .map(|upstream| upstream_call(upstream, request.clone())),
-    )
-    .await;
+    let mut pending: FuturesUnordered<_> = upstreams
+        .into_iter()
+        .enumerate()
+        .map(|(index, upstream)| {
+            let request = request.clone();
+            async move { (index, upstream_call(upstream, request).await) }
+        })
+        .collect();
 
-    let mut packets = Vec::with_capacity(configured);
-    let mut keys = Vec::with_capacity(configured);
-    for packet in results.into_iter().flatten() {
-        keys.push(packet_comparison_key(&packet));
-        packets.push(packet);
-    }
-
-    match select_quorum_index(&keys, configured) {
-        Some(index) => Ok(packets.swap_remove(index)),
-        None => {
-            tracing::warn!(
-                configured_endpoints = configured,
-                responding_endpoints = packets.len(),
-                distinct_answers = distinct_answer_count(&keys),
-                "Ethereum RPC state read did not reach configured-endpoint quorum; failing closed"
-            );
-            Err(TransportErrorKind::custom_str(
-                "configured Ethereum RPC endpoints did not reach read quorum",
-            ))
+    let mut tally = QuorumTally::new(configured);
+    while let Some((index, result)) = pending.next().await {
+        match result {
+            Ok(packet) => {
+                health.record(index, true);
+                let key = packet_comparison_key(&packet);
+                if let Some(winner) = tally.answer(packet, key) {
+                    return Ok(winner);
+                }
+            }
+            Err(_) => {
+                health.record(index, false);
+                tally.fail();
+            }
+        }
+        if !tally.still_possible() {
+            break;
         }
     }
+
+    tracing::warn!(
+        configured_endpoints = configured,
+        responding_endpoints = tally.responded(),
+        distinct_answers = tally.distinct(),
+        "Ethereum RPC state read did not reach configured-endpoint quorum; failing closed"
+    );
+    Err(TransportErrorKind::custom_str(
+        "configured Ethereum RPC endpoints did not reach read quorum",
+    ))
 }
 
 /// Return the index of an answer whose comparison key is shared by at least
@@ -387,7 +655,8 @@ pub fn build_provider_from_urls(urls: &[String]) -> Result<RootProvider<Failover
             Ok(transport)
         })
         .collect::<Result<Vec<_>>>()?;
-    let client = ClientBuilder::default().transport(FailoverTransport::new(upstreams), false);
+    let transport = FailoverTransport::new(upstreams, endpoint_health(urls));
+    let client = ClientBuilder::default().transport(transport, false);
     Ok(ProviderBuilder::new().on_client(client))
 }
 
@@ -418,37 +687,57 @@ where
 
 /// Require a strict majority of matching answers even for reads that normally
 /// use failover, such as block headers that anchor a finalized log range.
+/// Returns as soon as a majority agrees and fails as soon as none is possible.
 pub async fn quorum_json_call<F, Fut>(endpoints: &[String], method: &str, call: F) -> Result<Value>
 where
     F: Fn(String) -> Fut,
     Fut: Future<Output = Result<Value>>,
 {
     let configured = endpoints.len();
-    let results = futures::future::join_all(endpoints.iter().cloned().map(&call)).await;
-    let mut answers = Vec::with_capacity(configured);
-    let mut keys = Vec::with_capacity(configured);
-    for answer in results.into_iter().flatten() {
-        keys.push(Some(normalize_rpc_value(answer.clone())));
-        answers.push(answer);
-    }
-    match select_quorum_index(&keys, configured) {
-        Some(index) => Ok(answers.swap_remove(index)),
-        None => {
-            let distinct = distinct_answer_count(&keys);
-            tracing::warn!(
-                method,
-                configured_endpoints = configured,
-                responding_endpoints = answers.len(),
-                distinct_answers = distinct,
-                "Ethereum RPC state read did not reach configured-endpoint quorum; failing closed"
-            );
-            bail!(
-                "{method} did not reach read quorum: {} of {configured} configured endpoints answered with {distinct} distinct answers, {} matching answers required",
-                answers.len(),
-                configured_quorum_size(configured)
-            )
+    let health = endpoint_health(endpoints);
+    let mut pending: FuturesUnordered<_> = endpoints
+        .iter()
+        .cloned()
+        .enumerate()
+        .map(|(index, endpoint)| {
+            let answer = call(endpoint);
+            async move { (index, answer.await) }
+        })
+        .collect();
+
+    let mut tally = QuorumTally::new(configured);
+    while let Some((index, result)) = pending.next().await {
+        match result {
+            Ok(answer) => {
+                health.record(index, true);
+                let key = Some(normalize_rpc_value(answer.clone()));
+                if let Some(winner) = tally.answer(answer, key) {
+                    return Ok(winner);
+                }
+            }
+            Err(_) => {
+                health.record(index, false);
+                tally.fail();
+            }
+        }
+        if !tally.still_possible() {
+            break;
         }
     }
+
+    let distinct = tally.distinct();
+    tracing::warn!(
+        method,
+        configured_endpoints = configured,
+        responding_endpoints = tally.responded(),
+        distinct_answers = distinct,
+        "Ethereum RPC state read did not reach configured-endpoint quorum; failing closed"
+    );
+    bail!(
+        "{method} did not reach read quorum: {} of {configured} configured endpoints answered with {distinct} distinct answers, {} matching answers required",
+        tally.responded(),
+        configured_quorum_size(configured)
+    )
 }
 
 async fn sequential_json_call<F, Fut>(
@@ -461,11 +750,22 @@ where
     F: Fn(String) -> Fut,
     Fut: Future<Output = Result<Value>>,
 {
-    let attempts = if can_fail_over { endpoints.len() } else { 1 };
+    let health = endpoint_health(endpoints);
+    // Calls with possible side effects go to the primary once, whatever its
+    // health; failover reads lead with the endpoints that are not cooling down.
+    let order = if can_fail_over {
+        health.failover_order()
+    } else {
+        vec![0]
+    };
     let mut failed = Vec::new();
-    for (index, endpoint) in endpoints.iter().take(attempts).enumerate() {
+    for index in order {
+        let Some(endpoint) = endpoints.get(index) else {
+            continue;
+        };
         match call(endpoint.clone()).await {
             Ok(answer) => {
+                health.record(index, true);
                 if index > 0 {
                     tracing::warn!(
                         method,
@@ -475,7 +775,10 @@ where
                 }
                 return Ok(answer);
             }
-            Err(_) => failed.push((index + 1).to_string()),
+            Err(_) => {
+                health.record(index, false);
+                failed.push((index + 1).to_string());
+            }
         }
     }
     bail!(
@@ -855,10 +1158,18 @@ mod tests {
     /// Start a JSON-RPC stub that answers every request with `result`, or with
     /// HTTP 503 when `result` is `None`.
     async fn spawn_rpc_stub(result: Option<Value>) -> String {
+        spawn_counting_rpc_stub(result).await.0
+    }
+
+    /// [`spawn_rpc_stub`], also returning how many requests it received.
+    async fn spawn_counting_rpc_stub(result: Option<Value>) -> (String, Arc<AtomicU64>) {
+        let hits = Arc::new(AtomicU64::new(0));
+        let counter = Arc::clone(&hits);
         let app = axum::Router::new().route(
             "/",
             axum::routing::post(move |axum::Json(body): axum::Json<Value>| {
                 let result = result.clone();
+                counter.fetch_add(1, Ordering::Relaxed);
                 async move {
                     let id = body.get("id").cloned().unwrap_or(Value::Null);
                     match result {
@@ -874,6 +1185,22 @@ mod tests {
                 }
             }),
         );
+        (serve_stub(app).await, hits)
+    }
+
+    /// Start a JSON-RPC stub that accepts requests and never answers.
+    async fn spawn_hanging_rpc_stub() -> String {
+        let app = axum::Router::new().route(
+            "/",
+            axum::routing::post(|| async {
+                std::future::pending::<()>().await;
+                ""
+            }),
+        );
+        serve_stub(app).await
+    }
+
+    async fn serve_stub(app: axum::Router) -> String {
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
             .await
             .expect("bind RPC stub");
@@ -939,5 +1266,224 @@ mod tests {
         ];
         let provider = build_provider_from_urls(&urls).expect("provider");
         assert_eq!(provider.get_block_number().await.expect("failover"), 16);
+    }
+
+    // ── Phase 3: early quorum and endpoint health ─────────────────────────────
+    // Routed-call tests use endpoint names no other test uses, because health
+    // is shared per endpoint list for the whole process.
+
+    #[tokio::test]
+    async fn quorum_returns_without_waiting_for_a_hung_endpoint() {
+        let answer = json!([log("0x1", None)]);
+        let answers = HashMap::from([
+            ("agree-a".to_string(), answer.clone()),
+            ("agree-b".to_string(), answer.clone()),
+        ]);
+        let list = endpoints(&["agree-a", "hung-c", "agree-b"]);
+        let read = routed_json_call(&list, "eth_getLogs", |endpoint| {
+            let answers = answers.clone();
+            async move {
+                if endpoint == "hung-c" {
+                    std::future::pending::<()>().await;
+                }
+                scripted_call(answers, endpoint).await
+            }
+        });
+        let result = tokio::time::timeout(Duration::from_secs(5), read)
+            .await
+            .expect("a majority answered, so the hung endpoint must not be awaited")
+            .expect("two of three agree");
+        assert_eq!(result, answer);
+    }
+
+    #[tokio::test]
+    async fn quorum_fails_as_soon_as_no_majority_is_possible() {
+        // Four configured endpoints need three matching answers. Two disagree
+        // and one is down, so the hung fourth cannot complete a majority.
+        let answers = HashMap::from([
+            ("early-empty".to_string(), json!([])),
+            ("early-full".to_string(), json!([log("0x1", None)])),
+        ]);
+        let list = endpoints(&["early-empty", "early-full", "early-down", "early-hung"]);
+        let read = routed_json_call(&list, "eth_getLogs", |endpoint| {
+            let answers = answers.clone();
+            async move {
+                if endpoint == "early-hung" {
+                    std::future::pending::<()>().await;
+                }
+                scripted_call(answers, endpoint).await
+            }
+        });
+        let error = tokio::time::timeout(Duration::from_secs(5), read)
+            .await
+            .expect("fails without waiting for the hung endpoint")
+            .expect_err("no majority is possible");
+        assert!(
+            error.to_string().contains("did not reach read quorum"),
+            "{error}"
+        );
+    }
+
+    #[tokio::test]
+    async fn a_failing_endpoint_is_skipped_during_its_cool_down() {
+        let calls_to_dead = Arc::new(AtomicU64::new(0));
+        let answers = HashMap::from([("cool-live".to_string(), json!("0x10"))]);
+        let list = endpoints(&["cool-dead", "cool-live"]);
+        for _ in 0..3 {
+            let result = routed_json_call(&list, "eth_blockNumber", |endpoint| {
+                let answers = answers.clone();
+                let calls = Arc::clone(&calls_to_dead);
+                async move {
+                    if endpoint == "cool-dead" {
+                        calls.fetch_add(1, Ordering::Relaxed);
+                    }
+                    scripted_call(answers, endpoint).await
+                }
+            })
+            .await
+            .expect("failover answer");
+            assert_eq!(result, json!("0x10"));
+        }
+        assert_eq!(
+            calls_to_dead.load(Ordering::Relaxed),
+            1,
+            "the dead primary is tried once, then skipped while it cools down"
+        );
+        let stats = endpoint_stats(&list).expect("the list was used");
+        assert_eq!(stats[0].failures, 1);
+        assert_eq!(stats[0].skips, 2);
+        assert!(stats[0].cooling_down);
+        assert_eq!(stats[1].successes, 3);
+    }
+
+    #[test]
+    fn a_cooled_endpoint_leads_again_after_its_cool_down() {
+        let health = EndpointHealth::new(3, Duration::from_millis(50));
+        assert_eq!(health.failover_order(), vec![0, 1, 2]);
+        health.record(0, false);
+        assert_eq!(health.failover_order(), vec![1, 2, 0]);
+        std::thread::sleep(Duration::from_millis(80));
+        assert_eq!(health.failover_order(), vec![0, 1, 2]);
+
+        health.record(1, false);
+        health.record(1, true);
+        assert_eq!(
+            health.failover_order(),
+            vec![0, 1, 2],
+            "a success clears the cool-down"
+        );
+
+        let disabled = EndpointHealth::new(2, Duration::ZERO);
+        disabled.record(0, false);
+        assert_eq!(disabled.failover_order(), vec![0, 1]);
+        assert_eq!(disabled.stats()[0].failures, 1);
+    }
+
+    #[test]
+    fn endpoints_that_are_all_cooling_are_still_tried_in_order() {
+        let health = EndpointHealth::new(2, Duration::from_secs(60));
+        health.record(0, false);
+        health.record(1, false);
+        assert_eq!(health.failover_order(), vec![0, 1]);
+    }
+
+    #[tokio::test]
+    async fn side_effects_go_to_a_cooling_primary_and_nowhere_else() {
+        let list = endpoints(&["send-primary", "send-other"]);
+        let calls_to_other = Arc::new(AtomicU64::new(0));
+        let call = |endpoint: String| {
+            let calls = Arc::clone(&calls_to_other);
+            async move {
+                if endpoint == "send-other" {
+                    calls.fetch_add(1, Ordering::Relaxed);
+                }
+                scripted_call(HashMap::new(), endpoint).await
+            }
+        };
+
+        // A failed read puts the primary into its cool-down.
+        assert!(routed_json_call(&list, "eth_blockNumber", call)
+            .await
+            .is_err());
+        assert!(endpoint_stats(&list).expect("the list was used")[0].cooling_down);
+
+        let before = calls_to_other.load(Ordering::Relaxed);
+        let error = routed_json_call(&list, "eth_sendRawTransaction", call)
+            .await
+            .expect_err("the primary is down");
+        assert_eq!(
+            error.to_string(),
+            "eth_sendRawTransaction failed on configured Ethereum RPC endpoint(s) 1"
+        );
+        assert_eq!(
+            calls_to_other.load(Ordering::Relaxed),
+            before,
+            "a call with side effects never fails over"
+        );
+    }
+
+    #[tokio::test]
+    async fn endpoint_counters_never_carry_urls() {
+        let list = endpoints(&[
+            "https://rpc.example/v3/secret-key-123",
+            "https://backup.example/?apikey=secret-key-456",
+        ]);
+        let answers = HashMap::from([(list[1].clone(), json!("0x1"))]);
+        routed_json_call(&list, "eth_blockNumber", |endpoint| {
+            scripted_call(answers.clone(), endpoint)
+        })
+        .await
+        .expect("failover");
+        let stats = endpoint_stats(&list).expect("the list was used");
+        assert!(!format!("{stats:?}").contains("secret-key"));
+        assert_eq!(
+            stats.iter().map(|s| s.position).collect::<Vec<_>>(),
+            vec![1, 2]
+        );
+        assert_eq!(endpoint_stats(&endpoints(&["never-used"])), None);
+    }
+
+    #[tokio::test]
+    async fn provider_skips_a_dead_primary_while_it_cools_down() {
+        let (dead, dead_hits) = spawn_counting_rpc_stub(None).await;
+        let (live, live_hits) = spawn_counting_rpc_stub(Some(json!("0x10"))).await;
+        let provider = build_provider_from_urls(&[dead, live]).expect("provider");
+        for _ in 0..3 {
+            assert_eq!(provider.get_block_number().await.expect("failover"), 16);
+        }
+        assert_eq!(dead_hits.load(Ordering::Relaxed), 1);
+        assert_eq!(live_hits.load(Ordering::Relaxed), 3);
+    }
+
+    #[tokio::test]
+    async fn providers_built_from_the_same_list_share_health() {
+        // The node builds a provider per operation, so health must outlive one.
+        let (dead, dead_hits) = spawn_counting_rpc_stub(None).await;
+        let (live, _) = spawn_counting_rpc_stub(Some(json!("0x10"))).await;
+        let urls = [dead, live];
+        for _ in 0..3 {
+            let provider = build_provider_from_urls(&urls).expect("provider");
+            assert_eq!(provider.get_block_number().await.expect("failover"), 16);
+        }
+        assert_eq!(dead_hits.load(Ordering::Relaxed), 1);
+    }
+
+    #[tokio::test]
+    async fn provider_quorum_does_not_wait_for_a_hung_endpoint() {
+        let urls = [
+            spawn_rpc_stub(Some(json!("0xaa36a7"))).await,
+            spawn_hanging_rpc_stub().await,
+            spawn_rpc_stub(Some(json!("0xaa36a7"))).await,
+        ];
+        let provider = build_provider_from_urls(&urls).expect("provider");
+        // The HTTP timeout is 15 s, so finishing well inside 5 s shows the
+        // hung endpoint was not waited for.
+        let chain_id = tokio::time::timeout(Duration::from_secs(5), async {
+            provider.get_chain_id().await
+        })
+        .await
+        .expect("quorum without the hung endpoint")
+        .expect("two of three agree");
+        assert_eq!(chain_id, 11_155_111);
     }
 }

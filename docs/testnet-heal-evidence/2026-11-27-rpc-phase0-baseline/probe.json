@@ -1,0 +1,449 @@
+{
+  "tool": "creg-rpc-edge-probe/1",
+  "startedAt": "2026-11-27T13:19:57.380Z",
+  "finishedAt": "2026-11-27T13:20:27.699Z",
+  "hosts": {
+    "api": "https://api.testnet.cregnet.dev",
+    "rpc": "https://rpc.testnet.cregnet.dev",
+    "explorer": "https://explorer.testnet.cregnet.dev",
+    "faucet": "https://faucet.testnet.cregnet.dev"
+  },
+  "burst": false,
+  "maxTipAgeMin": 30,
+  "summary": {
+    "counts": {
+      "INFO": 13,
+      "PASS": 13,
+      "FAIL": 33,
+      "WARN": 1
+    },
+    "failingFindings": [
+      "R-01",
+      "R-06",
+      "R-08",
+      "R-14"
+    ]
+  },
+  "results": [
+    {
+      "finding": "-",
+      "surface": "api.testnet.cregnet.dev/rpc",
+      "check": "GET descriptor",
+      "verdict": "INFO",
+      "observed": "HTTP 200, body {\"service\":\"CREG Blockchain JSON-RPC\",\"network\":\"creg-testnet\",\"method..."
+    },
+    {
+      "finding": "R-09",
+      "surface": "api.testnet.cregnet.dev/rpc",
+      "check": "CORS preflight",
+      "verdict": "INFO",
+      "observed": "HTTP 200, body {\"service\":\"CREG Blockchain JSON-RPC\",\"network\":\"creg-testnet\",\"method...; server Caddy, via -, cloudflare no, allow-origin -"
+    },
+    {
+      "finding": "-",
+      "surface": "api.testnet.cregnet.dev/rpc",
+      "check": "creg_chainId",
+      "verdict": "PASS",
+      "observed": "HTTP 200, result \"creg-phase-c-testnet-2026-09-26-r7\""
+    },
+    {
+      "finding": "-",
+      "surface": "api.testnet.cregnet.dev/rpc",
+      "check": "creg_blockNumber",
+      "verdict": "PASS",
+      "observed": "HTTP 200, result \"0x17\""
+    },
+    {
+      "finding": "-",
+      "surface": "api.testnet.cregnet.dev/rpc",
+      "check": "creg_health status ok",
+      "verdict": "PASS",
+      "observed": "HTTP 200, result {\"status\":\"ok\",\"version\":\"0.1.0\",\"chain_id\":\"creg-phase-c-testnet-2026..."
+    },
+    {
+      "finding": "R-06",
+      "surface": "api.testnet.cregnet.dev/rpc",
+      "check": "validator-set sync",
+      "verdict": "INFO",
+      "observed": "state synced, last_error none"
+    },
+    {
+      "finding": "R-06",
+      "surface": "api.testnet.cregnet.dev/rpc",
+      "check": "creg_health reports tip age",
+      "verdict": "FAIL",
+      "observed": "fields: status, version, chain_id, block_number, validator_set_sync"
+    },
+    {
+      "finding": "R-06",
+      "surface": "api.testnet.cregnet.dev/rpc",
+      "check": "tip block age",
+      "verdict": "WARN",
+      "observed": "height 23, 2026-11-27T12:05:42Z, 74.3 min old"
+    },
+    {
+      "finding": "R-16",
+      "surface": "api.testnet.cregnet.dev/rpc",
+      "check": "eth_* namespace",
+      "verdict": "INFO",
+      "observed": "HTTP 200, rpc error -32601 Method not found"
+    },
+    {
+      "finding": "R-08",
+      "surface": "api.testnet.cregnet.dev/rpc",
+      "check": "batch answered",
+      "verdict": "FAIL",
+      "observed": "HTTP 200, rpc error -32700 Parse error"
+    },
+    {
+      "finding": "R-08",
+      "surface": "api.testnet.cregnet.dev/rpc",
+      "check": "positional array rejected",
+      "verdict": "FAIL",
+      "observed": "HTTP 200, result \"creg-phase-c-testnet-2026-09-26-r7\""
+    },
+    {
+      "finding": "R-08",
+      "surface": "api.testnet.cregnet.dev/rpc",
+      "check": "notification gets no reply",
+      "verdict": "FAIL",
+      "observed": "HTTP 200, result \"0x17\""
+    },
+    {
+      "finding": "R-08",
+      "surface": "api.testnet.cregnet.dev/rpc",
+      "check": "missing jsonrpc rejected",
+      "verdict": "FAIL",
+      "observed": "HTTP 200, result \"0x17\""
+    },
+    {
+      "finding": "-",
+      "surface": "api.testnet.cregnet.dev/jsonrpc",
+      "check": "creg_chainId matches",
+      "verdict": "PASS",
+      "observed": "HTTP 200, result \"creg-phase-c-testnet-2026-09-26-r7\""
+    },
+    {
+      "finding": "-",
+      "surface": "rpc.testnet.cregnet.dev/rpc",
+      "check": "creg_chainId matches",
+      "verdict": "PASS",
+      "observed": "HTTP 200, result \"creg-phase-c-testnet-2026-09-26-r7\""
+    },
+    {
+      "finding": "R-01",
+      "surface": "api.testnet.cregnet.dev/sepolia",
+      "check": "GET descriptor says allowlisted",
+      "verdict": "FAIL",
+      "observed": "HTTP 200, body {\"service\":\"CREG Unified L1 RPC Gateway\",\"network\":\"sepolia\",\"chainId\"..."
+    },
+    {
+      "finding": "R-09",
+      "surface": "api.testnet.cregnet.dev/sepolia",
+      "check": "CORS preflight",
+      "verdict": "INFO",
+      "observed": "HTTP 200, body {\"service\":\"CREG Unified L1 RPC Gateway\",\"network\":\"sepolia\",\"chainId\"...; server Caddy, via -, cloudflare no, allow-origin -"
+    },
+    {
+      "finding": "-",
+      "surface": "api.testnet.cregnet.dev/sepolia",
+      "check": "eth_chainId",
+      "verdict": "PASS",
+      "observed": "HTTP 200, result \"0xaa36a7\""
+    },
+    {
+      "finding": "R-05",
+      "surface": "api.testnet.cregnet.dev/sepolia",
+      "check": "upstream response headers",
+      "verdict": "INFO",
+      "observed": "server cloudflare, via 2.0 Caddy, cloudflare yes, allow-origin -"
+    },
+    {
+      "finding": "-",
+      "surface": "api.testnet.cregnet.dev/sepolia",
+      "check": "eth_blockNumber",
+      "verdict": "PASS",
+      "observed": "HTTP 200, result \"0xba8451\""
+    },
+    {
+      "finding": "R-01",
+      "surface": "api.testnet.cregnet.dev/sepolia",
+      "check": "web3_clientVersion denied",
+      "verdict": "FAIL",
+      "observed": "HTTP 200, result \"Geth/v1.17.9-stable-9dffe6e9/linux-amd64/go1.25.14\""
+    },
+    {
+      "finding": "R-01",
+      "surface": "api.testnet.cregnet.dev/sepolia",
+      "check": "eth_getLogs denied",
+      "verdict": "FAIL",
+      "observed": "HTTP 200, result [{\"address\":\"0x7614dcf2f64379b459d42eef8fcebe8ac3a6bc91\",\"topics\":[\"0x..."
+    },
+    {
+      "finding": "R-01",
+      "surface": "api.testnet.cregnet.dev/sepolia",
+      "check": "batch with denied method",
+      "verdict": "FAIL",
+      "observed": "HTTP 200, array[2]"
+    },
+    {
+      "finding": "R-14",
+      "surface": "api.testnet.cregnet.dev/sepolia",
+      "check": "batch of 21 refused",
+      "verdict": "FAIL",
+      "observed": "HTTP 200, array[21]"
+    },
+    {
+      "finding": "R-01",
+      "surface": "api.testnet.cregnet.dev/sepolia",
+      "check": "malformed body refused by gateway",
+      "verdict": "FAIL",
+      "observed": "HTTP 400, rpc error -32700 Parse error"
+    },
+    {
+      "finding": "R-01",
+      "surface": "api.testnet.cregnet.dev/sepolia",
+      "check": "70 KiB body refused (413)",
+      "verdict": "FAIL",
+      "observed": "HTTP 200, result \"0xaa36a7\""
+    },
+    {
+      "finding": "R-01",
+      "surface": "rpc.testnet.cregnet.dev/sepolia",
+      "check": "GET descriptor says allowlisted",
+      "verdict": "FAIL",
+      "observed": "HTTP 200, body {\"service\":\"CREG Unified L1 RPC Gateway\",\"network\":\"sepolia\",\"chainId\"..."
+    },
+    {
+      "finding": "R-09",
+      "surface": "rpc.testnet.cregnet.dev/sepolia",
+      "check": "CORS preflight",
+      "verdict": "INFO",
+      "observed": "HTTP 200, body {\"service\":\"CREG Unified L1 RPC Gateway\",\"network\":\"sepolia\",\"chainId\"...; server Caddy, via -, cloudflare no, allow-origin -"
+    },
+    {
+      "finding": "-",
+      "surface": "rpc.testnet.cregnet.dev/sepolia",
+      "check": "eth_chainId",
+      "verdict": "PASS",
+      "observed": "HTTP 200, result \"0xaa36a7\""
+    },
+    {
+      "finding": "R-05",
+      "surface": "rpc.testnet.cregnet.dev/sepolia",
+      "check": "upstream response headers",
+      "verdict": "INFO",
+      "observed": "server cloudflare, via 2.0 Caddy, cloudflare yes, allow-origin -"
+    },
+    {
+      "finding": "-",
+      "surface": "rpc.testnet.cregnet.dev/sepolia",
+      "check": "eth_blockNumber",
+      "verdict": "PASS",
+      "observed": "HTTP 200, result \"0xba8451\""
+    },
+    {
+      "finding": "R-01",
+      "surface": "rpc.testnet.cregnet.dev/sepolia",
+      "check": "web3_clientVersion denied",
+      "verdict": "FAIL",
+      "observed": "HTTP 200, result \"Geth/v1.17.9-stable-9dffe6e9/linux-amd64/go1.25.14\""
+    },
+    {
+      "finding": "R-01",
+      "surface": "rpc.testnet.cregnet.dev/sepolia",
+      "check": "eth_getLogs denied",
+      "verdict": "FAIL",
+      "observed": "HTTP 200, result [{\"address\":\"0xfffffffffffffffffffffffffffffffffffffffe\",\"topics\":[\"0x..."
+    },
+    {
+      "finding": "R-01",
+      "surface": "rpc.testnet.cregnet.dev/sepolia",
+      "check": "batch with denied method",
+      "verdict": "FAIL",
+      "observed": "HTTP 200, array[2]"
+    },
+    {
+      "finding": "R-14",
+      "surface": "rpc.testnet.cregnet.dev/sepolia",
+      "check": "batch of 21 refused",
+      "verdict": "FAIL",
+      "observed": "HTTP 200, array[21]"
+    },
+    {
+      "finding": "R-01",
+      "surface": "rpc.testnet.cregnet.dev/sepolia",
+      "check": "malformed body refused by gateway",
+      "verdict": "FAIL",
+      "observed": "HTTP 400, rpc error -32700 Parse error"
+    },
+    {
+      "finding": "R-01",
+      "surface": "rpc.testnet.cregnet.dev/sepolia",
+      "check": "70 KiB body refused (413)",
+      "verdict": "FAIL",
+      "observed": "HTTP 200, result \"0xaa36a7\""
+    },
+    {
+      "finding": "R-01",
+      "surface": "explorer.testnet.cregnet.dev/rpc",
+      "check": "GET refused (405)",
+      "verdict": "FAIL",
+      "observed": "HTTP 200, body {\"service\":\"CREG Sepolia L1 JSON-RPC\",\"chainId\":\"0xaa36a7\",\"usage\":\"PO..."
+    },
+    {
+      "finding": "R-09",
+      "surface": "explorer.testnet.cregnet.dev/rpc",
+      "check": "CORS preflight",
+      "verdict": "INFO",
+      "observed": "HTTP 200, body {\"service\":\"CREG Sepolia L1 JSON-RPC\",\"chainId\":\"0xaa36a7\",\"usage\":\"PO...; server Caddy, via -, cloudflare no, allow-origin -"
+    },
+    {
+      "finding": "-",
+      "surface": "explorer.testnet.cregnet.dev/rpc",
+      "check": "eth_chainId",
+      "verdict": "PASS",
+      "observed": "HTTP 200, result \"0xaa36a7\""
+    },
+    {
+      "finding": "R-05",
+      "surface": "explorer.testnet.cregnet.dev/rpc",
+      "check": "upstream response headers",
+      "verdict": "INFO",
+      "observed": "server cloudflare, via 2.0 Caddy, cloudflare yes, allow-origin -"
+    },
+    {
+      "finding": "-",
+      "surface": "explorer.testnet.cregnet.dev/rpc",
+      "check": "eth_blockNumber",
+      "verdict": "PASS",
+      "observed": "HTTP 200, result \"0xba8452\""
+    },
+    {
+      "finding": "R-01",
+      "surface": "explorer.testnet.cregnet.dev/rpc",
+      "check": "web3_clientVersion denied",
+      "verdict": "FAIL",
+      "observed": "HTTP 200, result \"reth/v2.11.0-b9abbcc/x86_64-unknown-linux-gnu\""
+    },
+    {
+      "finding": "R-01",
+      "surface": "explorer.testnet.cregnet.dev/rpc",
+      "check": "eth_getLogs denied",
+      "verdict": "FAIL",
+      "observed": "HTTP 200, result [{\"address\":\"0xfffffffffffffffffffffffffffffffffffffffe\",\"topics\":[\"0x..."
+    },
+    {
+      "finding": "R-01",
+      "surface": "explorer.testnet.cregnet.dev/rpc",
+      "check": "batch with denied method",
+      "verdict": "FAIL",
+      "observed": "HTTP 200, array[2]"
+    },
+    {
+      "finding": "R-14",
+      "surface": "explorer.testnet.cregnet.dev/rpc",
+      "check": "batch of 21 refused",
+      "verdict": "FAIL",
+      "observed": "HTTP 200, array[21]"
+    },
+    {
+      "finding": "R-01",
+      "surface": "explorer.testnet.cregnet.dev/rpc",
+      "check": "malformed body refused by gateway",
+      "verdict": "FAIL",
+      "observed": "HTTP 400, rpc error -32700 Parse error"
+    },
+    {
+      "finding": "R-01",
+      "surface": "explorer.testnet.cregnet.dev/rpc",
+      "check": "70 KiB body refused (413)",
+      "verdict": "FAIL",
+      "observed": "HTTP 200, result \"0xaa36a7\""
+    },
+    {
+      "finding": "R-01",
+      "surface": "faucet.testnet.cregnet.dev/rpc",
+      "check": "GET descriptor says allowlisted",
+      "verdict": "FAIL",
+      "observed": "HTTP 200, body {\"service\":\"CREG Sepolia L1 JSON-RPC\",\"chainId\":\"0xaa36a7\",\"usage\":\"PO..."
+    },
+    {
+      "finding": "R-09",
+      "surface": "faucet.testnet.cregnet.dev/rpc",
+      "check": "CORS preflight",
+      "verdict": "INFO",
+      "observed": "HTTP 200, body {\"service\":\"CREG Sepolia L1 JSON-RPC\",\"chainId\":\"0xaa36a7\",\"usage\":\"PO...; server Caddy, via -, cloudflare no, allow-origin -"
+    },
+    {
+      "finding": "-",
+      "surface": "faucet.testnet.cregnet.dev/rpc",
+      "check": "eth_chainId",
+      "verdict": "PASS",
+      "observed": "HTTP 200, result \"0xaa36a7\""
+    },
+    {
+      "finding": "R-05",
+      "surface": "faucet.testnet.cregnet.dev/rpc",
+      "check": "upstream response headers",
+      "verdict": "INFO",
+      "observed": "server cloudflare, via 2.0 Caddy, cloudflare yes, allow-origin -"
+    },
+    {
+      "finding": "-",
+      "surface": "faucet.testnet.cregnet.dev/rpc",
+      "check": "eth_blockNumber",
+      "verdict": "PASS",
+      "observed": "HTTP 200, result \"0xba8452\""
+    },
+    {
+      "finding": "R-01",
+      "surface": "faucet.testnet.cregnet.dev/rpc",
+      "check": "web3_clientVersion denied",
+      "verdict": "FAIL",
+      "observed": "HTTP 200, result \"reth/v2.11.0-b9abbcc/x86_64-unknown-linux-gnu\""
+    },
+    {
+      "finding": "R-01",
+      "surface": "faucet.testnet.cregnet.dev/rpc",
+      "check": "eth_getLogs denied",
+      "verdict": "FAIL",
+      "observed": "HTTP 200, result [{\"address\":\"0xfffffffffffffffffffffffffffffffffffffffe\",\"topics\":[\"0x..."
+    },
+    {
+      "finding": "R-01",
+      "surface": "faucet.testnet.cregnet.dev/rpc",
+      "check": "batch with denied method",
+      "verdict": "FAIL",
+      "observed": "HTTP 200, array[2]"
+    },
+    {
+      "finding": "R-14",
+      "surface": "faucet.testnet.cregnet.dev/rpc",
+      "check": "batch of 21 refused",
+      "verdict": "FAIL",
+      "observed": "HTTP 200, array[21]"
+    },
+    {
+      "finding": "R-01",
+      "surface": "faucet.testnet.cregnet.dev/rpc",
+      "check": "malformed body refused by gateway",
+      "verdict": "FAIL",
+      "observed": "HTTP 400, rpc error -32700 Parse error"
+    },
+    {
+      "finding": "R-01",
+      "surface": "faucet.testnet.cregnet.dev/rpc",
+      "check": "70 KiB body refused (413)",
+      "verdict": "FAIL",
+      "observed": "HTTP 200, result \"0xaa36a7\""
+    },
+    {
+      "finding": "R-05",
+      "surface": "all gateways",
+      "check": "Sepolia head spread",
+      "verdict": "INFO",
+      "observed": "1 blocks (api.testnet.cregnet.dev/sepolia 12223569, rpc.testnet.cregnet.dev/sepolia 12223569, explorer.testnet.cregnet.dev/rpc 12223570, faucet.testnet.cregnet.dev/rpc 12223570)"
+    }
+  ]
+}

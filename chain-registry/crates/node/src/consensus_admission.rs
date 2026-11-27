@@ -3824,7 +3824,7 @@ mod tests {
             vrf_proofs: HashMap::new(),
             decryption_shares: HashMap::new(),
             validator_registrations: HashMap::new(),
-            validator_set_sync: crate::ValidatorSetSyncStatus::default(),
+            validator_set_sync: crate::state::ValidatorSetSyncStatus::default(),
             view_change_certs: HashMap::new(),
             reorgs: Vec::new(),
             pbft_engine: crate::state::PbftEngine::new(),
