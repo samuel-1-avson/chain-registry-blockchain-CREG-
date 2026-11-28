@@ -606,6 +606,10 @@ enum ValidatorCommands {
         #[arg(long, value_name = "URL")]
         local_node_url: Option<String>,
 
+        /// Manage the selected identity using its existing key and local node.
+        #[arg(long, requires_all = ["node_id", "local_node_url"])]
+        manage_existing: bool,
+
         /// Print the local session link without opening it.
         #[arg(long)]
         no_browser: bool,
@@ -1333,6 +1337,7 @@ async fn run(cli: Cli) -> Result<()> {
                     node_id,
                     key_file,
                     local_node_url,
+                    manage_existing,
                     no_browser,
                 } => {
                     validator_onboarding::run(
@@ -1340,6 +1345,7 @@ async fn run(cli: Cli) -> Result<()> {
                         key_file,
                         cli.node_url,
                         local_node_url,
+                        manage_existing,
                         no_browser,
                     )
                     .await?;

@@ -17,8 +17,8 @@ async fn detect_environment() -> EnvironmentInfo {
 }
 
 #[tauri::command]
-async fn open_validator_onboarding() -> Result<(), String> {
-    runtime::open_validator_onboarding()
+async fn open_validator_onboarding(container_name: Option<String>) -> Result<(), String> {
+    runtime::open_validator_onboarding(container_name.as_deref())
         .await
         .map_err(|error| format!("{error:#}"))
 }

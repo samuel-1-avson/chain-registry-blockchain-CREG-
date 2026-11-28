@@ -86,7 +86,7 @@ pub async fn run(node_url: Option<String>) -> Result<()> {
     }
 
     if setup_validator {
-        return crate::validator_onboarding::run(None, None, node_url, None, false).await;
+        return crate::validator_onboarding::run(None, None, node_url, None, false, false).await;
     }
 
     // Final summary

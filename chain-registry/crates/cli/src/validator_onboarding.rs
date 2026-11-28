@@ -70,6 +70,7 @@ struct BrowserConfig {
     faucet: String,
     node_id: String,
     public_key: String,
+    manage_existing: bool,
     launch_log: Option<String>,
     approve: String,
     apply: String,
@@ -123,6 +124,7 @@ struct SyncHealth {
 struct EnrollmentStatus {
     registered: bool,
     admitted: bool,
+    identity_conflict: Option<String>,
     local_node: &'static str,
     vote_height: Option<u64>,
     launch_status: &'static str,
@@ -206,6 +208,10 @@ pub struct AdmissionProgressView {
     pub node_id: String,
     #[serde(default)]
     pub ed25519_pubkey: String,
+    #[serde(default)]
+    pub certified_member: bool,
+    #[serde(default)]
+    pub registration_conflict: bool,
     #[serde(default)]
     pub stage: String,
     #[serde(default)]
@@ -369,6 +375,7 @@ fn browser_config(node_id: String, key: &SigningKey) -> Result<BrowserConfig> {
         faucet: "https://faucet.testnet.cregnet.dev".into(),
         node_id,
         public_key: hex::encode(key.verifying_key().as_bytes()),
+        manage_existing: false,
         launch_log: None,
         approve: selector("approve(address,uint256)"),
         apply: selector("applyToBeValidator(uint256)"),
@@ -577,6 +584,67 @@ impl Enrollment {
         }
     }
 
+    async fn certified_identity(&self, lookup: &str) -> Result<Option<ValidatorIdentity>> {
+        let response = self
+            .client
+            .get(
+                self.network
+                    .join(&format!("/v1/public/validators/{lookup}"))?,
+            )
+            .send()
+            .await?;
+        if response.status() == StatusCode::NOT_FOUND {
+            return Ok(None);
+        }
+        let profile: serde_json::Value = response.error_for_status()?.json().await?;
+        if let Some(binding) = profile.get("certified_membership") {
+            return Ok(serde_json::from_value(binding.clone())?);
+        }
+        // Older R7 nodes expose the active identity in the top-level profile.
+        if profile["in_active_set"].as_bool() != Some(true)
+            || !profile["status"].as_str().is_some_and(common::validator_status_is_active)
+        {
+            return Ok(None);
+        }
+        let identity = ValidatorIdentity {
+            evm_address: profile["eth_address"]
+                .as_str()
+                .unwrap_or_default()
+                .to_owned(),
+            node_id: profile["node_id"].as_str().unwrap_or_default().to_owned(),
+            ed25519_pubkey: profile["pubkey"].as_str().unwrap_or_default().to_owned(),
+        }
+        .normalized();
+        Ok(identity.is_complete().then_some(identity))
+    }
+
+    async fn check_certified_identity(
+        &self,
+        identity: &ValidatorIdentity,
+    ) -> Result<bool, ApiError> {
+        let (wallet, node) = tokio::try_join!(
+            self.certified_identity(&identity.evm_address),
+            self.certified_identity(&identity.node_id)
+        )
+        .map_err(|_| {
+            api_error(
+                StatusCode::BAD_GATEWAY,
+                "Could not verify the certified R7 identity. Refresh and try again.",
+            )
+        })?;
+        let mut certified = false;
+        for binding in [wallet, node].into_iter().flatten() {
+            if binding.normalized() != *identity {
+                return Err(api_error(
+                    StatusCode::CONFLICT,
+                    format!("The selected wallet or node is certified as {}. Select the matching wallet and validator.", binding.node_id),
+                ));
+            }
+            certified = true;
+        }
+        Ok(certified)
+    }
+
     fn challenge(&self, identity: &ValidatorIdentity) -> String {
         validator_identity_registration_message(
             &self.config.chain_id,
@@ -697,6 +765,12 @@ fn merge_admission_progress(
 ) -> Option<AdmissionProgressView> {
     match (primary, secondary) {
         (Some(mut a), Some(b)) => {
+            a.registration_conflict |= b.registration_conflict;
+            if b.certified_member && !a.certified_member {
+                a.certified_member = true;
+                a.stage.clone_from(&b.stage);
+                a.stage_reason.clone_from(&b.stage_reason);
+            }
             if b.l1_approvals_collected > a.l1_approvals_collected {
                 a.l1_approvals_collected = b.l1_approvals_collected;
                 a.l1_signers = b.l1_signers;
@@ -794,9 +868,10 @@ async fn status(
             "Could not refresh R7 enrollment status",
         )
     };
-    let (stats, registrations) = tokio::join!(
+    let (stats, registrations, certified) = tokio::join!(
         state.network_stats(),
         state.get::<Vec<Registration>>(&state.network, "/v1/validator/registrations"),
+        state.check_certified_identity(&identity),
     );
     let stats = stats.map_err(|_| unavailable())?;
     let registrations = registrations.map_err(|_| unavailable())?;
@@ -804,7 +879,12 @@ async fn status(
         .iter()
         .find(|record| record.identity.normalized() == identity);
     let registered = found.is_some_and(|record| record.registered_with_node);
-    let admitted = found.is_some_and(|record| record.admitted_to_consensus && record.active);
+    let admitted = certified.as_ref().is_ok_and(|certified| {
+        *certified || found.is_some_and(|record| record.admitted_to_consensus && record.active)
+    });
+    let identity_conflict = certified
+        .err()
+        .and_then(|(_, Json(message))| message["error"].as_str().map(str::to_owned));
     let runtime = match state.launcher.as_ref().filter(|_| registered) {
         Some(launcher) => launcher.runtime(&state.config).await,
         None => None,
@@ -862,7 +942,16 @@ async fn status(
                     signer_warnings.push(issue.clone());
                 }
             }
-            report.applicants.first().cloned()
+            report
+                .applicants
+                .iter()
+                .find(|entry| {
+                    entry.node_id == identity.node_id
+                        && entry
+                            .ed25519_pubkey
+                            .eq_ignore_ascii_case(&identity.ed25519_pubkey)
+                })
+                .cloned()
         }
         Err(Some(StatusCode::NOT_FOUND)) => {
             admission_unavailable_reason = Some(
@@ -874,7 +963,16 @@ async fn status(
         Err(_) => None,
     };
     let local_view = match &local_admission_res {
-        Some(Ok(report)) => report.applicants.first().cloned(),
+        Some(Ok(report)) => report
+            .applicants
+            .iter()
+            .find(|entry| {
+                entry.node_id == identity.node_id
+                    && entry
+                        .ed25519_pubkey
+                        .eq_ignore_ascii_case(&identity.ed25519_pubkey)
+            })
+            .cloned(),
         _ => None,
     };
     let admission = merge_admission_progress(net_view, local_view);
@@ -903,6 +1001,7 @@ async fn status(
     Ok(Json(EnrollmentStatus {
         registered,
         admitted,
+        identity_conflict,
         local_node,
         vote_height,
         launch_status,
@@ -918,6 +1017,7 @@ async fn challenge(
     Json(wallet): Json<Wallet>,
 ) -> Result<Json<serde_json::Value>, ApiError> {
     let identity = state.identity(normalize_address(&wallet.address)?);
+    state.check_certified_identity(&identity).await?;
     Ok(Json(
         serde_json::json!({ "message": state.challenge(&identity) }),
     ))
@@ -942,6 +1042,7 @@ async fn register(
         )
     };
     state.network_stats().await.map_err(|_| unavailable())?;
+    state.check_certified_identity(&identity).await?;
     let ed_signature = state
         .signing_key
         .sign(state.challenge(&identity).as_bytes());
@@ -1000,6 +1101,7 @@ async fn start_node(
             "Could not verify the selected R7 node",
         )
     })?;
+    state.check_certified_identity(&identity).await?;
     let registrations: Vec<Registration> = state
         .get(&state.network, "/v1/validator/registrations")
         .await
@@ -1076,6 +1178,7 @@ pub async fn run(
     key_file: Option<PathBuf>,
     node_url: Option<String>,
     local_node_url: Option<String>,
+    manage_existing: bool,
     no_browser: bool,
 ) -> Result<()> {
     let storage_id = node_id.as_deref().unwrap_or(DEFAULT_NODE_ID);
@@ -1087,7 +1190,10 @@ pub async fn run(
         None if node_id.is_none() => runtime_key_path(storage_id)?.with_file_name("onboarding.key"),
         None => runtime_key_path(storage_id)?,
     };
-    let key = runtime_key(&key_path, key_file.is_none())?;
+    if manage_existing && (node_id.is_none() || local_node_url.is_none()) {
+        bail!("Managing an existing validator requires its node ID and local HTTP URL");
+    }
+    let key = runtime_key(&key_path, key_file.is_none() && !manage_existing)?;
     let node_id = node_id.unwrap_or_else(|| {
         format!(
             "ext-val-{}",
@@ -1095,10 +1201,15 @@ pub async fn run(
         )
     });
     let mut config = browser_config(node_id, &key)?;
+    config.manage_existing = manage_existing;
     let http_port = local_node_url
         .as_ref()
         .and_then(|_| local_node.port_or_known_default());
-    let launcher = local_launcher(&config.node_id, &key_path, http_port);
+    let launcher = if manage_existing {
+        None
+    } else {
+        local_launcher(&config.node_id, &key_path, http_port)
+    };
     config.launch_log = launcher
         .as_ref()
         .map(|launcher| launcher.log_file.display().to_string());
@@ -1119,6 +1230,25 @@ pub async fn run(
         launcher,
         launch_status: Arc::new(Mutex::new("idle")),
     };
+    if manage_existing {
+        let (network, local_status, binding) = tokio::join!(
+            state.network_stats(),
+            state.local_status(&state.local_node, 0, false),
+            state.certified_identity(&state.config.node_id),
+        );
+        network?;
+        anyhow::ensure!(
+            !matches!(local_status, LOCAL_NODE_UNAVAILABLE | LOCAL_NODE_MISMATCH),
+            "Could not verify the selected local R7 node"
+        );
+        if let Some(binding) = binding? {
+            anyhow::ensure!(
+                state.config.public_key.eq_ignore_ascii_case(&binding.ed25519_pubkey),
+                "The local key file does not match the certified public key for {}",
+                state.config.node_id
+            );
+        }
+    }
     let url = format!("{}/#{}", state.origin, state.session);
     if !no_browser {
         if let Err(error) = crate::auth::open_browser(&url) {
@@ -1316,6 +1446,9 @@ pub async fn show_status(
     for app in &report.applicants {
         println!("\n  Applicant {} ({})", app.node_id, app.applicant);
         println!("    Stage:             {} — {}", app.stage, app.stage_reason);
+        if app.registration_conflict {
+            println!("    Registration:      metadata does not match the certified validator");
+        }
         println!("    L1 staking:        {} ({} tCREG)", app.staking_state, app.stake_creg);
         println!(
             "    Sepolia approvals: {}/{}",
@@ -1705,6 +1838,53 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn rejects_mismatched_certified_wallet_before_requesting_a_signature() {
+        let key = SigningKey::from_bytes(&[28; 32]);
+        let config = browser_config("fixture-validator".into(), &key).unwrap();
+        let wallet = "0x1000000000000000000000000000000000000001";
+        let bound = serde_json::json!({
+            "certified_membership": {
+                "evm_address": wallet,
+                "node_id": config.node_id,
+                "ed25519_pubkey": config.public_key,
+            },
+            "registration": { "node_id": "stale-metadata" },
+        });
+        let server = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let origin = format!("http://{}", server.local_addr().unwrap());
+        let router = Router::new().route(
+            "/v1/public/validators/:lookup",
+            get(move || {
+                let bound = bound.clone();
+                async move { Json(bound) }
+            }),
+        );
+        let task = tokio::spawn(async move { axum::serve(server, router).await.unwrap() });
+        let state = Enrollment {
+            signing_key: Arc::new(key),
+            client: Client::new(),
+            network: Url::parse(&origin).unwrap(),
+            local_node: Url::parse(&origin).unwrap(),
+            config,
+            origin,
+            session: "fixture-session".into(),
+            nonce: "fixture-nonce".into(),
+            vote_height: Arc::new(Mutex::new(None)),
+            launcher: None,
+            launch_status: Arc::new(Mutex::new("idle")),
+        };
+        let wrong_wallet = Wallet {
+            address: "0x2000000000000000000000000000000000000002".into(),
+        };
+        let error = challenge(State(state.clone()), Json(wrong_wallet))
+            .await
+            .expect_err("certified identity mismatch must prevent signing");
+        assert_eq!(error.0, StatusCode::CONFLICT);
+        assert!(challenge(State(state), Json(Wallet { address: wallet.into() })).await.is_ok());
+        task.abort();
+    }
+
+    #[tokio::test]
     async fn serves_multi_wallet_picker_assets_and_csp() {
         let key = SigningKey::from_bytes(&[31; 32]);
         let config = browser_config("fixture-validator".into(), &key).unwrap();
@@ -1741,6 +1921,9 @@ mod tests {
         assert!(html.contains("id=\"wallet-list\""));
         assert!(html.contains("id=\"switch-account\""));
         assert!(html.contains("id=\"rescan-wallets\""));
+        for field in ["identity-wallet", "identity-node", "identity-key", "confirm-identity"] {
+            assert!(html.contains(&format!("id=\"{field}\"")));
+        }
 
         let js = client
             .get(format!("{origin}/onboarding.js"))

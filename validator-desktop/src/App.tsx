@@ -16,13 +16,33 @@ import { EvidenceView } from "./views/EvidenceView";
 
 type TabId = "zones" | "ai" | "logs" | "evidence" | "settings";
 
+const PUBLIC_R7_URL = "https://api.testnet.cregnet.dev";
+const NODE_URL_SETTING = "creg.node-http-url";
+
+function savedNodeUrl(): string {
+  try {
+    return window.localStorage.getItem(NODE_URL_SETTING) || PUBLIC_R7_URL;
+  } catch {
+    return PUBLIC_R7_URL;
+  }
+}
+
+function rememberNodeUrl(url: string) {
+  try {
+    const endpoint = new URL(url);
+    if (endpoint.username || endpoint.password || endpoint.search || endpoint.hash) return;
+    window.localStorage.setItem(NODE_URL_SETTING, url);
+  } catch {
+    // The endpoint can still be used for this session.
+  }
+}
+
 function r7NodeLabel(node: R7RuntimeStatus): string {
   if (node.health) {
-    const role = node.health.is_validator ? "Validator" : "Observer";
-    return `${role} ${node.health.synced ? "synced" : "syncing"}`;
+    return node.health.is_validator ? "Validator reachable" : "Observer reachable";
   }
   switch (node.container_state) {
-    case "running": return "Health check unavailable";
+    case "running": return "R7 API unverified";
     case "created": return "Created";
     case "restarting": return "Restarting";
     case "paused": return "Paused";
@@ -38,7 +58,7 @@ export function App() {
   const [supervisorBinary, setSupervisorBinary] = useState("");
   const [operatorKeyFile, setOperatorKeyFile] = useState("");
   const [aiConfigPath, setAiConfigPath] = useState("");
-  const [nodeUrl, setNodeUrl] = useState("http://127.0.0.1:8080");
+  const [nodeUrl, setNodeUrl] = useState(savedNodeUrl);
   const [indexerUrl, setIndexerUrl] = useState("http://127.0.0.1:8090");
   const [sseUrl, setSseUrl] = useState("http://127.0.0.1:8090/v1/index/events");
   const [runtimeStatus, setRuntimeStatus] = useState<RuntimeStatus | null>(null);
@@ -106,23 +126,32 @@ export function App() {
     try {
       const node = await desktopApi.fetchNodeOverview(nodeUrl);
       const tip = node.tip_height == null ? "" : ` · Tip #${node.tip_height}`;
-      setOverview(`${node.status_text}${tip}`);
+      if (node.ok) rememberNodeUrl(nodeUrl.trim());
+      const chain = node.chain_id ? ` · ${node.chain_id}` : "";
+      setOverview(`${node.status_text}${chain}${tip}`);
     } catch (err) {
       setOverview(String(err));
     }
   };
 
-  const r7Node = r7Runtimes?.length === 1 ? r7Runtimes[0] : null;
+  const runningR7 = r7Runtimes?.filter((node) => node.container_state === "running") ?? [];
+  const inactiveR7 = r7Runtimes?.filter((node) => node.container_state !== "running") ?? [];
+  const verifiedR7 = runningR7.filter((node) => node.health && node.http_url);
   let r7Label = "Checking…";
   if (r7Error || !isTauriRuntime()) r7Label = "Status unavailable";
-  else if (r7Node) r7Label = r7NodeLabel(r7Node);
-  else if (r7Runtimes) r7Label = r7Runtimes.length ? `${r7Runtimes.length} local nodes` : "No local node";
+  else if (r7Runtimes) r7Label = `${runningR7.length} running · ${inactiveR7.length} inactive`;
 
-  const openOnboarding = async () => {
+  const selectNode = (url: string) => {
+    setNodeUrl(url);
+    setOverview(null);
+    rememberNodeUrl(url);
+  };
+
+  const openOnboarding = async (containerName?: string) => {
     setBusy("Opening R7 onboarding…");
     setOnboardingStatus(null);
     try {
-      await desktopApi.openValidatorOnboarding();
+      await desktopApi.openValidatorOnboarding(containerName);
       setOnboardingStatus("R7 onboarding is open in your browser. Keep this window open while you complete the steps.");
     } catch (error) {
       setOnboardingStatus(String(error));
@@ -167,9 +196,8 @@ export function App() {
         <header className="topbar">
           <div className="meta-strip">
             <span role="status">
-              R7 node <strong className={r7Node?.health?.synced ? "text-ok" : "text-warn"}>{r7Label}</strong>
+              R7 nodes <strong className={runningR7.length > 0 ? "text-ok" : "text-warn"}>{r7Label}</strong>
             </span>
-            {r7Node?.health && <span>Finalized <strong>#{r7Node.health.finalized_height}</strong></span>}
             <span>
               SSE: <strong>{sseState}</strong>
             </span>
@@ -191,24 +219,24 @@ export function App() {
           {tab === "zones" && (
             <>
               <section className="card panel-stack">
-                <h2>Join the R7 testnet</h2>
-                <p className="muted">Connect a Sepolia wallet to apply or check your validator application.</p>
+                <h2>Local R7 validators</h2>
                 {r7Error && <div className="alert alert-warn">{r7Error}</div>}
-                {r7Runtimes && r7Runtimes.length > 0 && (
+                {onboardingStatus && <p role="status">{onboardingStatus}</p>}
+                {runningR7.length > 0 && (
                   <table className="table">
                     <thead>
                       <tr>
                         <th>Local R7 node</th>
-                        <th>Status</th>
-                        <th>Finalized block</th>
+                        <th>API</th>
+                        <th>Block sync</th>
+                        <th>Peers</th>
+                        <th>Sepolia sync</th>
                         <th>Admission</th>
-                        <th>Approvals</th>
-                        <th>Sepolia tx</th>
-                        <th>Activation / Vote</th>
+                        <th>Manage</th>
                       </tr>
                     </thead>
                     <tbody>
-                      {r7Runtimes.map((node) => {
+                      {runningR7.map((node) => {
                         const adm = node.admission;
                         const txLabel = adm?.l1_tx_hash
                           ? `${adm.l1_tx_status} (${adm.l1_tx_hash.slice(0, 10)}…${
@@ -232,15 +260,23 @@ export function App() {
                               : "Pending"
                           : "—";
                         return (
-                          <tr key={node.node_id}>
-                            <td className="mono">{node.node_id}</td>
+                          <tr key={node.container_name}>
+                            <td className="mono">{node.node_id}<div className="small muted">{node.http_url}</div></td>
                             <td>{r7NodeLabel(node)}</td>
-                            <td>{node.health ? `#${node.health.finalized_height}` : "—"}</td>
+                            <td>{node.health ? <>Tip <strong>#{node.health.tip_height}</strong><div className="small muted">
+                              Finalized #{node.health.finalized_height} · {node.health.chain_healthy ? `${node.health.chain_lag_blocks} behind` : `Lagging by ${node.health.chain_lag_blocks}`}
+                            </div></> : "—"}</td>
+                            <td>{node.health?.peer_count ?? "—"}</td>
+                            <td>{node.health?.sepolia_sync_state ?? "—"}</td>
                             <td>
+                              {(node.certified_identity || adm?.certified_member) && <div className="small">Certified voting member</div>}
                               {adm ? (
                                 <div>
                                   <strong>{adm.stage.replaceAll("_", " ")}</strong>
+                                  {adm.registration_conflict && <div className="small text-warn">Registration does not match the certified identity</div>}
                                   <div className="small muted">{adm.stage_reason}</div>
+                                  <div className="small muted">{approvalLabel} · {txLabel}</div>
+                                  <div className="small muted">{actLabel}</div>
                                   {adm.missing_signer_setup.length > 0 &&
                                     (adm.stage === "active_voting" ? (
                                       <div className="small muted">
@@ -252,28 +288,44 @@ export function App() {
                                       </div>
                                     ))}
                                 </div>
-                              ) : "—"}
+                              ) : node.certified_identity ? null : "—"}
                             </td>
-                            <td>{approvalLabel}</td>
-                            <td className="mono">{txLabel}</td>
-                            <td>{actLabel}</td>
+                            <td>
+                              {node.certified_identity && <details className="small">
+                                <summary>Certified identity</summary>
+                                <div>Wallet <code className="r7-identity-value">{node.certified_identity.evm_address}</code></div>
+                                <div>Public key <code className="r7-identity-value">{node.certified_identity.ed25519_pubkey}</code></div>
+                              </details>}
+                              <button type="button" className="btn"
+                              disabled={!node.health || Boolean(busy)}
+                              onClick={() => void openOnboarding(node.container_name)}>
+                              Manage existing validator
+                              </button>
+                            </td>
                           </tr>
                         );
                       })}
                     </tbody>
                   </table>
                 )}
+                {inactiveR7.length > 0 && (
+                  <details>
+                    <summary>Inactive R7 containers ({inactiveR7.length})</summary>
+                    <ul>{inactiveR7.map((node) => (
+                      <li key={node.container_name}><code>{node.container_name}</code> · {r7NodeLabel(node)}</li>
+                    ))}</ul>
+                  </details>
+                )}
                 <div>
                   <button
                     type="button"
                     className="btn btn-primary"
                     disabled={!isTauriRuntime() || Boolean(busy)}
-                    onClick={openOnboarding}
+                    onClick={() => void openOnboarding()}
                   >
-                    Open validator onboarding
+                    Enroll a new validator
                   </button>
                 </div>
-                {onboardingStatus && <p role="status">{onboardingStatus}</p>}
               </section>
               <ZonesView
                 env={env}
@@ -322,9 +374,20 @@ export function App() {
           {tab === "settings" && (
             <section className="card panel-stack">
               <h2>Paths &amp; Endpoints</h2>
+                <label className="field">
+                  Verified R7 node
+                  <select className="input" value={nodeUrl === PUBLIC_R7_URL || verifiedR7.some((node) => node.http_url === nodeUrl) ? nodeUrl : ""}
+                    onChange={(event) => { if (event.target.value) selectNode(event.target.value); }}>
+                    <option value="">Custom endpoint</option>
+                    <option value={PUBLIC_R7_URL}>Public R7 observer</option>
+                    {verifiedR7.map((node) => (
+                      <option key={node.container_name} value={node.http_url ?? ""}>{node.node_id} · {node.http_url}</option>
+                    ))}
+                  </select>
+                </label>
               <label className="field">
                 Node HTTP URL
-                <input className="input mono" value={nodeUrl} onChange={(e) => setNodeUrl(e.target.value)} />
+                <input className="input mono" value={nodeUrl} onChange={(e) => { setNodeUrl(e.target.value); setOverview(null); }} />
               </label>
               <div className="toolbar">
                 <button type="button" className="btn" disabled={!isTauriRuntime()} onClick={refreshOverview}>Ping configured node</button>

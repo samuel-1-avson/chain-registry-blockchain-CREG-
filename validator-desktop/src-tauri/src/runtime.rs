@@ -13,7 +13,8 @@ use tokio::process::{Child, Command};
 use tokio::sync::Mutex;
 
 use crate::chain_client::{
-    fetch_r7_admission_status, fetch_r7_health, R7AdmissionSummary, R7NodeHealth,
+    fetch_r7_admission_status, fetch_r7_certified_identity, fetch_r7_health, R7AdmissionSummary,
+    R7CertifiedIdentity, R7NodeHealth,
 };
 use crate::zones::default_operator_key_file;
 
@@ -65,34 +66,48 @@ pub struct RuntimeStatus {
 
 #[derive(Debug, Serialize)]
 pub struct R7RuntimeStatus {
+    pub container_name: String,
     pub node_id: String,
     pub container_state: String,
+    pub http_url: Option<String>,
     pub health: Option<R7NodeHealth>,
+    pub certified_identity: Option<R7CertifiedIdentity>,
     pub admission: Option<R7AdmissionSummary>,
 }
 
-fn parse_r7_container(line: &str) -> Option<(&str, &str, &str)> {
+fn parse_r7_container(line: &str) -> Option<(&str, String, &str)> {
     let mut fields = line.split_whitespace();
     let name = fields.next()?;
-    let node_id = name.strip_prefix("creg-validator-")?;
     let state = fields.next()?;
-    let (chain_id, public_key) = fields.next()?.split_once('/')?;
-    (fields.next().is_none()
-        && !node_id.is_empty()
-        && chain_id == R7_CHAIN_ID
-        && public_key.len() == 64
-        && public_key.bytes().all(|byte| byte.is_ascii_hexdigit()))
-    .then_some((name, node_id, state))
+    if let Some(label) = fields.next() {
+        let node_id = name.strip_prefix("creg-validator-")?;
+        let (chain_id, public_key) = label.split_once('/')?;
+        return (fields.next().is_none()
+            && !node_id.is_empty()
+            && chain_id == R7_CHAIN_ID
+            && public_key.len() == 64
+            && public_key.bytes().all(|byte| byte.is_ascii_hexdigit()))
+        .then(|| (name, node_id.to_owned(), state));
+    }
+
+    let live_name = name.split_once("-before-").map_or(name, |(base, _)| base);
+    if let Some(index) = live_name.strip_prefix("creg-phase-c-r7-v") {
+        return index
+            .parse::<u16>()
+            .ok()
+            .map(|index| (name, format!("validator-{index}"), state));
+    }
+    let node_id = live_name.strip_prefix("creg-validator-")?;
+    node_id.strip_prefix("ext-val-cli-")?.parse::<u16>().ok()?;
+    Some((name, node_id.to_owned(), state))
 }
 
 fn r7_loopback_port(output: &str) -> Option<u16> {
-    output.lines().find_map(|line| {
-        let port = line
-            .trim()
-            .strip_prefix("127.0.0.1:")?
-            .parse::<u16>()
-            .ok()?;
-        (port != 0).then_some(port)
+    ["127.0.0.1:", "0.0.0.0:"].into_iter().find_map(|binding| {
+        output.lines().find_map(|line| {
+            let port = line.trim().strip_prefix(binding)?.parse::<u16>().ok()?;
+            (port != 0).then_some(port)
+        })
     })
 }
 
@@ -110,35 +125,53 @@ async fn docker_status_output(args: &[&str]) -> Result<Output> {
     Ok(output)
 }
 
-pub async fn get_r7_runtime_status() -> Result<Vec<R7RuntimeStatus>> {
+async fn r7_container_inventory() -> Result<String> {
     let output = docker_status_output(&[
         "container",
         "ls",
         "-a",
         "--filter",
-        "label=dev.creg.validator",
+        "name=creg-",
         "--format",
         r#"{{.Names}} {{.State}} {{.Label "dev.creg.validator"}}"#,
     ])
     .await?;
-    let stdout = String::from_utf8(output.stdout)?;
+    Ok(String::from_utf8(output.stdout)?)
+}
+
+async fn r7_http_port(name: &str) -> Option<u16> {
+    let output = docker_status_output(&["port", name, "8080/tcp"])
+        .await
+        .ok()?;
+    r7_loopback_port(&String::from_utf8_lossy(&output.stdout))
+}
+
+pub async fn get_r7_runtime_status() -> Result<Vec<R7RuntimeStatus>> {
+    let stdout = r7_container_inventory().await?;
     let mut runtimes = join_all(stdout.lines().filter_map(parse_r7_container).map(
         |(name, node_id, state)| async move {
             let mut local_port = None;
             let mut health = None;
             if state == "running" {
-                if let Ok(output) = docker_status_output(&["port", name, "8080/tcp"]).await {
-                    if let Some(port) = r7_loopback_port(&String::from_utf8_lossy(&output.stdout)) {
-                        local_port = Some(port);
-                        health = fetch_r7_health(port, node_id, R7_CHAIN_ID).await.ok();
-                    }
+                local_port = r7_http_port(name).await;
+                if let Some(port) = local_port {
+                    health = fetch_r7_health(port, &node_id, R7_CHAIN_ID).await.ok();
                 }
             }
-            let admission = fetch_r7_admission_status(local_port, node_id).await;
+            let (admission, certified_identity) = match local_port.filter(|_| health.is_some()) {
+                Some(port) => tokio::join!(
+                    fetch_r7_admission_status(Some(port), &node_id),
+                    fetch_r7_certified_identity(port, &node_id),
+                ),
+                None => (None, None),
+            };
             R7RuntimeStatus {
-                node_id: node_id.to_owned(),
+                container_name: name.to_owned(),
+                node_id,
                 container_state: state.to_owned(),
+                http_url: local_port.map(|port| format!("http://127.0.0.1:{port}")),
                 health,
+                certified_identity,
                 admission,
             }
         },
@@ -325,7 +358,7 @@ pub async fn detect_environment() -> EnvironmentInfo {
     }
 }
 
-pub async fn open_validator_onboarding() -> Result<()> {
+pub async fn open_validator_onboarding(container_name: Option<&str>) -> Result<()> {
     let repo_root = find_repo_root();
     let bundled_cli = std::env::current_exe()
         .ok()
@@ -343,6 +376,27 @@ pub async fn open_validator_onboarding() -> Result<()> {
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
+    if let Some(container_name) = container_name {
+        let inventory = r7_container_inventory().await?;
+        let (name, node_id, _) = inventory
+            .lines()
+            .filter_map(parse_r7_container)
+            .find(|(name, _, state)| *name == container_name && *state == "running")
+            .context("The selected R7 validator is no longer running")?;
+        let port = r7_http_port(name)
+            .await
+            .context("The selected validator has no local HTTP port")?;
+        fetch_r7_health(port, &node_id, R7_CHAIN_ID)
+            .await
+            .context("Could not verify the selected validator and signed R7 network")?;
+        command.args([
+            "--manage-existing",
+            "--node-id",
+            &node_id,
+            "--local-node-url",
+            &format!("http://127.0.0.1:{port}"),
+        ]);
+    }
     if let Some(root) = &repo_root {
         command.current_dir(root);
     }
@@ -520,7 +574,7 @@ pub async fn start_validator(
                 && std::fs::read_to_string(&compose)
                     .is_ok_and(|raw| raw.contains("/dev/kvm"))
             {
-                let msg = "The four-zone Docker Compose stack requires Linux KVM (/dev/kvm) and is not supported on Windows Docker Desktop. Your R7 testnet validator is managed separately under 'Join the R7 testnet' above.".to_string();
+                let msg = "The four-zone Docker Compose stack requires Linux KVM (/dev/kvm). Manage your testnet node in Local R7 validators.".to_string();
                 let mut mgr = state.inner.lock().await;
                 mgr.mode = RuntimeMode::DockerCompose;
                 mgr.last_error = Some(msg.clone());
@@ -701,26 +755,40 @@ mod tests {
     use super::*;
 
     #[test]
-    fn r7_status_only_discovers_labeled_nodes_on_the_launcher_loopback_port() {
+    fn r7_status_discovers_managed_and_manually_launched_r7_nodes() {
         let public_key = "f".repeat(64);
         let entry = format!("creg-validator-example running {R7_CHAIN_ID}/{public_key}");
         assert_eq!(
             parse_r7_container(&entry),
-            Some(("creg-validator-example", "example", "running"))
+            Some(("creg-validator-example", "example".to_owned(), "running"))
         );
         assert!(
             parse_r7_container(&format!("creg-validator-example running old/{public_key}"))
                 .is_none()
         );
-        assert!(parse_r7_container(&format!(
-            "creg-phase-c-r7-v1 running {R7_CHAIN_ID}/{public_key}"
-        ))
-        .is_none());
+        assert_eq!(
+            parse_r7_container("creg-phase-c-r7-v1 running"),
+            Some(("creg-phase-c-r7-v1", "validator-1".to_owned(), "running"))
+        );
+        assert_eq!(
+            parse_r7_container("creg-validator-ext-val-cli-2 running"),
+            Some((
+                "creg-validator-ext-val-cli-2",
+                "ext-val-cli-2".to_owned(),
+                "running"
+            ))
+        );
+        assert!(parse_r7_container("bench-v1 running").is_none());
+        assert!(parse_r7_container("creg-validator-unlabeled running").is_none());
         assert_eq!(
             r7_loopback_port("0.0.0.0:8080\n127.0.0.1:59567\n"),
             Some(59567)
         );
-        assert_eq!(r7_loopback_port("0.0.0.0:8080\n127.0.0.1:0\n"), None);
+        assert_eq!(
+            r7_loopback_port("0.0.0.0:18084\n127.0.0.1:0\n"),
+            Some(18084)
+        );
+        assert_eq!(r7_loopback_port("192.0.2.1:8080\n"), None);
     }
 
     #[test]
