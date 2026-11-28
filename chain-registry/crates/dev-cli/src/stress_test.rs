@@ -146,6 +146,7 @@ pub async fn run_stress_test(config: StressTestConfig) -> Result<StressTestRepor
             stake: 100,
             reputation: 80,
             is_active: true,
+            pq_pubkey: None,
         });
     }
 

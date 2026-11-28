@@ -1902,9 +1902,12 @@ rule TestMaliciousPayload {{
                     validator_id: format!("v{index}"),
                     validator_pubkey: hex::encode(key.verifying_key().as_bytes()),
                     signature: hex::encode(key.sign(message.as_bytes()).to_bytes()),
+                    pq_signature: None,
                 });
         }
-        snapshot.validate_against(&previous).expect("prior quorum");
+        snapshot
+            .validate_against(&previous, None)
+            .expect("prior quorum");
         let mut committee = compute_analysis_committee_for_authenticated_snapshot(
             &snapshot,
             "npm:certified@1.0.0",
@@ -1930,10 +1933,11 @@ rule TestMaliciousPayload {{
                     validator_id: format!("v{index}"),
                     validator_pubkey: hex::encode(key.verifying_key().as_bytes()),
                     signature: hex::encode(key.sign(message.as_bytes()).to_bytes()),
+                    pq_signature: None,
                 });
         }
         alternate_witness
-            .validate_against(&previous)
+            .validate_against(&previous, None)
             .expect("alternate prior quorum");
         assert!(verify_analysis_committee_assignment(
             &alternate_witness,

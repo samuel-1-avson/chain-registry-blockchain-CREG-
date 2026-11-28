@@ -439,6 +439,7 @@ pub fn authenticated_at_checked(
     let mut current_set = trusted_bootstrap.clone();
     let mut selected = None;
     let mut authority_started = false;
+    let mut hybrid_seen = false;
 
     for entry in &snapshots {
         let Some(certificate) = entry.certificate.as_ref() else {
@@ -462,13 +463,15 @@ pub fn authenticated_at_checked(
                 entry.effective_from_height
             );
         }
-        certificate.validate_against(&current_set).map_err(|error| {
-            anyhow::anyhow!(
-                "validator-set history contains an invalid authenticated transition at height {}: {}",
-                entry.effective_from_height,
-                error
-            )
-        })?;
+        validate_recorded_transition(certificate, &current_set, &mut hybrid_seen).map_err(
+            |error| {
+                anyhow::anyhow!(
+                    "validator-set history contains an invalid authenticated transition at height {}: {}",
+                    entry.effective_from_height,
+                    error
+                )
+            },
+        )?;
         current_hash = certificate.validator_set_hash.clone();
         current_set = certificate.validators.clone();
         authority_started = true;
@@ -504,6 +507,7 @@ pub fn authenticated_at_from_checkpoint_checked(
     let mut current_hash = checkpoint.validator_set_hash.clone();
     let mut current_set = checkpoint.validators.clone();
     let mut found = false;
+    let mut hybrid_seen = checkpoint.witness_is_hybrid() == Some(true);
     for entry in &snapshots {
         if !found {
             // Compatibility/bootstrap entries may predate the configured
@@ -548,7 +552,9 @@ pub fn authenticated_at_from_checkpoint_checked(
                 entry.effective_from_height
             );
         }
-        if let Err(error) = certificate.validate_against(&current_set) {
+        if let Err(error) =
+            validate_recorded_transition(certificate, &current_set, &mut hybrid_seen)
+        {
             anyhow::bail!(
                 "validator-set history contains an invalid checkpoint descendant at height {}: {}",
                 entry.effective_from_height,
@@ -805,16 +811,39 @@ pub fn truncate_after_reorg(data_dir: &Path, common_ancestor: u64) -> anyhow::Re
     persist_history_bytes(data_dir, &bytes)
 }
 
+/// Re-check one certificate of this node's persisted history. It was written
+/// by [`record_authenticated`] under ADR-017's height rule, so the scheme is
+/// read from its witness; history must not return to Ed25519-only
+/// signatures once a hybrid transition appears.
+fn validate_recorded_transition(
+    certificate: &AuthenticatedValidatorSetSnapshot,
+    previous: &ValidatorSet,
+    hybrid_seen: &mut bool,
+) -> Result<(), &'static str> {
+    certificate.validate_against_recorded(previous)?;
+    let hybrid = certificate.witness_is_hybrid() == Some(true);
+    if *hybrid_seen && !hybrid {
+        return Err(
+            "validator-set history returns to Ed25519-only signatures after a hybrid transition",
+        );
+    }
+    *hybrid_seen |= hybrid;
+    Ok(())
+}
+
 /// Persist a transition only after its certificate verifies against the prior
-/// active set. This is the sole writer for security-sensitive snapshot anchors.
+/// active set, under the signature scheme that ADR-017's signed
+/// `hybrid_activation_height` assigns to its effective height. This is the
+/// sole writer for security-sensitive snapshot anchors.
 pub fn record_authenticated(
     data_dir: &Path,
     snapshot: AuthenticatedValidatorSetSnapshot,
     previous: &ValidatorSet,
+    hybrid_activation_height: Option<u64>,
 ) -> Result<(), RecordAuthenticatedError> {
     let _write_guard = history_write_guard().map_err(RecordAuthenticatedError::persistence)?;
     snapshot
-        .validate_against(previous)
+        .validate_against(previous, hybrid_activation_height)
         .map_err(|error| RecordAuthenticatedError::InvalidCertificate(error.to_string()))?;
     let mut snapshots = load_checked(data_dir).map_err(RecordAuthenticatedError::persistence)?;
     if let Some(active) = select_at(&snapshots, snapshot.effective_from_height.saturating_sub(1)) {
@@ -907,6 +936,7 @@ fn record_configured_checkpoint_against(
 
     let mut current_hash = configured.validator_set_hash.clone();
     let mut current_set = configured.validators.clone();
+    let mut hybrid_seen = configured.witness_is_hybrid() == Some(true);
     for entry in snapshots
         .into_iter()
         .filter(|entry| entry.effective_from_height > configured.effective_from_height)
@@ -923,13 +953,15 @@ fn record_configured_checkpoint_against(
             // any of its children will likewise fail continuity below.
             continue;
         }
-        certificate.validate_against(&current_set).map_err(|error| {
-            RecordAuthenticatedError::persistence(anyhow::anyhow!(
-                "local validator-set history contains an invalid configured-checkpoint descendant at height {}: {}",
-                entry.effective_from_height,
-                error
-            ))
-        })?;
+        validate_recorded_transition(certificate, &current_set, &mut hybrid_seen).map_err(
+            |error| {
+                RecordAuthenticatedError::persistence(anyhow::anyhow!(
+                    "local validator-set history contains an invalid configured-checkpoint descendant at height {}: {}",
+                    entry.effective_from_height,
+                    error
+                ))
+            },
+        )?;
         current_hash = certificate.validator_set_hash.clone();
         current_set = certificate.validators.clone();
         reconciled.push(entry);
@@ -1012,6 +1044,7 @@ mod tests {
                     validator_id: validator.id.clone(),
                     validator_pubkey: validator.pubkey.clone(),
                     signature: hex::encode(key.sign(message.as_bytes()).to_bytes()),
+                    pq_signature: None,
                 });
         }
         snapshot
@@ -1113,7 +1146,7 @@ mod tests {
         };
         record(data.path(), 0, &bootstrap).unwrap();
         assert!(require(22, &candidate.pubkey, &certificate.previous_block_hash).is_err());
-        record_authenticated(data.path(), certificate.clone(), &bootstrap).unwrap();
+        record_authenticated(data.path(), certificate.clone(), &bootstrap, None).unwrap();
         assert!(require(21, &candidate.pubkey, &certificate.previous_block_hash).is_err());
         assert!(require(22, &candidate.pubkey, &"0".repeat(64)).is_err());
         assert!(require(
@@ -1158,17 +1191,21 @@ mod tests {
                     validator_id: format!("v{index}"),
                     validator_pubkey: hex::encode(key.verifying_key().as_bytes()),
                     signature: hex::encode(key.sign(message.as_bytes()).to_bytes()),
+                    pq_signature: None,
                 });
         }
-        record_authenticated(dir.path(), transition.clone(), &previous).expect("certified write");
-        record_authenticated(dir.path(), transition.clone(), &previous).expect("idempotent replay");
+        record_authenticated(dir.path(), transition.clone(), &previous, None)
+            .expect("certified write");
+        record_authenticated(dir.path(), transition.clone(), &previous, None)
+            .expect("idempotent replay");
         let mut reordered = transition.clone();
         reordered.transition_signatures.reverse();
         assert_eq!(
             common::validator_snapshot_certificate_hash(&reordered),
             common::validator_snapshot_certificate_hash(&transition)
         );
-        record_authenticated(dir.path(), reordered, &previous).expect("order-insensitive replay");
+        record_authenticated(dir.path(), reordered, &previous, None)
+            .expect("order-insensitive replay");
 
         let message = common::validator_set_transition_message(&transition);
         let mut alternate_certificate = transition.clone();
@@ -1180,11 +1217,12 @@ mod tests {
                     validator_id: format!("v{index}"),
                     validator_pubkey: hex::encode(key.verifying_key().as_bytes()),
                     signature: hex::encode(key.sign(message.as_bytes()).to_bytes()),
+                    pq_signature: None,
                 },
             );
         }
         alternate_certificate
-            .validate_against(&previous)
+            .validate_against(&previous, None)
             .expect("alternate witness has an independent quorum");
         assert_eq!(
             common::validator_snapshot_certificate_hash(&alternate_certificate),
@@ -1194,7 +1232,7 @@ mod tests {
             common::validator_snapshot_witness_hash(&alternate_certificate),
             common::validator_snapshot_witness_hash(&transition)
         );
-        record_authenticated(dir.path(), alternate_certificate, &previous)
+        record_authenticated(dir.path(), alternate_certificate, &previous, None)
             .expect("alternate valid quorum converges idempotently");
         let retained = authenticated_at(dir.path(), 7).expect("certified snapshot");
         assert_eq!(retained.validator_set_hash, transition.validator_set_hash);
@@ -1216,7 +1254,7 @@ mod tests {
         duplicate_signer
             .transition_signatures
             .push(duplicate_signer.transition_signatures[0].clone());
-        assert!(duplicate_signer.validate_against(&previous).is_err());
+        assert!(duplicate_signer.validate_against(&previous, None).is_err());
     }
 
     #[test]
@@ -1229,19 +1267,19 @@ mod tests {
         let mut invalid = signed_transition(1, &previous, &previous, &keys);
         invalid.transition_signatures.truncate(2);
         assert!(matches!(
-            record_authenticated(invalid_dir.path(), invalid, &previous),
+            record_authenticated(invalid_dir.path(), invalid, &previous, None),
             Err(RecordAuthenticatedError::InvalidCertificate(_))
         ));
 
         let conflict_dir = tempfile::tempdir().expect("conflict tempdir");
         record(conflict_dir.path(), 0, &previous).expect("bootstrap conflict history");
         let accepted = signed_transition(1, &previous, &previous, &keys);
-        record_authenticated(conflict_dir.path(), accepted, &previous)
+        record_authenticated(conflict_dir.path(), accepted, &previous, None)
             .expect("initial certificate");
         let alternate_keys: Vec<_> = (0..4).map(|_| SigningKey::generate(&mut OsRng)).collect();
         let alternate = signed_transition(1, &previous, &keyed_set(&alternate_keys), &keys);
         assert!(matches!(
-            record_authenticated(conflict_dir.path(), alternate, &previous),
+            record_authenticated(conflict_dir.path(), alternate, &previous, None),
             Err(RecordAuthenticatedError::Conflict(_))
         ));
 
@@ -1250,7 +1288,7 @@ mod tests {
             .expect("corrupt local history");
         let valid = signed_transition(1, &previous, &previous, &keys);
         assert!(matches!(
-            record_authenticated(persistence_dir.path(), valid, &previous),
+            record_authenticated(persistence_dir.path(), valid, &previous, None),
             Err(RecordAuthenticatedError::Persistence { .. })
         ));
     }
@@ -1287,7 +1325,7 @@ mod tests {
         let retained = signed_transition(6, &validators, &validators, &keys);
         let abandoned = signed_transition(7, &validators, &validators, &keys);
         for transition in [&checkpoint, &retained, &abandoned] {
-            record_authenticated(dir.path(), transition.clone(), &validators)
+            record_authenticated(dir.path(), transition.clone(), &validators, None)
                 .expect("certified transition");
         }
 
@@ -1323,10 +1361,11 @@ mod tests {
         let checkpoint = signed_transition(5, &validators, &validators, &keys);
         assert!(authenticated_at_from_checkpoint(dir.path(), 5, &checkpoint).is_none());
 
-        record_authenticated(dir.path(), checkpoint.clone(), &validators)
+        record_authenticated(dir.path(), checkpoint.clone(), &validators, None)
             .expect("checkpoint history");
         let child = signed_transition(6, &validators, &validators, &keys);
-        record_authenticated(dir.path(), child.clone(), &validators).expect("valid descendant");
+        record_authenticated(dir.path(), child.clone(), &validators, None)
+            .expect("valid descendant");
         assert_eq!(
             common::validator_snapshot_certificate_hash(
                 &authenticated_at_from_checkpoint(dir.path(), 6, &checkpoint)
@@ -1378,9 +1417,10 @@ mod tests {
         record(dir.path(), 0, &bootstrap).expect("trusted bootstrap history");
 
         let first = signed_transition(1, &bootstrap, &rotated, &bootstrap_keys);
-        record_authenticated(dir.path(), first, &bootstrap).expect("first transition");
+        record_authenticated(dir.path(), first, &bootstrap, None).expect("first transition");
         let second = signed_transition(2, &rotated, &final_set, &rotated_keys);
-        record_authenticated(dir.path(), second.clone(), &rotated).expect("second transition");
+        record_authenticated(dir.path(), second.clone(), &rotated, None)
+            .expect("second transition");
         assert_eq!(
             common::validator_snapshot_certificate_hash(
                 &authenticated_at_checked(dir.path(), 2, &bootstrap)
@@ -1605,7 +1645,7 @@ mod tests {
         record(dir.path(), 0, &initial).expect("record bootstrap");
         let cert = signed_transition(1, &initial, &expanded, &keys[..3]);
         let prev_hash = cert.previous_block_hash.clone();
-        record_authenticated(dir.path(), cert.clone(), &initial)
+        record_authenticated(dir.path(), cert.clone(), &initial, None)
             .expect("record certified transition");
 
         let found = pending_next_height_transition(dir.path(), 0, &prev_hash)

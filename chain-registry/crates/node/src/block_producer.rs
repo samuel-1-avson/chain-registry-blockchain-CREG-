@@ -19,7 +19,6 @@ struct ProposerContext {
     tip_height: u64,
     prev_hash: String,
     node_id: String,
-    privkey: Option<chain_registry_secrets::SecretString>,
     #[allow(dead_code)]
     our_pubkey: Option<String>,
     validator_set_hash: String,
@@ -532,7 +531,16 @@ async fn drive_pbft_view_changes(state: Arc<RwLock<NodeState>>, p2p_handle: crat
     let mut last_view_change_at = tip_stalled_since;
     loop {
         ticker.tick().await;
-        let (tip, node_id, privkey, data_dir, bootstrap, active_round, certified_view) = {
+        let (
+            tip,
+            node_id,
+            signing_keys,
+            activation_height,
+            data_dir,
+            bootstrap,
+            active_round,
+            certified_view,
+        ) = {
             let s = state.read().await;
             let tip_height = s.chain.tip_height().unwrap_or(0);
             let tip_hash = s.chain.tip_hash().unwrap_or_default();
@@ -543,7 +551,8 @@ async fn drive_pbft_view_changes(state: Arc<RwLock<NodeState>>, p2p_handle: crat
             (
                 (tip_height, tip_hash),
                 s.config.node_id.clone(),
-                s.config.validator_privkey.clone(),
+                s.config.validator_signing_keys(),
+                s.config.vote_v4_activation_height,
                 s.config.data_dir.clone(),
                 s.validator_set_bootstrap.clone(),
                 s.pbft_engine
@@ -570,7 +579,15 @@ async fn drive_pbft_view_changes(state: Arc<RwLock<NodeState>>, p2p_handle: crat
         {
             continue;
         }
-        let Some(privkey_hex) = privkey else { continue };
+        let signing_keys = match signing_keys {
+            Ok(Some(keys)) => keys,
+            Ok(None) => continue,
+            Err(error) => {
+                tracing::warn!(error = %error, "Skipping view-change broadcast: validator key is invalid");
+                last_view_change_at = std::time::Instant::now();
+                continue;
+            }
+        };
         let height = tip.0.saturating_add(1);
         let authority = match crate::validator_set_history::verification_set_at(
             &data_dir, height, &bootstrap,
@@ -589,19 +606,6 @@ async fn drive_pbft_view_changes(state: Arc<RwLock<NodeState>>, p2p_handle: crat
             last_view_change_at = std::time::Instant::now();
             continue;
         }
-        let Ok(pk_bytes) = hex::decode(privkey_hex.trim_start_matches("0x")) else {
-            tracing::warn!("Skipping view-change broadcast: validator key is not valid hex");
-            last_view_change_at = std::time::Instant::now();
-            continue;
-        };
-        let Ok(sk) = common::crypto::SigningKey::from_seed(
-            common::crypto::SignatureScheme::Ed25519,
-            &pk_bytes,
-        ) else {
-            tracing::warn!("Skipping view-change broadcast: validator key is not 32 bytes");
-            last_view_change_at = std::time::Instant::now();
-            continue;
-        };
         let local_vote = {
             let mut s = state.write().await;
             if s.chain.tip_height().ok() != Some(tip.0)
@@ -618,17 +622,28 @@ async fn drive_pbft_view_changes(state: Arc<RwLock<NodeState>>, p2p_handle: crat
                 continue;
             };
             let mut vote = signal.vote;
-            let message = vote.signing_message();
-            vote.signature = sk.sign(message.as_bytes()).to_hex();
+            // Reuse a vote the engine already holds: a hybrid re-signature
+            // would carry a new hedged ML-DSA-44 half for the same decision.
+            if vote.signature.is_empty() {
+                let message = vote.signing_message();
+                vote.signature = match signing_keys.sign_combined_at(
+                    activation_height,
+                    vote.height,
+                    message.as_bytes(),
+                ) {
+                    Ok(signature) => signature,
+                    Err(error) => {
+                        tracing::error!(height, error = %error, "Refusing to sign a view-change vote");
+                        last_view_change_at = std::time::Instant::now();
+                        continue;
+                    }
+                };
+            }
             let result = s
                 .chain
                 .pbft_safety_journal()
                 .and_then(|journal| {
-                    journal.record_local_view_change(
-                        &vote,
-                        &pbft_authority,
-                        s.pbft_engine.allow_small_cluster_quorum(),
-                    )
+                    journal.record_local_view_change(&vote, &pbft_authority, s.pbft_engine.rules())
                 })
                 .and_then(|_| {
                     s.pbft_engine
@@ -690,16 +705,15 @@ async fn drive_pbft_vote_rebroadcast(
             if vote.phase_age_seconds <= vote.phase_timeout_seconds {
                 continue;
             }
-            let (phase, signature) = if let Some(commit) = vote.commit_sig.as_ref() {
-                (crate::pbft_safety::PbftVotePhase::Commit, &commit.signature)
+            let (phase, signed) = if let Some(commit) = vote.commit_sig.as_ref() {
+                (crate::pbft_safety::PbftVotePhase::Commit, commit)
             } else if let Some(prepare) = vote.prepare_sig.as_ref() {
-                (
-                    crate::pbft_safety::PbftVotePhase::Prepare,
-                    &prepare.signature,
-                )
+                (crate::pbft_safety::PbftVotePhase::Prepare, prepare)
             } else {
                 continue;
             };
+            let signature = &signed.signature;
+            let pq_signature = signed.pq_signature.clone();
             let phase_name = match phase {
                 crate::pbft_safety::PbftVotePhase::Prepare => "prepare",
                 crate::pbft_safety::PbftVotePhase::Commit => "commit",
@@ -718,6 +732,7 @@ async fn drive_pbft_vote_rebroadcast(
                         &vote.block_hash,
                         &signing_message,
                         signature,
+                        pq_signature.as_deref(),
                     )
                 })
             };
@@ -730,12 +745,14 @@ async fn drive_pbft_vote_rebroadcast(
                     block_hash: vote.block_hash.clone(),
                     validator_id: node_id.clone(),
                     signature: signature.clone(),
+                    pq_signature,
                 }
             } else {
                 common::GossipMessage::PbftPrepare {
                     block_hash: vote.block_hash.clone(),
                     validator_id: node_id.clone(),
                     signature: signature.clone(),
+                    pq_signature,
                 }
             };
             if let Ok(data) = serde_json::to_vec(&gossip) {
@@ -1059,7 +1076,18 @@ async fn prepare_proposer_context(
     p2p: &crate::p2p::P2PHandle,
     _allowed_fallback_rank: usize,
 ) -> anyhow::Result<ProposerContext> {
-    let (tip_height, prev_hash, node_id, privkey, data_dir, bootstrap, vrf_proofs, certified_view) = {
+    let (
+        tip_height,
+        prev_hash,
+        node_id,
+        privkey,
+        signing_keys,
+        activation_height,
+        data_dir,
+        bootstrap,
+        vrf_proofs,
+        certified_view,
+    ) = {
         let s = state.read().await;
         let tip_height = s.chain.tip_height()?;
         let prev_hash = s.chain.tip_hash()?;
@@ -1074,6 +1102,8 @@ async fn prepare_proposer_context(
             prev_hash,
             node_id,
             privkey,
+            s.config.validator_signing_keys(),
+            s.config.vote_v4_activation_height,
             s.config.data_dir.clone(),
             s.validator_set_bootstrap.clone(),
             s.vrf_proofs.clone(),
@@ -1195,26 +1225,26 @@ async fn prepare_proposer_context(
 
     let reproposal = if let Some(prepared) = &prepared_certificate {
         let block = prepared.block();
-        let private_key_hex = privkey
-            .as_deref()
+        let signing_keys = signing_keys
+            .map_err(anyhow::Error::msg)?
             .context("prepared reproposal requires the replacement validator key")?;
-        let key_bytes = hex::decode(private_key_hex.trim_start_matches("0x"))?;
-        let signing_key = common::crypto::SigningKey::from_seed(
-            common::crypto::SignatureScheme::Ed25519,
-            &key_bytes,
-        )?;
         let signing_message = consensus::pbft::reproposal_signing_message(
             &block.hash(),
             view_number,
             &node_id,
             &view_change_certificate,
         );
+        let leader_signature = signing_keys.sign_combined_at(
+            activation_height,
+            block.header.height,
+            signing_message.as_bytes(),
+        )?;
         Some(common::GossipMessage::PbftRepropose {
             block,
             target_view: view_number,
             leader_id: node_id.clone(),
             view_change_certificate: view_change_certificate.clone(),
-            leader_signature: signing_key.sign(signing_message.as_bytes()).to_hex(),
+            leader_signature,
         })
     } else {
         None
@@ -1224,7 +1254,6 @@ async fn prepare_proposer_context(
         tip_height,
         prev_hash,
         node_id,
-        privkey,
         our_pubkey,
         validator_set_hash,
         package_authority: authority,
@@ -1252,7 +1281,6 @@ async fn produce_block(
         tip_height,
         prev_hash,
         node_id,
-        privkey,
         our_pubkey: _,
         validator_set_hash,
         package_authority,
@@ -1352,164 +1380,170 @@ async fn produce_block(
     let mut prep_cmd = None;
     let mut commit_cmd = None;
 
-    if let Some(ref privkey_hex) = privkey {
-        if let Ok(pk_bytes) = hex::decode(privkey_hex) {
-            if let Ok(sk) = common::crypto::SigningKey::from_seed(
-                common::crypto::SignatureScheme::Ed25519,
-                &pk_bytes,
-            ) {
-                let prep_msg_str = consensus::pbft::pbft_signature_message("prepare", &bh);
-                let prep_sig = sk.sign(prep_msg_str.as_bytes()).to_hex();
-                let pubkey = sk.public_key().to_hex();
+    let signing_keys = match s.config.validator_signing_keys() {
+        Ok(keys) => keys,
+        Err(error) => {
+            tracing::warn!(error = %error, "Skipping local PBFT votes: validator key is invalid");
+            None
+        }
+    };
+    let activation_height = s.config.vote_v4_activation_height;
+    if let Some(signing_keys) = signing_keys {
+        let prep_msg_str = consensus::pbft::pbft_signature_message("prepare", &bh);
+        let prep_sig_obj = signing_keys
+            .pbft_signature_at(
+                activation_height,
+                block.header.height,
+                &node_id,
+                "prepare",
+                &bh,
+            )
+            .map_err(|error| {
+                PbftSafetyGate(format!("local PREPARE could not be signed: {error}"))
+            })?;
 
-                let prep_sig_obj = common::BlockSignature {
-                    validator_id: node_id.clone(),
-                    pubkey: pubkey.clone(),
-                    signature: prep_sig.clone(),
-                    pq_signature: None,
-                };
+        s.chain
+            .pbft_safety_journal()
+            .and_then(|journal| {
+                journal.record_decision(
+                    crate::pbft_safety::PbftVotePhase::Prepare,
+                    block.header.height,
+                    &block.header.prev_hash,
+                    view_number,
+                    &bh,
+                    &prep_msg_str,
+                    &prep_sig_obj.signature,
+                    prep_sig_obj.pq_signature.as_deref(),
+                )
+            })
+            .map_err(|error| {
+                PbftSafetyGate(format!("local PREPARE could not be persisted: {error}"))
+            })?;
+        let prepare_quorum_reached = s
+            .pbft_engine
+            .prepare(&bh, &node_id, prep_sig_obj.clone())
+            .map_err(|error| PbftSafetyGate(format!("local PREPARE rejected: {error}")))?;
 
-                s.chain
-                    .pbft_safety_journal()
-                    .and_then(|journal| {
-                        journal.record_decision(
-                            crate::pbft_safety::PbftVotePhase::Prepare,
-                            block.header.height,
-                            &block.header.prev_hash,
-                            view_number,
-                            &bh,
-                            &prep_msg_str,
-                            &prep_sig,
-                        )
-                    })
-                    .map_err(|error| {
-                        PbftSafetyGate(format!("local PREPARE could not be persisted: {error}"))
-                    })?;
-                let prepare_quorum_reached = s
-                    .pbft_engine
-                    .prepare(&bh, &node_id, prep_sig_obj)
-                    .map_err(|error| PbftSafetyGate(format!("local PREPARE rejected: {error}")))?;
+        let prep_msg = common::GossipMessage::PbftPrepare {
+            block_hash: bh.clone(),
+            validator_id: node_id.clone(),
+            signature: prep_sig_obj.signature,
+            pq_signature: prep_sig_obj.pq_signature,
+        };
+        if let Ok(data) = serde_json::to_vec(&prep_msg) {
+            prep_cmd = Some(crate::p2p::P2PCommand::Broadcast {
+                topic: "creg/v1/blocks".into(),
+                data,
+            });
+        }
 
-                let prep_msg = common::GossipMessage::PbftPrepare {
-                    block_hash: bh.clone(),
-                    validator_id: node_id.clone(),
-                    signature: prep_sig,
-                };
-                if let Ok(data) = serde_json::to_vec(&prep_msg) {
-                    prep_cmd = Some(crate::p2p::P2PCommand::Broadcast {
-                        topic: "creg/v1/blocks".into(),
-                        data,
-                    });
-                }
+        if prepare_quorum_reached {
+            let (prepared_block, certificate) =
+                s.pbft_engine.prepared_certificate(&bh).ok_or_else(|| {
+                    PbftSafetyGate("PREPARE quorum has no recoverable certificate".into())
+                })?;
+            let authority = s.pbft_engine.round_validator_set(&bh).ok_or_else(|| {
+                PbftSafetyGate("PREPARE quorum has no validator authority".into())
+            })?;
+            s.chain
+                .pbft_safety_journal()
+                .and_then(|journal| {
+                    journal.record_prepared(
+                        &prepared_block,
+                        &certificate,
+                        &authority,
+                        s.pbft_engine.rules(),
+                    )
+                })
+                .map_err(|error| {
+                    PbftSafetyGate(format!("prepared value could not be persisted: {error}"))
+                })?;
+            let commit_msg_str = consensus::pbft::pbft_signature_message("commit", &bh);
+            let commit_sig_obj = signing_keys
+                .pbft_signature_at(
+                    activation_height,
+                    block.header.height,
+                    &node_id,
+                    "commit",
+                    &bh,
+                )
+                .map_err(|error| {
+                    PbftSafetyGate(format!("local COMMIT could not be signed: {error}"))
+                })?;
 
-                if prepare_quorum_reached {
-                    let (prepared_block, certificate) =
-                        s.pbft_engine.prepared_certificate(&bh).ok_or_else(|| {
-                            PbftSafetyGate("PREPARE quorum has no recoverable certificate".into())
-                        })?;
-                    let authority = s.pbft_engine.round_validator_set(&bh).ok_or_else(|| {
-                        PbftSafetyGate("PREPARE quorum has no validator authority".into())
-                    })?;
-                    s.chain
-                        .pbft_safety_journal()
-                        .and_then(|journal| {
-                            journal.record_prepared(
-                                &prepared_block,
-                                &certificate,
-                                &authority,
-                                s.pbft_engine.allow_small_cluster_quorum(),
-                            )
-                        })
-                        .map_err(|error| {
-                            PbftSafetyGate(format!(
-                                "prepared value could not be persisted: {error}"
-                            ))
-                        })?;
-                    let commit_msg_str = consensus::pbft::pbft_signature_message("commit", &bh);
-                    let commit_sig = sk.sign(commit_msg_str.as_bytes()).to_hex();
-
-                    let commit_sig_obj = common::BlockSignature {
-                        validator_id: node_id.clone(),
-                        pubkey,
-                        signature: commit_sig.clone(),
-                        pq_signature: None,
-                    };
-
-                    s.chain
-                        .pbft_safety_journal()
-                        .and_then(|journal| {
-                            journal.record_decision(
-                                crate::pbft_safety::PbftVotePhase::Commit,
-                                block.header.height,
-                                &block.header.prev_hash,
-                                view_number,
-                                &bh,
-                                &commit_msg_str,
-                                &commit_sig,
-                            )
-                        })
-                        .map_err(|error| {
-                            PbftSafetyGate(format!("local COMMIT could not be persisted: {error}"))
-                        })?;
-                    tracing::info!(
-                        event = "pbft_local_commit_durable",
-                        node_id = %node_id,
-                        chain_id = %s.config.chain_id,
-                        genesis_hash = %s.config.network_genesis_hash,
-                        height = block.header.height,
-                        parent_hash = %block.header.prev_hash,
-                        block_hash = %bh,
+            s.chain
+                .pbft_safety_journal()
+                .and_then(|journal| {
+                    journal.record_decision(
+                        crate::pbft_safety::PbftVotePhase::Commit,
+                        block.header.height,
+                        &block.header.prev_hash,
                         view_number,
-                        "Local PBFT COMMIT durably persisted before consensus application or gossip"
-                    );
-                    #[cfg(feature = "phase-c-real-fleet")]
-                    pause_after_durable_commit_if_armed(&s, &block, &bh, view_number).await?;
+                        &bh,
+                        &commit_msg_str,
+                        &commit_sig_obj.signature,
+                        commit_sig_obj.pq_signature.as_deref(),
+                    )
+                })
+                .map_err(|error| {
+                    PbftSafetyGate(format!("local COMMIT could not be persisted: {error}"))
+                })?;
+            tracing::info!(
+                event = "pbft_local_commit_durable",
+                node_id = %node_id,
+                chain_id = %s.config.chain_id,
+                genesis_hash = %s.config.network_genesis_hash,
+                height = block.header.height,
+                parent_hash = %block.header.prev_hash,
+                block_hash = %bh,
+                view_number,
+                "Local PBFT COMMIT durably persisted before consensus application or gossip"
+            );
+            #[cfg(feature = "phase-c-real-fleet")]
+            pause_after_durable_commit_if_armed(&s, &block, &bh, view_number).await?;
 
-                    let commit_quorum_reached = s
-                        .pbft_engine
-                        .commit(&bh, &node_id, commit_sig_obj)
-                        .map_err(|error| {
-                            PbftSafetyGate(format!("local COMMIT rejected: {error}"))
-                        })?;
+            let commit_quorum_reached = s
+                .pbft_engine
+                .commit(&bh, &node_id, commit_sig_obj.clone())
+                .map_err(|error| PbftSafetyGate(format!("local COMMIT rejected: {error}")))?;
 
-                    let commit_msg = common::GossipMessage::PbftCommit {
-                        block_hash: bh.clone(),
-                        validator_id: node_id.clone(),
-                        signature: commit_sig,
-                    };
-                    if let Ok(data) = serde_json::to_vec(&commit_msg) {
-                        commit_cmd = Some(crate::p2p::P2PCommand::Broadcast {
-                            topic: "creg/v1/blocks".into(),
-                            data,
-                        });
-                    }
+            let commit_msg = common::GossipMessage::PbftCommit {
+                block_hash: bh.clone(),
+                validator_id: node_id.clone(),
+                signature: commit_sig_obj.signature,
+                pq_signature: commit_sig_obj.pq_signature,
+            };
+            if let Ok(data) = serde_json::to_vec(&commit_msg) {
+                commit_cmd = Some(crate::p2p::P2PCommand::Broadcast {
+                    topic: "creg/v1/blocks".into(),
+                    data,
+                });
+            }
 
-                    if commit_quorum_reached {
-                        tracing::info!(
-                            "[PBFT Proposer] Block {} finalised locally by proposer quorum",
-                            &bh[..12]
-                        );
-                        if let Some(final_block) = s.pbft_engine.get_finalised_block(&bh) {
-                            let inserted = match s.chain.insert_block_with_outcome(&final_block) {
-                                Ok(outcome) => {
-                                    if let Some(replaced) = outcome.replaced_hash {
-                                        s.record_reorg(1, vec![replaced], outcome.hash.clone());
-                                    }
-                                    true
-                                }
-                                Err(e) => {
-                                    tracing::error!(
-                                        "[PBFT Proposer] Failed to insert finalised block: {}",
-                                        e
-                                    );
-                                    false
-                                }
-                            };
-                            if inserted {
-                                s.publisher_index.apply_block(&final_block);
-                                s.on_block_committed(&final_block);
+            if commit_quorum_reached {
+                tracing::info!(
+                    "[PBFT Proposer] Block {} finalised locally by proposer quorum",
+                    &bh[..12]
+                );
+                if let Some(final_block) = s.pbft_engine.get_finalised_block(&bh) {
+                    let inserted = match s.chain.insert_block_with_outcome(&final_block) {
+                        Ok(outcome) => {
+                            if let Some(replaced) = outcome.replaced_hash {
+                                s.record_reorg(1, vec![replaced], outcome.hash.clone());
                             }
+                            true
                         }
+                        Err(e) => {
+                            tracing::error!(
+                                "[PBFT Proposer] Failed to insert finalised block: {}",
+                                e
+                            );
+                            false
+                        }
+                    };
+                    if inserted {
+                        s.publisher_index.apply_block(&final_block);
+                        s.on_block_committed(&final_block);
                     }
                 }
             }

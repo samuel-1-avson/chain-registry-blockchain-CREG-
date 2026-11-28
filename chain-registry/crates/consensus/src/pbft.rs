@@ -94,15 +94,84 @@ pub fn verify_pbft_phase_signature(
         .map_err(|e| anyhow::anyhow!("Invalid PBFT {} signature: {}", phase, e))
 }
 
+/// Verify one PBFT PREPARE or COMMIT signature from `validator` under the
+/// scheme that governs the block's height (ADR-017 §3): Ed25519 over
+/// `creg-pbft-v1:<phase>:<hash>` before hybrid activation, hybrid Ed25519 +
+/// ML-DSA-44 (`pq_signature` required) from it.
+pub fn verify_pbft_block_signature(
+    phase: &str,
+    block_hash: &str,
+    validator: &crate::validator_set::ValidatorInfo,
+    signature: &BlockSignature,
+    require_hybrid: bool,
+) -> Result<()> {
+    let expected_pubkey = validator
+        .pubkey
+        .trim_start_matches("0x")
+        .to_ascii_lowercase();
+    let supplied_pubkey = signature
+        .pubkey
+        .trim_start_matches("0x")
+        .to_ascii_lowercase();
+    if supplied_pubkey != expected_pubkey {
+        bail!(
+            "PBFT {} signature pubkey mismatch for validator {}",
+            phase,
+            validator.id
+        );
+    }
+    let message = pbft_signature_message(phase, block_hash);
+    common::validator_signature::verify_validator_signature(
+        &expected_pubkey,
+        validator.pq_pubkey.as_deref(),
+        message.as_bytes(),
+        &signature.signature,
+        signature.pq_signature.as_deref(),
+        require_hybrid,
+    )
+    .map_err(|e| anyhow::anyhow!("Invalid PBFT {} signature: {}", phase, e))
+}
+
+/// Inputs that decide whether a PBFT signature or certificate is valid.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct PbftRules {
+    pub allow_small_cluster_quorum: bool,
+    /// ADR-017 hybrid signature activation height from the signed chain
+    /// spec. Never read from the environment.
+    pub hybrid_activation_height: Option<u64>,
+}
+
+impl PbftRules {
+    /// Whether signatures governing `height` must be hybrid.
+    pub fn hybrid_required(&self, height: u64) -> bool {
+        common::validator_signature::hybrid_signatures_required(
+            self.hybrid_activation_height,
+            height,
+        )
+    }
+}
+
 /// Configuration for PBFT consensus parameters.
 /// All values have sensible defaults and can be overridden via environment
-/// variables at startup.
+/// variables at startup, except `hybrid_activation_height`, which only the
+/// signed chain spec sets.
 #[derive(Debug, Clone)]
 pub struct PbftConfig {
     pub round_phase_timeout: Duration,
     pub max_view_changes: u32,
     pub stale_round_ttl: Duration,
     pub allow_small_cluster_quorum: bool,
+    /// ADR-017: first height whose PBFT signatures must be hybrid.
+    pub hybrid_activation_height: Option<u64>,
+}
+
+impl PbftConfig {
+    pub fn rules(&self) -> PbftRules {
+        PbftRules {
+            allow_small_cluster_quorum: self.allow_small_cluster_quorum,
+            hybrid_activation_height: self.hybrid_activation_height,
+        }
+    }
 }
 
 impl Default for PbftConfig {
@@ -128,6 +197,7 @@ impl Default for PbftConfig {
                 "CREG_PBFT_ALLOW_SMALL_CLUSTER_QUORUM",
                 DEFAULT_ALLOW_SMALL_CLUSTER_QUORUM,
             ),
+            hybrid_activation_height: None,
         }
     }
 }
@@ -322,7 +392,7 @@ impl PbftRound {
         let prepared = verify_view_change_certificate(
             &self.block.header,
             &self.validator_set,
-            self.config.allow_small_cluster_quorum,
+            self.config.rules(),
         )?;
         if let Some(prepared) = prepared {
             // A PBFT COMMIT signs the exact block hash, including the original
@@ -468,20 +538,15 @@ impl PbftRound {
             bail!("Validator {} is not active", validator_id);
         }
 
-        let expected_pubkey = validator
-            .pubkey
-            .trim_start_matches("0x")
-            .to_ascii_lowercase();
-        let supplied_pubkey = sig.pubkey.trim_start_matches("0x").to_ascii_lowercase();
-        if supplied_pubkey != expected_pubkey {
-            bail!(
-                "PBFT {} signature pubkey mismatch for validator {}",
-                phase,
-                validator_id
-            );
-        }
-
-        verify_pbft_phase_signature(phase, &self.block.hash(), &expected_pubkey, &sig.signature)
+        verify_pbft_block_signature(
+            phase,
+            &self.block.hash(),
+            validator,
+            sig,
+            self.config
+                .rules()
+                .hybrid_required(self.block.header.height),
+        )
     }
 
     /// Returns the finalised signatures to embed in the ChainRecord.
@@ -549,37 +614,38 @@ fn prepared_block_hash(header: &PreparedBlockHeader) -> Result<String> {
     Ok(common::sha256_hex(&bytes))
 }
 
-fn verify_message_signature(pubkey_hex: &str, message: &str, signature_hex: &str) -> Result<()> {
-    use common::crypto::{PublicKey, Signature, SignatureScheme, VerifyMode};
-
-    let pubkey = hex::decode(pubkey_hex.trim_start_matches("0x"))?;
-    let key = PublicKey::from_bytes(SignatureScheme::Ed25519, &pubkey)?;
-    let signature = hex::decode(signature_hex.trim_start_matches("0x"))?;
-    let signature = Signature::from_bytes(SignatureScheme::Ed25519, &signature)?;
-    key.verify(message.as_bytes(), &signature, VerifyMode::Strict)?;
-    Ok(())
+/// Verify a single-field validator signature (view-change votes, re-proposal
+/// envelopes) under the scheme that governs `height` (ADR-017 §3).
+fn verify_validator_message(
+    validator: &crate::validator_set::ValidatorInfo,
+    message: &str,
+    signature_hex: &str,
+    rules: PbftRules,
+    height: u64,
+) -> Result<()> {
+    common::validator_signature::verify_validator_signature_combined(
+        &validator.pubkey,
+        validator.pq_pubkey.as_deref(),
+        message.as_bytes(),
+        signature_hex,
+        rules.hybrid_required(height),
+    )
 }
 
 pub fn verify_prepared_certificate(
     vote: &ViewChangeVote,
     certificate: &PreparedCertificate,
     validator_set: &ValidatorSet,
-    allow_small_cluster_quorum: bool,
+    rules: PbftRules,
 ) -> Result<()> {
-    verify_prepared_certificate_with_depth(
-        vote,
-        certificate,
-        validator_set,
-        allow_small_cluster_quorum,
-        0,
-    )
+    verify_prepared_certificate_with_depth(vote, certificate, validator_set, rules, 0)
 }
 
 fn verify_prepared_certificate_with_depth(
     vote: &ViewChangeVote,
     certificate: &PreparedCertificate,
     validator_set: &ValidatorSet,
-    allow_small_cluster_quorum: bool,
+    rules: PbftRules,
     depth: usize,
 ) -> Result<()> {
     if depth >= MAX_VIEW_CHANGE_PROOF_DEPTH {
@@ -604,7 +670,7 @@ fn verify_prepared_certificate_with_depth(
     let original_prepared = verify_view_change_certificate_with_depth(
         &original.header,
         validator_set,
-        allow_small_cluster_quorum,
+        rules,
         depth + 1,
     )?;
     if original_prepared
@@ -625,17 +691,12 @@ fn verify_prepared_certificate_with_depth(
         if proof.target_view != certificate.prepared_view {
             bail!("reproposal proof targets a different prepared view");
         }
-        verify_reproposal_proof_with_depth(
-            &original,
-            proof,
-            validator_set,
-            allow_small_cluster_quorum,
-            depth + 1,
-        )?;
+        verify_reproposal_proof_with_depth(&original, proof, validator_set, rules, depth + 1)?;
     } else if certificate.reproposal_proof.is_some() {
         bail!("original-view prepared certificate has an unexpected reproposal proof");
     }
-    let quorum = quorum_threshold(validator_set.len(), allow_small_cluster_quorum);
+    let quorum = quorum_threshold(validator_set.len(), rules.allow_small_cluster_quorum);
+    let require_hybrid = rules.hybrid_required(header.height);
     let mut seen = HashSet::new();
     for signature in &certificate.prepare_signatures {
         if !seen.insert(signature.validator_id.clone()) {
@@ -653,12 +714,7 @@ fn verify_prepared_certificate_with_depth(
         {
             bail!("prepared certificate public key does not match validator authority");
         }
-        verify_pbft_phase_signature(
-            "prepare",
-            &block_hash,
-            &validator.pubkey,
-            &signature.signature,
-        )?;
+        verify_pbft_block_signature("prepare", &block_hash, validator, signature, require_hybrid)?;
     }
     if seen.len() < quorum {
         bail!(
@@ -673,15 +729,15 @@ fn verify_prepared_certificate_with_depth(
 pub fn verify_view_change_vote(
     vote: &ViewChangeVote,
     validator_set: &ValidatorSet,
-    allow_small_cluster_quorum: bool,
+    rules: PbftRules,
 ) -> Result<()> {
-    verify_view_change_vote_with_depth(vote, validator_set, allow_small_cluster_quorum, 0)
+    verify_view_change_vote_with_depth(vote, validator_set, rules, 0)
 }
 
 fn verify_view_change_vote_with_depth(
     vote: &ViewChangeVote,
     validator_set: &ValidatorSet,
-    allow_small_cluster_quorum: bool,
+    rules: PbftRules,
     depth: usize,
 ) -> Result<()> {
     if depth >= MAX_VIEW_CHANGE_PROOF_DEPTH {
@@ -695,16 +751,16 @@ fn verify_view_change_vote_with_depth(
         .get(&vote.validator_id)
         .filter(|validator| validator.is_active)
         .ok_or_else(|| anyhow::anyhow!("view-change vote is from an inactive validator"))?;
-    verify_message_signature(&validator.pubkey, &vote.signing_message(), &vote.signature)
-        .map_err(|error| anyhow::anyhow!("invalid view-change signature: {error}"))?;
+    verify_validator_message(
+        validator,
+        &vote.signing_message(),
+        &vote.signature,
+        rules,
+        vote.height,
+    )
+    .map_err(|error| anyhow::anyhow!("invalid view-change signature: {error}"))?;
     if let Some(prepared) = &vote.prepared {
-        verify_prepared_certificate_with_depth(
-            vote,
-            prepared,
-            validator_set,
-            allow_small_cluster_quorum,
-            depth + 1,
-        )?;
+        verify_prepared_certificate_with_depth(vote, prepared, validator_set, rules, depth + 1)?;
     }
     Ok(())
 }
@@ -714,15 +770,15 @@ fn verify_view_change_vote_with_depth(
 pub fn verify_view_change_certificate(
     header: &common::BlockHeader,
     validator_set: &ValidatorSet,
-    allow_small_cluster_quorum: bool,
+    rules: PbftRules,
 ) -> Result<Option<PreparedCertificate>> {
-    verify_view_change_certificate_with_depth(header, validator_set, allow_small_cluster_quorum, 0)
+    verify_view_change_certificate_with_depth(header, validator_set, rules, 0)
 }
 
 fn verify_view_change_certificate_with_depth(
     header: &common::BlockHeader,
     validator_set: &ValidatorSet,
-    allow_small_cluster_quorum: bool,
+    rules: PbftRules,
     depth: usize,
 ) -> Result<Option<PreparedCertificate>> {
     if depth >= MAX_VIEW_CHANGE_PROOF_DEPTH {
@@ -735,7 +791,7 @@ fn verify_view_change_certificate_with_depth(
         return Ok(None);
     }
 
-    let quorum = quorum_threshold(validator_set.len(), allow_small_cluster_quorum);
+    let quorum = quorum_threshold(validator_set.len(), rules.allow_small_cluster_quorum);
     let mut seen = HashSet::new();
     let mut highest: Option<PreparedCertificate> = None;
     let mut highest_hash: Option<String> = None;
@@ -749,12 +805,7 @@ fn verify_view_change_certificate_with_depth(
         if !seen.insert(vote.validator_id.clone()) {
             bail!("view-change certificate contains a duplicate validator identity");
         }
-        verify_view_change_vote_with_depth(
-            vote,
-            validator_set,
-            allow_small_cluster_quorum,
-            depth + 1,
-        )?;
+        verify_view_change_vote_with_depth(vote, validator_set, rules, depth + 1)?;
 
         if let Some(prepared) = &vote.prepared {
             let prepared_hash = prepared_block_hash(&prepared.header)?;
@@ -790,16 +841,16 @@ pub fn verify_reproposal_proof(
     block: &Block,
     proof: &ReproposalProof,
     validator_set: &ValidatorSet,
-    allow_small_cluster_quorum: bool,
+    rules: PbftRules,
 ) -> Result<()> {
-    verify_reproposal_proof_with_depth(block, proof, validator_set, allow_small_cluster_quorum, 0)
+    verify_reproposal_proof_with_depth(block, proof, validator_set, rules, 0)
 }
 
 fn verify_reproposal_proof_with_depth(
     block: &Block,
     proof: &ReproposalProof,
     validator_set: &ValidatorSet,
-    allow_small_cluster_quorum: bool,
+    rules: PbftRules,
     depth: usize,
 ) -> Result<()> {
     if depth >= MAX_VIEW_CHANGE_PROOF_DEPTH {
@@ -811,13 +862,9 @@ fn verify_reproposal_proof_with_depth(
     let mut check_header = block.header.clone();
     check_header.view_number = proof.target_view;
     check_header.view_change_certificate = proof.view_change_certificate.clone();
-    let highest = verify_view_change_certificate_with_depth(
-        &check_header,
-        validator_set,
-        allow_small_cluster_quorum,
-        depth + 1,
-    )?
-    .ok_or_else(|| anyhow::anyhow!("reproposal proof has no prepared value"))?;
+    let highest =
+        verify_view_change_certificate_with_depth(&check_header, validator_set, rules, depth + 1)?
+            .ok_or_else(|| anyhow::anyhow!("reproposal proof has no prepared value"))?;
     let hash = block.hash();
     if highest.block().hash() != hash {
         bail!("reproposal proof changed the highest prepared block hash");
@@ -832,8 +879,8 @@ fn verify_reproposal_proof_with_depth(
         .get(&proof.leader_id)
         .filter(|validator| validator.is_active)
         .ok_or_else(|| anyhow::anyhow!("replacement primary is not active"))?;
-    verify_message_signature(
-        &leader.pubkey,
+    verify_validator_message(
+        leader,
         &reproposal_signing_message(
             &hash,
             proof.target_view,
@@ -841,6 +888,8 @@ fn verify_reproposal_proof_with_depth(
             &proof.view_change_certificate,
         ),
         &proof.leader_signature,
+        rules,
+        block.header.height,
     )
 }
 
@@ -853,6 +902,12 @@ impl Default for PbftEngine {
 impl PbftEngine {
     pub fn allow_small_cluster_quorum(&self) -> bool {
         self.config.allow_small_cluster_quorum
+    }
+
+    /// Verification rules for this engine, including the signed ADR-017
+    /// hybrid activation height.
+    pub fn rules(&self) -> PbftRules {
+        self.config.rules()
     }
 
     fn evict_rounds_if_needed(&mut self) {
@@ -975,7 +1030,7 @@ impl PbftEngine {
             &vote_context,
             &certificate,
             &validator_set,
-            self.config.allow_small_cluster_quorum,
+            self.config.rules(),
         )?;
         let quorum = quorum_threshold(validator_set.len(), self.config.allow_small_cluster_quorum);
         let prepared_view = certificate.prepared_view;
@@ -1091,7 +1146,7 @@ impl PbftEngine {
         let highest = verify_view_change_certificate(
             &certificate_header,
             &validator_set,
-            self.config.allow_small_cluster_quorum,
+            self.config.rules(),
         )?
         .ok_or_else(|| anyhow::anyhow!("reproposal certificate has no prepared value"))?;
         if highest.block().hash() != hash {
@@ -1107,10 +1162,12 @@ impl PbftEngine {
             .get(leader_id)
             .filter(|validator| validator.is_active)
             .ok_or_else(|| anyhow::anyhow!("replacement primary is not active"))?;
-        verify_message_signature(
-            &leader.pubkey,
+        verify_validator_message(
+            leader,
             &reproposal_signing_message(&hash, target_view, leader_id, &certificate),
             leader_signature,
+            self.config.rules(),
+            block.header.height,
         )?;
         let proof = ReproposalProof {
             target_view,
@@ -1433,7 +1490,7 @@ impl PbftEngine {
         vote: ViewChangeVote,
         validator_set: &ValidatorSet,
     ) -> Result<Option<Vec<ViewChangeVote>>> {
-        verify_view_change_vote(&vote, validator_set, self.config.allow_small_cluster_quorum)?;
+        verify_view_change_vote(&vote, validator_set, self.config.rules())?;
         if self.rounds.values().any(|round| {
             round.block.header.height == vote.height
                 && round.block.header.prev_hash == vote.prev_hash
@@ -1475,11 +1532,7 @@ impl PbftEngine {
         check_header.prev_hash = vote.prev_hash.clone();
         check_header.view_number = vote.new_view;
         check_header.view_change_certificate = certificate.clone();
-        verify_view_change_certificate(
-            &check_header,
-            validator_set,
-            self.config.allow_small_cluster_quorum,
-        )?;
+        verify_view_change_certificate(&check_header, validator_set, self.config.rules())?;
 
         let context = (vote.height, vote.prev_hash.clone());
         let should_replace = self
@@ -1708,6 +1761,7 @@ mod tests {
             stake: 100,
             reputation: 100,
             is_active: true,
+            pq_pubkey: None,
         });
         set
     }
@@ -1846,6 +1900,7 @@ mod tests {
                 stake: 100,
                 reputation: 100,
                 is_active: true,
+                pq_pubkey: None,
             });
         }
         set
@@ -1876,6 +1931,7 @@ mod tests {
                 stake: 100,
                 reputation: 100,
                 is_active: true,
+                pq_pubkey: None,
             });
         }
         (set, keys)
@@ -1912,6 +1968,7 @@ mod tests {
             max_view_changes: 3,
             stale_round_ttl: Duration::from_secs(120),
             allow_small_cluster_quorum: false,
+            hybrid_activation_height: None,
         });
         engine
             .start_round(test_block(&proposer), vs.clone())
@@ -2070,6 +2127,7 @@ mod tests {
             max_view_changes: 3,
             stale_round_ttl: Duration::from_secs(120),
             allow_small_cluster_quorum: false,
+            hybrid_activation_height: None,
         });
         engine.start_round(test_block(&proposer), vs).unwrap();
         std::thread::sleep(Duration::from_millis(5));
@@ -2088,7 +2146,7 @@ mod tests {
             prepared: None,
             signature: String::new(),
         };
-        assert!(super::verify_view_change_vote(&vote, &vs, false).is_err());
+        assert!(super::verify_view_change_vote(&vote, &vs, super::PbftRules::default()).is_err());
     }
 
     #[test]
@@ -2109,6 +2167,7 @@ mod tests {
                 stake: 100,
                 reputation: 100,
                 is_active: true,
+                pq_pubkey: None,
             });
         }
 
@@ -2237,6 +2296,7 @@ mod tests {
             stake: 100,
             reputation: 100,
             is_active: true,
+            pq_pubkey: None,
         });
         let proposer = selected_proposer(&vs, &"11".repeat(32));
         let block = test_block(&proposer);
@@ -2310,5 +2370,264 @@ mod tests {
             assert!(engine.view_change_votes.len() <= MAX_VIEW_CHANGE_BUCKETS);
             assert!(engine.certified_views.len() <= MAX_CERTIFIED_VIEWS);
         }
+    }
+
+    // ── ADR-017 Increment 4a: hybrid PBFT signatures from activation ─────────
+
+    /// Four validators, each with an Ed25519 key and an independent
+    /// ML-DSA-44 key; `pq_pubkey` is set when `enrolled`.
+    fn hybrid_four_validator_set(
+        enrolled: bool,
+    ) -> (
+        ValidatorSet,
+        Vec<common::crypto::SigningKey>,
+        Vec<common::crypto::SigningKey>,
+    ) {
+        use common::validator_signature::{
+            validator_ed25519_pubkey_hex, validator_mldsa44_pubkey_hex,
+        };
+        let hybrid: Vec<_> = (0..4u8)
+            .map(|i| common::crypto::SigningKey::hybrid_from_seeds(&[i + 1; 32], &[i + 41; 32]))
+            .collect();
+        let classical: Vec<_> = (0..4u8)
+            .map(|i| common::crypto::SigningKey::from_ed25519_seed(&[i + 1; 32]))
+            .collect();
+        let mut set = ValidatorSet::new();
+        for (i, key) in hybrid.iter().enumerate() {
+            set.add(ValidatorInfo {
+                id: format!("v{i}"),
+                pubkey: validator_ed25519_pubkey_hex(key),
+                eth_address: None,
+                stake: 100,
+                reputation: 100,
+                is_active: true,
+                pq_pubkey: enrolled.then(|| validator_mldsa44_pubkey_hex(key).unwrap()),
+            });
+        }
+        (set, hybrid, classical)
+    }
+
+    fn block_vote_with(
+        validator_id: &str,
+        key: &common::crypto::SigningKey,
+        phase: &str,
+        block_hash: &str,
+    ) -> BlockSignature {
+        let message = pbft_signature_message(phase, block_hash);
+        let (signature, pq_signature) =
+            common::validator_signature::sign_validator_message(key, message.as_bytes());
+        BlockSignature {
+            validator_id: validator_id.into(),
+            pubkey: common::validator_signature::validator_ed25519_pubkey_hex(key),
+            signature,
+            pq_signature,
+        }
+    }
+
+    /// `test_block` with a Merkle root that matches its (empty) transaction
+    /// list, as prepared certificates require.
+    fn hybrid_test_block(proposer_id: &str) -> Block {
+        let mut block = test_block(proposer_id);
+        block.header.merkle_root = common::merkle_root(&block.transactions);
+        block
+    }
+
+    fn engine_with_activation(activation: Option<u64>) -> super::PbftEngine {
+        super::PbftEngine::with_config(super::PbftConfig {
+            hybrid_activation_height: activation,
+            ..super::PbftConfig::default()
+        })
+    }
+
+    #[test]
+    fn prepare_and_commit_use_the_scheme_of_the_block_height() {
+        let (vs, hybrid, classical) = hybrid_four_validator_set(true);
+        let proposer = selected_proposer(&vs, &"11".repeat(32));
+        let block = test_block(&proposer); // height 1
+        let block_hash = block.hash();
+
+        // Activation at the block height: hybrid only.
+        let mut engine = engine_with_activation(Some(1));
+        engine.start_round(block.clone(), vs.clone()).unwrap();
+        let classical_vote = block_vote_with("v0", &classical[0], "prepare", &block_hash);
+        assert!(engine.prepare(&block_hash, "v0", classical_vote).is_err());
+        let mut stripped = block_vote_with("v0", &hybrid[0], "prepare", &block_hash);
+        stripped.pq_signature = None;
+        assert!(engine.prepare(&block_hash, "v0", stripped).is_err());
+        let mut replayed = block_vote_with("v0", &hybrid[0], "commit", &block_hash);
+        replayed.pq_signature =
+            block_vote_with("v0", &hybrid[0], "prepare", &block_hash).pq_signature;
+        assert!(
+            engine.prepare(&block_hash, "v0", replayed).is_err(),
+            "the ML-DSA-44 half of another phase must not complete a PREPARE"
+        );
+        for (index, key) in hybrid.iter().enumerate().take(3) {
+            let id = format!("v{index}");
+            let vote = block_vote_with(&id, key, "prepare", &block_hash);
+            engine.prepare(&block_hash, &id, vote).unwrap();
+        }
+        for (index, key) in hybrid.iter().enumerate().take(3) {
+            let id = format!("v{index}");
+            let vote = block_vote_with(&id, key, "commit", &block_hash);
+            engine.commit(&block_hash, &id, vote).unwrap();
+        }
+        let finalised = engine.get_finalised_block(&block_hash).unwrap();
+        assert_eq!(finalised.pbft_signatures.len(), 3);
+        assert!(finalised
+            .pbft_signatures
+            .iter()
+            .all(|signature| signature.pq_signature.is_some()));
+
+        // One height before activation: classical only.
+        let mut engine = engine_with_activation(Some(2));
+        engine.start_round(block.clone(), vs.clone()).unwrap();
+        let hybrid_vote = block_vote_with("v0", &hybrid[0], "prepare", &block_hash);
+        assert!(engine.prepare(&block_hash, "v0", hybrid_vote).is_err());
+        let classical_vote = block_vote_with("v0", &classical[0], "prepare", &block_hash);
+        engine.prepare(&block_hash, "v0", classical_vote).unwrap();
+    }
+
+    #[test]
+    fn a_validator_without_an_enrolled_key_cannot_sign_after_activation() {
+        let (vs, hybrid, _) = hybrid_four_validator_set(false);
+        let proposer = selected_proposer(&vs, &"11".repeat(32));
+        let block = test_block(&proposer);
+        let block_hash = block.hash();
+        let mut engine = engine_with_activation(Some(1));
+        engine.start_round(block, vs).unwrap();
+        let vote = block_vote_with("v0", &hybrid[0], "prepare", &block_hash);
+        let error = engine.prepare(&block_hash, "v0", vote).unwrap_err();
+        assert!(error.to_string().contains("ML-DSA-44"), "{error}");
+    }
+
+    #[test]
+    fn view_change_votes_and_prepared_certificates_follow_the_activation_height() {
+        let (vs, hybrid, classical) = hybrid_four_validator_set(true);
+        let prev_hash = "11".repeat(32);
+        let proposer = selected_proposer(&vs, &prev_hash);
+        let block = hybrid_test_block(&proposer);
+        let block_hash = block.hash();
+
+        // Prepare the block at view 0 under hybrid rules.
+        let mut engine = engine_with_activation(Some(1));
+        engine.start_round(block.clone(), vs.clone()).unwrap();
+        for (index, key) in hybrid.iter().enumerate().take(3) {
+            let id = format!("v{index}");
+            let vote = block_vote_with(&id, key, "prepare", &block_hash);
+            engine.prepare(&block_hash, &id, vote).unwrap();
+        }
+        let (_, certificate) = engine.prepared_certificate(&block_hash).unwrap();
+
+        let unsigned = |validator: usize| common::ViewChangeVote {
+            height: 1,
+            prev_hash: prev_hash.clone(),
+            new_view: 1,
+            validator_id: format!("v{validator}"),
+            prepared: Some(certificate.clone()),
+            signature: String::new(),
+        };
+        let sign = |mut vote: common::ViewChangeVote, key: &common::crypto::SigningKey| {
+            vote.signature = common::validator_signature::sign_validator_message_combined(
+                key,
+                vote.signing_message().as_bytes(),
+            );
+            vote
+        };
+        let hybrid_rules = super::PbftRules {
+            allow_small_cluster_quorum: false,
+            hybrid_activation_height: Some(1),
+        };
+        let classical_rules = super::PbftRules::default();
+
+        let hybrid_vote = sign(unsigned(0), &hybrid[0]);
+        super::verify_view_change_vote(&hybrid_vote, &vs, hybrid_rules).unwrap();
+        assert!(
+            super::verify_view_change_vote(&hybrid_vote, &vs, classical_rules).is_err(),
+            "a hybrid vote and its hybrid PREPARE quorum are refused before activation"
+        );
+        let classical_vote = sign(unsigned(0), &classical[0]);
+        assert!(super::verify_view_change_vote(&classical_vote, &vs, hybrid_rules).is_err());
+        let mut truncated = hybrid_vote.clone();
+        truncated.signature.truncate(128);
+        assert!(super::verify_view_change_vote(&truncated, &vs, hybrid_rules).is_err());
+
+        // A quorum of hybrid votes certifies view 1 in a hybrid engine.
+        let mut completed = None;
+        for (index, key) in hybrid.iter().enumerate().take(3) {
+            completed = engine
+                .receive_view_change(sign(unsigned(index), key), &vs)
+                .unwrap();
+        }
+        let certified = completed.expect("three hybrid votes certify the view");
+        assert_eq!(certified.len(), 3);
+        let (view, _, prepared) = engine.certified_view(1, &prev_hash).unwrap();
+        assert_eq!(view, 1);
+        assert_eq!(prepared.unwrap().block().hash(), block_hash);
+
+        // Re-signing the same vote changes only the hedged ML-DSA-44 half, so
+        // it is a duplicate, not equivocation.
+        let again = sign(unsigned(0), &hybrid[0]);
+        assert_ne!(again.signature, hybrid_vote.signature);
+        assert!(engine.receive_view_change(again, &vs).is_ok());
+    }
+
+    #[test]
+    fn reproposal_leader_signature_follows_the_activation_height() {
+        let (vs, hybrid, classical) = hybrid_four_validator_set(true);
+        let prev_hash = "11".repeat(32);
+        let proposer = selected_proposer(&vs, &prev_hash);
+        let block = hybrid_test_block(&proposer);
+        let block_hash = block.hash();
+        let mut engine = engine_with_activation(Some(1));
+        engine.start_round(block.clone(), vs.clone()).unwrap();
+        for (index, key) in hybrid.iter().enumerate().take(3) {
+            let id = format!("v{index}");
+            let vote = block_vote_with(&id, key, "prepare", &block_hash);
+            engine.prepare(&block_hash, &id, vote).unwrap();
+        }
+        let (_, prepared) = engine.prepared_certificate(&block_hash).unwrap();
+        let mut certificate = Vec::new();
+        for (index, key) in hybrid.iter().enumerate().take(3) {
+            let mut vote = common::ViewChangeVote {
+                height: 1,
+                prev_hash: prev_hash.clone(),
+                new_view: 1,
+                validator_id: format!("v{index}"),
+                prepared: Some(prepared.clone()),
+                signature: String::new(),
+            };
+            vote.signature = common::validator_signature::sign_validator_message_combined(
+                key,
+                vote.signing_message().as_bytes(),
+            );
+            certificate.push(vote);
+        }
+        certificate.sort_by(|a, b| a.validator_id.cmp(&b.validator_id));
+        let leader_id = super::selected_proposer_for_view(&vs, &prev_hash, 1).unwrap();
+        let leader_index: usize = leader_id.trim_start_matches('v').parse().unwrap();
+        let message = super::reproposal_signing_message(&block_hash, 1, &leader_id, &certificate);
+
+        let classical_signature = common::validator_signature::sign_validator_message_combined(
+            &classical[leader_index],
+            message.as_bytes(),
+        );
+        let mut fresh = engine_with_activation(Some(1));
+        assert!(fresh
+            .repropose_prepared(
+                block.clone(),
+                vs.clone(),
+                1,
+                &leader_id,
+                certificate.clone(),
+                &classical_signature,
+            )
+            .is_err());
+        let hybrid_signature = common::validator_signature::sign_validator_message_combined(
+            &hybrid[leader_index],
+            message.as_bytes(),
+        );
+        fresh
+            .repropose_prepared(block, vs, 1, &leader_id, certificate, &hybrid_signature)
+            .unwrap();
     }
 }

@@ -32,6 +32,7 @@ pub mod package_admission;
 pub mod package_status;
 pub mod pbft_safety;
 pub mod pending_pool;
+pub mod pq_compact;
 pub mod public_v4;
 pub mod publisher_index;
 pub mod rate_limit;

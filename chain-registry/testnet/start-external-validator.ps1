@@ -110,6 +110,15 @@ if ($env:CREG_ONBOARDING_KEY_FILE) {
             "--env", "CREG_VALIDATOR_KEY_FILE=/keys/validator.key",
             "--mount", "type=bind,source=$resolvedKey,target=/keys/validator.key,readonly"
         )
+        # ADR-017: the ML-DSA-44 seed that `creg validator onboard` keeps next
+        # to the Ed25519 key (validator.key -> validator.pq.key).
+        $pqKey = [System.IO.Path]::ChangeExtension($resolvedKey, "pq.key")
+        if (Test-Path -LiteralPath $pqKey -PathType Leaf) {
+            $observerArgs += @(
+                "--env", "CREG_VALIDATOR_PQ_KEY_FILE=/keys/validator.pq.key",
+                "--mount", "type=bind,source=$pqKey,target=/keys/validator.pq.key,readonly"
+            )
+        }
     }
     $observerArgs += $image
     & docker @observerArgs | Out-Null
@@ -138,6 +147,24 @@ if ($CustomKey) {
 } else {
     $validatorKey = (Get-Content $keyFile -Raw).Trim()
     Write-Host "[OK] Loaded existing validator key from $keyFile" -ForegroundColor Green
+}
+
+# ADR-017: an independent ML-DSA-44 seed next to the Ed25519 key, the same
+# file `creg validator onboard` creates and registers. The node signs with it
+# only from the hybrid activation height in the signed chain spec.
+$pqKeyFile = Join-Path $dataDir "validator.pq.key"
+if (-not (Test-Path $pqKeyFile)) {
+    $pqBytes = New-Object byte[] 32
+    (New-Object System.Security.Cryptography.RNGCryptoServiceProvider).GetBytes($pqBytes)
+    $pqKey = [System.BitConverter]::ToString($pqBytes).Replace("-", "").ToLower()
+    [System.IO.File]::WriteAllText($pqKeyFile, $pqKey)
+    Write-Host "[OK] Generated new ML-DSA-44 seed: $pqKeyFile" -ForegroundColor Green
+} else {
+    $pqKey = (Get-Content $pqKeyFile -Raw).Trim()
+    Write-Host "[OK] Loaded existing ML-DSA-44 seed from $pqKeyFile" -ForegroundColor Green
+}
+if ($pqKey -notmatch '^(0x)?[0-9a-fA-F]{64}$') {
+    throw "The ML-DSA-44 seed at $pqKeyFile must contain 32 bytes of hex."
 }
 
 $operatorKeyFile = Join-Path $dataDir "operator_api.key"
@@ -173,6 +200,7 @@ $envLines = @(
     "CREG_NODE_ROLE=$nodeRoleEnv",
     "CREG_ADMISSION_AUTO_ACTIVATE=true",
     "CREG_VALIDATOR_KEY=$validatorKey",
+    "CREG_VALIDATOR_PQ_KEY=$pqKey",
     "CREG_OPERATOR_API_KEY=$opKey",
     "CREG_ETH_RPC=$EthRpc",
     "CREG_EXPECTED_L1_CHAIN_ID=11155111",
@@ -256,6 +284,7 @@ Write-Host "============================================================" -Foreg
 Write-Host "Node ID:         $NodeId" -ForegroundColor Cyan
 Write-Host "Chain Data:      $chainDataDir" -ForegroundColor Cyan
 Write-Host "Key Location:    $keyFile" -ForegroundColor Cyan
+Write-Host "ML-DSA-44 Seed:  $pqKeyFile" -ForegroundColor Cyan
 Write-Host "Docker Image:    $chosenImage" -ForegroundColor Cyan
 Write-Host "P2P Port:        $P2pPort (Firewall: OPEN TCP/UDP $P2pPort)" -ForegroundColor Cyan
 if ($HttpPort -eq 0) {
@@ -267,7 +296,7 @@ $seedDescription = if ($env:BOOTNODE) { $env:BOOTNODE } else { "from the signed 
 Write-Host "P2P Seeds:       $seedDescription" -ForegroundColor Cyan
 Write-Host ""
 Write-Host "--- KEY BACKUP NOTICE ---" -ForegroundColor Yellow
-Write-Host "Validator key is stored at $keyFile; back it up securely without copying it into logs or chat." -ForegroundColor Yellow
+Write-Host "Validator keys are stored at $keyFile and $pqKeyFile; back up both securely without copying them into logs or chat." -ForegroundColor Yellow
 Write-Host ""
 Write-Host "--- REMOTE VERIFICATION ---" -ForegroundColor Yellow
 if ($HttpPort -ne 0) {

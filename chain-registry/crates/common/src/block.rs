@@ -182,6 +182,9 @@ pub struct ReproposalProof {
     pub target_view: u32,
     pub leader_id: String,
     pub view_change_certificate: Vec<ViewChangeVote>,
+    /// Ed25519 signature hex before hybrid activation; from activation the
+    /// full hybrid Ed25519 + ML-DSA-44 signature hex (ADR-017,
+    /// [`crate::validator_signature`]).
     pub leader_signature: String,
 }
 
@@ -217,6 +220,10 @@ pub struct ViewChangeVote {
     pub new_view: u32,
     pub validator_id: String,
     pub prepared: Option<PreparedCertificate>,
+    /// Ed25519 signature hex before hybrid activation; from activation the
+    /// full hybrid Ed25519 + ML-DSA-44 signature hex (ADR-017,
+    /// [`crate::validator_signature`]). The struct keeps its fields so
+    /// pre-activation encodings and golden vectors are unchanged.
     pub signature: String,
 }
 

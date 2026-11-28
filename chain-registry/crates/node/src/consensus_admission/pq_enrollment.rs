@@ -22,8 +22,8 @@ use alloy::primitives::Address;
 use anyhow::Context;
 
 use super::{
-    ed25519_signing_key_from_hex, now_ms, transition_quorum_required, AttestationStore,
-    TransitionGossipMessage, TransitionProposalKey, TRANSITION_TOPIC,
+    now_ms, transition_quorum_required, AttestationStore, TransitionGossipMessage,
+    TransitionProposalKey, TRANSITION_TOPIC,
 };
 use crate::state::SharedState;
 
@@ -214,17 +214,31 @@ async fn tick_with_quiet_period(
     p2p: &crate::p2p::P2PHandle,
     quiet_ms: i64,
 ) -> anyhow::Result<()> {
-    let (node_id, privkey, data_dir, bootstrap, registrations, tip_height, tip_hash) = {
+    let (
+        node_id,
+        signing_keys,
+        hybrid_activation_height,
+        data_dir,
+        bootstrap,
+        registrations,
+        tip_height,
+        tip_hash,
+    ) = {
         let s = state.read().await;
         if !s.config.is_validator {
             return Ok(());
         }
-        let Some(privkey) = s.config.validator_privkey.clone() else {
+        let Some(signing_keys) = s
+            .config
+            .validator_signing_keys()
+            .map_err(anyhow::Error::msg)?
+        else {
             return Ok(());
         };
         (
             s.config.node_id.clone(),
-            privkey,
+            signing_keys,
+            s.config.vote_v4_activation_height,
             s.config.data_dir.clone(),
             s.validator_set_bootstrap.clone(),
             s.validator_registrations.clone(),
@@ -242,8 +256,7 @@ async fn tick_with_quiet_period(
     )
     .map_err(anyhow::Error::msg)?;
 
-    let signing_key = ed25519_signing_key_from_hex(privkey.expose_secret())?;
-    let signer_pubkey = signing_key.public_key().to_hex();
+    let signer_pubkey = signing_keys.pubkey_hex();
     if !authority.validators.iter().any(|validator| {
         validator.id == node_id
             && validator.pubkey.eq_ignore_ascii_case(&signer_pubkey)
@@ -294,10 +307,16 @@ async fn tick_with_quiet_period(
         transition_signatures: Vec::new(),
     };
     let message = common::validator_set_transition_message(&unsigned);
+    let (signature_hex, pq_signature) = signing_keys.sign_at(
+        hybrid_activation_height,
+        effective_from_height,
+        message.as_bytes(),
+    )?;
     let signature = common::ValidatorSetTransitionSignature {
         validator_id: node_id.clone(),
         validator_pubkey: signer_pubkey,
-        signature: signing_key.sign(message.as_bytes()).to_hex(),
+        signature: signature_hex,
+        pq_signature,
     };
     let applicant = proposal_applicant(&authority, &enrollments)?;
     let proposal_key = TransitionProposalKey {
@@ -354,6 +373,7 @@ async fn tick_with_quiet_period(
             &s.config.data_dir,
             snapshot.clone(),
             &authority,
+            hybrid_activation_height,
         )?;
         s.refresh_runtime_validator_set_from_certified_history()?;
     }
@@ -624,6 +644,7 @@ mod tests {
             validator_id: format!("validator-{signer}"),
             validator_pubkey: key(signer).public_key().to_hex(),
             signature: key(signer).sign(message.as_bytes()).to_hex(),
+            pq_signature: None,
         }
     }
 

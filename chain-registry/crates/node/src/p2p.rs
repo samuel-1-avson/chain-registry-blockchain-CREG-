@@ -131,12 +131,18 @@ enum PbftValidationError {
     SignatureVerificationFailed,
 }
 
+/// Pre-propagation check of a PBFT PREPARE or COMMIT gossip signature under
+/// the scheme that governs the block's height (ADR-017): Ed25519 before
+/// hybrid activation, hybrid with `pq_signature` from it. The PBFT engine
+/// verifies the signature again against the round's authority.
 fn validate_pbft_phase_message(
     validator_set: &common::ValidatorSet,
     phase: &str,
     block_hash: &str,
     validator_id: &str,
     signature_hex: &str,
+    pq_signature_hex: Option<&str>,
+    require_hybrid: bool,
 ) -> Result<common::BlockSignature, PbftValidationError> {
     let validator = validator_set
         .validators
@@ -148,11 +154,14 @@ fn validate_pbft_phase_message(
         return Err(PbftValidationError::MissingValidatorPubkey);
     }
 
-    consensus::pbft::verify_pbft_phase_signature(
-        phase,
-        block_hash,
+    let message = consensus::pbft::pbft_signature_message(phase, block_hash);
+    common::validator_signature::verify_validator_signature(
         &validator.pubkey,
+        validator.pq_pubkey.as_deref(),
+        message.as_bytes(),
         signature_hex,
+        pq_signature_hex,
+        require_hybrid,
     )
     .map_err(|_| PbftValidationError::SignatureVerificationFailed)?;
 
@@ -160,8 +169,29 @@ fn validate_pbft_phase_message(
         validator_id: validator_id.to_string(),
         pubkey: validator.pubkey.clone(),
         signature: signature_hex.to_string(),
-        pq_signature: None,
+        pq_signature: pq_signature_hex.map(str::to_owned),
     })
+}
+
+/// Whether a PBFT vote for `block_hash` must be hybrid: the round's height
+/// when the proposal is known, otherwise the next canonical height, the only
+/// height that accepts votes.
+fn pbft_vote_requires_hybrid(state: &crate::NodeState, block_hash: &str) -> bool {
+    let height = state
+        .pbft_engine
+        .round_context(block_hash)
+        .map(|(height, _, _)| height)
+        .unwrap_or_else(|| {
+            state
+                .chain
+                .tip_height()
+                .unwrap_or_default()
+                .saturating_add(1)
+        });
+    common::validator_signature::hybrid_signatures_required(
+        state.config.vote_v4_activation_height,
+        height,
+    )
 }
 
 fn validate_pbft_pre_prepare_block(
@@ -209,24 +239,11 @@ fn report_pbft_validation_failure(
     );
 }
 
-/// Helper to sign a PBFT phase message (prepare/commit) using our key.
-/// Returns (signature_hex, pubkey_hex). Logs on failure in caller.
-fn sign_pbft_phase(
-    sk: &common::crypto::SigningKey,
-    phase: &str,
-    block_hash: &str,
-) -> (String, String) {
-    let message = consensus::pbft::pbft_signature_message(phase, block_hash);
-    let signature = sk.sign(message.as_bytes()).to_hex();
-    let pubkey = sk.public_key().to_hex();
-    (signature, pubkey)
-}
-
 async fn sign_and_record_commit(
     state: &mut crate::NodeState,
     block_hash: &str,
     validator_id: &str,
-    signing_key: &common::crypto::SigningKey,
+    signing_keys: &crate::config::ValidatorSigningKeys,
 ) -> anyhow::Result<(common::GossipMessage, bool)> {
     let (height, prev_hash, view_number) = state
         .pbft_engine
@@ -245,15 +262,15 @@ async fn sign_and_record_commit(
         &prepared_block,
         &certificate,
         &authority,
-        state.pbft_engine.allow_small_cluster_quorum(),
+        state.pbft_engine.rules(),
     )?;
-    let (signature, pubkey) = sign_pbft_phase(signing_key, "commit", block_hash);
-    let vote = common::BlockSignature {
-        validator_id: validator_id.to_owned(),
-        pubkey,
-        signature: signature.clone(),
-        pq_signature: None,
-    };
+    let vote = signing_keys.pbft_signature_at(
+        state.config.vote_v4_activation_height,
+        height,
+        validator_id,
+        "commit",
+        block_hash,
+    )?;
     let signing_message = consensus::pbft::pbft_signature_message("commit", block_hash);
     journal.record_decision(
         crate::pbft_safety::PbftVotePhase::Commit,
@@ -262,7 +279,8 @@ async fn sign_and_record_commit(
         view_number,
         block_hash,
         &signing_message,
-        &signature,
+        &vote.signature,
+        vote.pq_signature.as_deref(),
     )?;
     tracing::info!(
         event = "pbft_local_commit_durable",
@@ -284,12 +302,15 @@ async fn sign_and_record_commit(
         view_number,
     )
     .await?;
-    let finalized = state.pbft_engine.commit(block_hash, validator_id, vote)?;
+    let finalized = state
+        .pbft_engine
+        .commit(block_hash, validator_id, vote.clone())?;
     Ok((
         common::GossipMessage::PbftCommit {
             block_hash: block_hash.to_owned(),
             validator_id: validator_id.to_owned(),
-            signature,
+            signature: vote.signature,
+            pq_signature: vote.pq_signature,
         },
         finalized,
     ))
@@ -534,6 +555,9 @@ fn transition_persistence_failure_acceptance(
     }
 }
 
+/// [`validate_and_persist_transition_at`] before hybrid activation, for tests
+/// of the classical rules.
+#[cfg(test)]
 fn validate_and_persist_transition(
     data_dir: &std::path::Path,
     snapshot: common::AuthenticatedValidatorSetSnapshot,
@@ -541,6 +565,29 @@ fn validate_and_persist_transition(
     tip_height: u64,
     tip_hash: &str,
     checkpoint: Option<&common::AuthenticatedValidatorSetSnapshot>,
+) -> anyhow::Result<gossipsub::MessageAcceptance> {
+    validate_and_persist_transition_at(
+        data_dir,
+        snapshot,
+        trusted_bootstrap,
+        tip_height,
+        tip_hash,
+        checkpoint,
+        None,
+    )
+}
+
+/// Validate a gossiped validator-set transition and persist it. Its
+/// signatures follow ADR-017's height rule for the signed
+/// `hybrid_activation_height`.
+fn validate_and_persist_transition_at(
+    data_dir: &std::path::Path,
+    snapshot: common::AuthenticatedValidatorSetSnapshot,
+    trusted_bootstrap: &common::ValidatorSet,
+    tip_height: u64,
+    tip_hash: &str,
+    checkpoint: Option<&common::AuthenticatedValidatorSetSnapshot>,
+    hybrid_activation_height: Option<u64>,
 ) -> anyhow::Result<gossipsub::MessageAcceptance> {
     let mut is_configured_checkpoint = false;
     let mut exact_checkpoint_acceptance = gossipsub::MessageAcceptance::Accept;
@@ -614,7 +661,12 @@ fn validate_and_persist_transition(
             // the deployment bootstrap set may authorize it.
             .unwrap_or_else(|| trusted_bootstrap.clone()),
         };
-        crate::validator_set_history::record_authenticated(data_dir, snapshot, &previous)?;
+        crate::validator_set_history::record_authenticated(
+            data_dir,
+            snapshot,
+            &previous,
+            hybrid_activation_height,
+        )?;
     }
     Ok(exact_checkpoint_acceptance)
 }
@@ -896,7 +948,7 @@ impl P2PNode {
                     SwarmEvent::Behaviour(BehaviourEvent::Gossipsub(gossipsub::Event::Message {
                         propagation_source: peer_id,
                         message_id: id,
-                        message,
+                        mut message,
                     })) => {
                         tracing::debug!("Got Gossipsub message {} from {}", id, peer_id);
 
@@ -981,6 +1033,32 @@ impl P2PNode {
                                 id, peer_id, message.data.len(), max_message_bytes
                             );
                             continue;
+                        }
+                        // ADR-017 decision 4: restore pooled ML-DSA-44
+                        // signatures before anything parses the message. The
+                        // size limit above applies to the compact form.
+                        if crate::pq_compact::topic_uses_compaction(topic_str)
+                            && crate::pq_compact::is_compact(&message.data)
+                        {
+                            match crate::pq_compact::expand(&message.data) {
+                                Ok(restored) => message.data = restored,
+                                Err(error) => {
+                                    tracing::warn!(
+                                        peer = %peer_id,
+                                        error = %error,
+                                        "P2P: rejected malformed compact gossip message"
+                                    );
+                                    report_validation_result(
+                                        &mut self.swarm,
+                                        &id,
+                                        &peer_id,
+                                        gossipsub::MessageAcceptance::Reject,
+                                    );
+                                    let action = peer_scores.record_corrupted_payload(&peer_id);
+                                    handle_peer_action(&mut self.swarm, peer_id, action);
+                                    continue;
+                                }
+                            }
                         }
                         let _ = requires_payload_validation_before_acceptance(topic_str);
 
@@ -1292,13 +1370,14 @@ impl P2PNode {
                                     let tip_hash = s.chain.tip_hash().map_err(
                                         crate::validator_set_history::RecordAuthenticatedError::persistence,
                                     )?;
-                                    validate_and_persist_transition(
+                                    validate_and_persist_transition_at(
                                         &s.config.data_dir,
                                         snapshot,
                                         &s.validator_set_bootstrap,
                                         tip_height,
                                         &tip_hash,
                                         checkpoint.as_ref(),
+                                        s.config.vote_v4_activation_height,
                                     )
                                 })()
                             };
@@ -1460,7 +1539,7 @@ impl P2PNode {
                                                 s.chain.pbft_safety_journal()?.record_received_view_change(
                                                     &vote,
                                                     &pbft_authority,
-                                                    s.pbft_engine.allow_small_cluster_quorum(),
+                                                    s.pbft_engine.rules(),
                                                 )?;
                                             }
                                             s.pbft_engine.receive_view_change(vote, &pbft_authority)
@@ -1781,7 +1860,7 @@ impl P2PNode {
                                                         journal.record_received_view_change(
                                                             vote,
                                                             &authority,
-                                                            s.pbft_engine.allow_small_cluster_quorum(),
+                                                            s.pbft_engine.rules(),
                                                         )?;
                                                     }
                                                 }
@@ -1801,7 +1880,7 @@ impl P2PNode {
                                                         journal.record_received_view_change(
                                                             vote,
                                                             &authority,
-                                                            s.pbft_engine.allow_small_cluster_quorum(),
+                                                            s.pbft_engine.rules(),
                                                         )?;
                                                     }
                                                 }
@@ -1833,12 +1912,11 @@ impl P2PNode {
                                             // Sign the block and broadcast PREPARE (validators only; observers never sign)
                                             if s.config.is_validator {
                                                 if let Some(our_id) = s.config.node_id.clone().into() {
-                                                    if let Some(our_privkey_hex) = &s.config.validator_privkey {
+                                                    match s.config.validator_signing_keys() {
+                                                    Ok(Some(signing_keys)) => {
                                                     let bh = block.hash();
-                                                    if let Ok(pk_bytes) = hex::decode(our_privkey_hex) {
-                                                        if let Ok(sk) = common::crypto::SigningKey::from_seed(common::crypto::SignatureScheme::Ed25519, &pk_bytes) {
-                                                            let (signature, pubkey) = sign_pbft_phase(&sk, "prepare", &bh);
-                                                            let sig_obj = common::BlockSignature { validator_id: our_id.clone(), pubkey: pubkey.clone(), signature: signature.clone(), pq_signature: None };
+                                                    match signing_keys.pbft_signature_at(s.config.vote_v4_activation_height, block.header.height, &our_id, "prepare", &bh) {
+                                                        Ok(sig_obj) => {
                                                             let signing_message = consensus::pbft::pbft_signature_message("prepare", &bh);
                                                             let durable = s.chain.pbft_safety_journal().and_then(|journal| {
                                                                 journal.record_decision(
@@ -1851,21 +1929,22 @@ impl P2PNode {
                                                                         .unwrap_or(block.header.view_number),
                                                                     &bh,
                                                                     &signing_message,
-                                                                    &signature,
+                                                                    &sig_obj.signature,
+                                                                    sig_obj.pq_signature.as_deref(),
                                                                 )
                                                             });
                                                             if let Err(error) = durable {
                                                                 tracing::error!(block_hash = %bh, error = %error, "Refusing to broadcast PREPARE without a durable vote lock");
                                                             } else {
-                                                                match s.pbft_engine.prepare(&bh, &our_id, sig_obj) {
+                                                                match s.pbft_engine.prepare(&bh, &our_id, sig_obj.clone()) {
                                                                     Ok(prepare_quorum) => {
-                                                                        let prep_msg = common::GossipMessage::PbftPrepare { block_hash: bh.clone(), validator_id: our_id.clone(), signature };
+                                                                        let prep_msg = common::GossipMessage::PbftPrepare { block_hash: bh.clone(), validator_id: our_id.clone(), signature: sig_obj.signature, pq_signature: sig_obj.pq_signature };
                                                                         if let Ok(data) = serde_json::to_vec(&prep_msg) {
                                                                             let topic = libp2p::gossipsub::IdentTopic::new("creg/v1/blocks");
                                                                             let _ = self.swarm.behaviour_mut().gossipsub.publish(topic, data);
                                                                         }
                                                                         if prepare_quorum {
-                                                                            match sign_and_record_commit(&mut s, &bh, &our_id, &sk).await {
+                                                                            match sign_and_record_commit(&mut s, &bh, &our_id, &signing_keys).await {
                                                                                 Ok((commit_msg, finalized)) => {
                                                                                     if finalized {
                                                                                         if let Err(error) = apply_finalized_pbft_block(&mut s, &bh) {
@@ -1884,24 +1963,30 @@ impl P2PNode {
                                                                     Err(error) => tracing::warn!(block_hash = %bh, error = %error, "Refusing to broadcast rejected local PBFT PREPARE"),
                                                                 }
                                                             }
-                                                        } else {
-                                                            tracing::warn!("Failed to parse own validator key for Prepare sign on {}", bh);
                                                         }
-                                                    } else {
-                                                        tracing::warn!("Failed to hex-decode own validator key for Prepare sign on {}", bh);
+                                                        Err(error) => tracing::error!(block_hash = %bh, error = %error, "Refusing to sign PBFT PREPARE"),
                                                     }
-                                                }
+                                                    }
+                                                    Ok(None) => {}
+                                                    Err(error) => tracing::warn!(error = %error, "Failed to load own validator key for PBFT PREPARE"),
+                                                    }
                                             }
                                         }
                                         }
                                     }
-                                    common::GossipMessage::PbftPrepare { block_hash, validator_id, signature } => {
+                                    common::GossipMessage::PbftPrepare { block_hash, validator_id, signature, pq_signature } => {
+                                        let require_hybrid = {
+                                            let s = state.read().await;
+                                            pbft_vote_requires_hybrid(&s, &block_hash)
+                                        };
                                         let validation = match validate_pbft_phase_message(
                                             &vs_snapshot,
                                             "prepare",
                                             &block_hash,
                                             &validator_id,
                                             &signature,
+                                            pq_signature.as_deref(),
+                                            require_hybrid,
                                         ) {
                                             Ok(sig) => Ok(sig),
                                             Err(PbftValidationError::UnknownValidator) => {
@@ -1923,6 +2008,8 @@ impl P2PNode {
                                                         &block_hash,
                                                         &validator_id,
                                                         &signature,
+                                                        pq_signature.as_deref(),
+                                                        require_hybrid,
                                                     );
                                                     if res.is_ok() {
                                                         let mut s = state.write().await;
@@ -1983,37 +2070,39 @@ impl P2PNode {
                                         );
                                         if let Ok(true) = s.pbft_engine.prepare(&block_hash, &validator_id, sig) {
                                             if s.config.is_validator {
-                                                if let Some(private_key_hex) = &s.config.validator_privkey {
-                                                if let Ok(key_bytes) = hex::decode(private_key_hex) {
-                                                    if let Ok(signing_key) = common::crypto::SigningKey::from_seed(common::crypto::SignatureScheme::Ed25519, &key_bytes) {
-                                                        let our_id = s.config.node_id.clone();
-                                                        match sign_and_record_commit(&mut s, &block_hash, &our_id, &signing_key).await {
-                                                            Ok((commit_msg, finalized)) => {
-                                                                if finalized {
-                                                                    if let Err(error) = apply_finalized_pbft_block(&mut s, &block_hash) {
-                                                                        tracing::error!(block_hash = %block_hash, error = %error, "Failed to apply locally finalized PBFT block");
-                                                                    }
-                                                                }
-                                                                if let Ok(data) = serde_json::to_vec(&commit_msg) {
-                                                                    let topic = libp2p::gossipsub::IdentTopic::new("creg/v1/blocks");
-                                                                    let _ = self.swarm.behaviour_mut().gossipsub.publish(topic, data);
+                                                if let Ok(Some(signing_keys)) = s.config.validator_signing_keys() {
+                                                    let our_id = s.config.node_id.clone();
+                                                    match sign_and_record_commit(&mut s, &block_hash, &our_id, &signing_keys).await {
+                                                        Ok((commit_msg, finalized)) => {
+                                                            if finalized {
+                                                                if let Err(error) = apply_finalized_pbft_block(&mut s, &block_hash) {
+                                                                    tracing::error!(block_hash = %block_hash, error = %error, "Failed to apply locally finalized PBFT block");
                                                                 }
                                                             }
-                                                            Err(error) => tracing::error!(block_hash = %block_hash, error = %error, "Refusing COMMIT without durable PBFT safety state"),
+                                                            if let Ok(data) = serde_json::to_vec(&commit_msg) {
+                                                                let topic = libp2p::gossipsub::IdentTopic::new("creg/v1/blocks");
+                                                                let _ = self.swarm.behaviour_mut().gossipsub.publish(topic, data);
+                                                            }
                                                         }
+                                                        Err(error) => tracing::error!(block_hash = %block_hash, error = %error, "Refusing COMMIT without durable PBFT safety state"),
                                                     }
                                                 }
                                             }
                                         }
-                                        }
                                     }
-                                    common::GossipMessage::PbftCommit { block_hash, validator_id, signature } => {
+                                    common::GossipMessage::PbftCommit { block_hash, validator_id, signature, pq_signature } => {
+                                        let require_hybrid = {
+                                            let s = state.read().await;
+                                            pbft_vote_requires_hybrid(&s, &block_hash)
+                                        };
                                         let validation = match validate_pbft_phase_message(
                                             &vs_snapshot,
                                             "commit",
                                             &block_hash,
                                             &validator_id,
                                             &signature,
+                                            pq_signature.as_deref(),
+                                            require_hybrid,
                                         ) {
                                             Ok(sig) => Ok(sig),
                                             Err(PbftValidationError::UnknownValidator) => {
@@ -2035,6 +2124,8 @@ impl P2PNode {
                                                         &block_hash,
                                                         &validator_id,
                                                         &signature,
+                                                        pq_signature.as_deref(),
+                                                        require_hybrid,
                                                     );
                                                     if res.is_ok() {
                                                         let mut s = state.write().await;
@@ -2203,6 +2294,13 @@ impl P2PNode {
                     if let Some(cmd) = command {
                         match cmd {
                             P2PCommand::Broadcast { topic, data } => {
+                                // ADR-017 decision 4: send each ML-DSA-44
+                                // signature once per message.
+                                let data = if crate::pq_compact::topic_uses_compaction(&topic) {
+                                    crate::pq_compact::compact_if_hybrid(data)
+                                } else {
+                                    data
+                                };
                                 let t = gossipsub::IdentTopic::new(topic);
                                 match self.swarm.behaviour_mut().gossipsub.publish(t, data) {
                                     Ok(_) => {}
@@ -2335,6 +2433,7 @@ mod tests {
                     validator_id: validator.id.clone(),
                     validator_pubkey: validator.pubkey.clone(),
                     signature: hex::encode(signing_key.sign(message.as_bytes()).to_bytes()),
+                    pq_signature: None,
                 });
         }
         transition
@@ -2635,6 +2734,7 @@ mod tests {
                             .sign(conflicting_message.as_bytes())
                             .to_bytes(),
                     ),
+                    pq_signature: None,
                 },
             );
         }
@@ -2805,6 +2905,7 @@ mod tests {
                             .sign(conflicting_message.as_bytes())
                             .to_bytes(),
                     ),
+                    pq_signature: None,
                 });
         }
         assert!(validate_and_persist_transition(
@@ -2925,11 +3026,67 @@ mod tests {
             block_hash,
             "node-pbft",
             &signature,
+            None,
+            false,
         )
         .unwrap();
 
         assert_eq!(result.validator_id, "node-pbft");
         assert_eq!(result.signature, signature);
+        // The same classical vote is refused once hybrid signatures govern
+        // its height.
+        assert_eq!(
+            validate_pbft_phase_message(
+                &validator_set,
+                "prepare",
+                block_hash,
+                "node-pbft",
+                &signature,
+                None,
+                true,
+            )
+            .unwrap_err(),
+            PbftValidationError::SignatureVerificationFailed
+        );
+    }
+
+    #[test]
+    fn validate_pbft_prepare_requires_hybrid_signatures_from_activation() {
+        let hybrid = common::crypto::SigningKey::hybrid_from_seeds(&[9u8; 32], &[90u8; 32]);
+        let mut member = validator("node-pbft", &SigningKey::from_bytes(&[9u8; 32]));
+        member.pq_pubkey = common::validator_signature::validator_mldsa44_pubkey_hex(&hybrid);
+        let validator_set = common::ValidatorSet::new(vec![member]);
+        let block_hash = "abc123blockhash";
+        let message = consensus::pbft::pbft_signature_message("prepare", block_hash);
+        let (signature, pq_signature) =
+            common::validator_signature::sign_validator_message(&hybrid, message.as_bytes());
+
+        let result = validate_pbft_phase_message(
+            &validator_set,
+            "prepare",
+            block_hash,
+            "node-pbft",
+            &signature,
+            pq_signature.as_deref(),
+            true,
+        )
+        .unwrap();
+        assert_eq!(result.pq_signature, pq_signature);
+        for (pq, require_hybrid) in [(None, true), (pq_signature.as_deref(), false)] {
+            assert_eq!(
+                validate_pbft_phase_message(
+                    &validator_set,
+                    "prepare",
+                    block_hash,
+                    "node-pbft",
+                    &signature,
+                    pq,
+                    require_hybrid,
+                )
+                .unwrap_err(),
+                PbftValidationError::SignatureVerificationFailed
+            );
+        }
     }
 
     #[test]
@@ -3078,6 +3235,8 @@ mod tests {
             block_hash,
             "node-pbft",
             &wrong_domain_sig,
+            None,
+            false,
         )
         .unwrap_err();
 
@@ -3096,6 +3255,8 @@ mod tests {
             "block-1",
             "missing-validator",
             &signature,
+            None,
+            false,
         )
         .unwrap_err();
 
@@ -3107,9 +3268,16 @@ mod tests {
         let signing_key = SigningKey::from_bytes(&[9u8; 32]);
         let validator_set = common::ValidatorSet::new(vec![validator("node-pbft", &signing_key)]);
 
-        let error =
-            validate_pbft_phase_message(&validator_set, "prepare", "block-1", "node-pbft", "zzzz")
-                .unwrap_err();
+        let error = validate_pbft_phase_message(
+            &validator_set,
+            "prepare",
+            "block-1",
+            "node-pbft",
+            "zzzz",
+            None,
+            false,
+        )
+        .unwrap_err();
 
         assert_eq!(error, PbftValidationError::SignatureVerificationFailed);
     }

@@ -355,6 +355,7 @@ mod consensus_tests {
                 stake: 1_000_000,
                 reputation: 75,
                 is_active: true,
+                pq_pubkey: None,
             }
         }
 

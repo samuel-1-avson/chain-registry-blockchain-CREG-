@@ -1952,6 +1952,7 @@ async fn submit_validator_set_transition(
                     &s.config.data_dir,
                     snapshot,
                     &previous,
+                    s.config.vote_v4_activation_height,
                 )
             };
             record_result.map_err(|error| {
@@ -6093,6 +6094,7 @@ mod tests {
                 validator_id: signer_id,
                 validator_pubkey: signer_pubkey,
                 signature: hex::encode(signing_key.sign(message.as_bytes()).to_bytes()),
+                pq_signature: None,
             });
         checkpoint
     }

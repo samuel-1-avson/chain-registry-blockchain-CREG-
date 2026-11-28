@@ -18,6 +18,11 @@ pub struct ValidatorSetTransitionSignature {
     pub validator_id: String,
     pub validator_pubkey: String,
     pub signature: String,
+    /// ADR-017 ML-DSA-44 component of `signature`. Required when the
+    /// transition's `effective_from_height` is at or above the hybrid
+    /// activation height, absent (and omitted) below it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pq_signature: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -210,12 +215,63 @@ impl AuthenticatedValidatorSetSnapshot {
             if !is_lower_hex(&witness.signature, 128) {
                 return Err("validator-set transition witness has a malformed signature");
             }
+            if witness.pq_signature.as_deref().is_some_and(|pq| {
+                crate::validator_signature::validate_mldsa44_signature_hex(pq).is_err()
+            }) {
+                return Err("validator-set transition witness has a malformed ML-DSA-44 signature");
+            }
         }
         Ok(())
     }
 
-    pub fn validate_against(&self, previous: &ValidatorSet) -> Result<(), &'static str> {
-        use crate::crypto::{PublicKey, Signature, SignatureScheme, VerifyMode};
+    /// Verify the transition against the preceding set. The signature scheme
+    /// follows ADR-017's height rule for `effective_from_height`: Ed25519
+    /// below `hybrid_activation_height`, hybrid Ed25519 + ML-DSA-44 at and
+    /// above it. Every transition received from a peer, an API client or a
+    /// local signer is checked with this function.
+    pub fn validate_against(
+        &self,
+        previous: &ValidatorSet,
+        hybrid_activation_height: Option<u64>,
+    ) -> Result<(), &'static str> {
+        self.validate_against_scheme(
+            previous,
+            crate::validator_signature::hybrid_signatures_required(
+                hybrid_activation_height,
+                self.effective_from_height,
+            ),
+        )
+    }
+
+    /// Whether every signature in the witness carries an ML-DSA-44 half.
+    /// `None` when the witness mixes the two schemes, which is never valid.
+    pub fn witness_is_hybrid(&self) -> Option<bool> {
+        let mut schemes = self
+            .transition_signatures
+            .iter()
+            .map(|signature| signature.pq_signature.is_some());
+        let first = schemes.next().unwrap_or(false);
+        schemes.all(|hybrid| hybrid == first).then_some(first)
+    }
+
+    /// Re-verify a transition from this node's own persisted history, which
+    /// [`Self::validate_against`] already accepted under the height rule
+    /// before it was written. The scheme is read from the witness (uniformly
+    /// hybrid or uniformly Ed25519), so a reader does not need the activation
+    /// height. Callers must also refuse a classical transition after a hybrid
+    /// one. This is a local integrity check, not the consensus rule.
+    pub fn validate_against_recorded(&self, previous: &ValidatorSet) -> Result<(), &'static str> {
+        let hybrid = self
+            .witness_is_hybrid()
+            .ok_or("validator-set transition witness mixes signature schemes")?;
+        self.validate_against_scheme(previous, hybrid)
+    }
+
+    fn validate_against_scheme(
+        &self,
+        previous: &ValidatorSet,
+        require_hybrid: bool,
+    ) -> Result<(), &'static str> {
         use std::collections::{HashMap, HashSet};
 
         self.validate_structure()?;
@@ -243,22 +299,27 @@ impl AuthenticatedValidatorSetSnapshot {
             if validator.pubkey != signature.validator_pubkey {
                 return Err("validator-set transition signer public key does not match");
             }
-            let Ok(pubkey) = hex::decode(&validator.pubkey) else {
-                return Err("validator-set transition signer public key is malformed");
-            };
-            let Ok(signature_bytes) = hex::decode(&signature.signature) else {
-                return Err("validator-set transition signature is malformed");
-            };
-            let Ok(pubkey) = PublicKey::from_bytes(SignatureScheme::Ed25519, &pubkey) else {
-                return Err("validator-set transition signer public key is malformed");
-            };
-            let Ok(signature) = Signature::from_bytes(SignatureScheme::Ed25519, &signature_bytes)
-            else {
-                return Err("validator-set transition signature is malformed");
-            };
-            if pubkey
-                .verify(message.as_bytes(), &signature, VerifyMode::Strict)
-                .is_err()
+            if require_hybrid && validator.pq_pubkey.is_none() {
+                return Err(
+                    "validator-set transition signer has no ML-DSA-44 key after hybrid activation",
+                );
+            }
+            if require_hybrid != signature.pq_signature.is_some() {
+                return Err(if require_hybrid {
+                    "validator-set transition signature lacks its ML-DSA-44 component after hybrid activation"
+                } else {
+                    "validator-set transition signature carries an ML-DSA-44 component before hybrid activation"
+                });
+            }
+            if crate::validator_signature::verify_validator_signature(
+                &validator.pubkey,
+                validator.pq_pubkey.as_deref(),
+                message.as_bytes(),
+                &signature.signature,
+                signature.pq_signature.as_deref(),
+                require_hybrid,
+            )
+            .is_err()
             {
                 return Err("validator-set transition signature is invalid");
             }
@@ -390,9 +451,10 @@ mod tests {
                     validator_id: format!("v{index}"),
                     validator_pubkey: hex::encode(key.verifying_key().as_bytes()),
                     signature: hex::encode(key.sign(message.as_bytes()).to_bytes()),
+                    pq_signature: None,
                 });
         }
-        assert!(snapshot.validate_against(&previous).is_ok());
+        assert!(snapshot.validate_against(&previous, None).is_ok());
 
         let mut alternate_witness = snapshot.clone();
         alternate_witness.transition_signatures.clear();
@@ -404,9 +466,10 @@ mod tests {
                     validator_id: format!("v{index}"),
                     validator_pubkey: hex::encode(key.verifying_key().as_bytes()),
                     signature: hex::encode(key.sign(message.as_bytes()).to_bytes()),
+                    pq_signature: None,
                 });
         }
-        assert!(alternate_witness.validate_against(&previous).is_ok());
+        assert!(alternate_witness.validate_against(&previous, None).is_ok());
         assert_eq!(
             validator_snapshot_certificate_hash(&snapshot),
             validator_snapshot_certificate_hash(&alternate_witness),
@@ -425,29 +488,32 @@ mod tests {
                 validator_id: "v3".into(),
                 validator_pubkey: hex::encode(keys[3].verifying_key().as_bytes()),
                 signature: "00".repeat(64),
+                pq_signature: None,
             });
         assert!(
-            quorum_plus_invalid.validate_against(&previous).is_err(),
+            quorum_plus_invalid
+                .validate_against(&previous, None)
+                .is_err(),
             "a valid quorum must not hide an invalid declared witness"
         );
 
         let mut duplicate_previous_id = previous.clone();
         duplicate_previous_id.validators[1].id = duplicate_previous_id.validators[0].id.clone();
         assert_eq!(
-            snapshot.validate_against(&duplicate_previous_id),
+            snapshot.validate_against(&duplicate_previous_id, None),
             Err("validator set contains duplicate validator identities")
         );
         let mut duplicate_previous_pubkey = previous.clone();
         duplicate_previous_pubkey.validators[1].pubkey =
             duplicate_previous_pubkey.validators[0].pubkey.clone();
         assert_eq!(
-            snapshot.validate_against(&duplicate_previous_pubkey),
+            snapshot.validate_against(&duplicate_previous_pubkey, None),
             Err("validator set contains duplicate validator public keys")
         );
         let mut malformed_previous_non_signer = previous.clone();
         malformed_previous_non_signer.validators[3].pubkey = "not-ed25519".into();
         assert_eq!(
-            snapshot.validate_against(&malformed_previous_non_signer),
+            snapshot.validate_against(&malformed_previous_non_signer, None),
             Err("validator set contains a non-canonical Ed25519 public key")
         );
         let mut duplicate_next_pubkey = snapshot.clone();
@@ -458,26 +524,26 @@ mod tests {
             .validators
             .push(duplicate_member);
         assert_eq!(
-            duplicate_next_pubkey.validate_against(&previous),
+            duplicate_next_pubkey.validate_against(&previous, None),
             Err("validator set contains duplicate validator public keys")
         );
         let mut malformed_next_pubkey = snapshot.clone();
         malformed_next_pubkey.validators.validators[0].pubkey = "ab".repeat(31);
         assert_eq!(
-            malformed_next_pubkey.validate_against(&previous),
+            malformed_next_pubkey.validate_against(&previous, None),
             Err("validator set contains a non-canonical Ed25519 public key")
         );
         let mut empty_next_id = snapshot.clone();
         empty_next_id.validators.validators[0].id.clear();
         assert_eq!(
-            empty_next_id.validate_against(&previous),
+            empty_next_id.validate_against(&previous, None),
             Err("validator set contains an empty validator identity")
         );
         let mut oversized_next = snapshot.clone();
         oversized_next.validators.validators =
             vec![snapshot.validators.validators[0].clone(); MAX_VALIDATOR_SET_MEMBERS + 1];
         assert_eq!(
-            oversized_next.validate_against(&previous),
+            oversized_next.validate_against(&previous, None),
             Err("validator set exceeds the protocol member limit")
         );
 
@@ -496,6 +562,128 @@ mod tests {
         .is_err());
 
         snapshot.effective_from_height += 1;
-        assert!(snapshot.validate_against(&previous).is_err());
+        assert!(snapshot.validate_against(&previous, None).is_err());
+    }
+
+    #[test]
+    fn transition_signatures_follow_the_hybrid_activation_height() {
+        use crate::crypto::SigningKey as HybridSigningKey;
+        use crate::validator_signature::{sign_validator_message, validator_mldsa44_pubkey_hex};
+
+        // Four previous members, each with an independent ML-DSA-44 key.
+        let keys: Vec<HybridSigningKey> = (0u8..4)
+            .map(|i| HybridSigningKey::hybrid_from_seeds(&[i + 1; 32], &[i + 101; 32]))
+            .collect();
+        let ed_keys: Vec<HybridSigningKey> = (0u8..4)
+            .map(|i| HybridSigningKey::from_ed25519_seed(&[i + 1; 32]))
+            .collect();
+        let previous = ValidatorSet::new(
+            keys.iter()
+                .enumerate()
+                .map(|(i, key)| Validator {
+                    id: format!("v{i}"),
+                    alias: format!("v{i}"),
+                    pubkey: hex::encode(key.public_key().ed25519_bytes()),
+                    eth_address: format!("0x{i}"),
+                    stake: 100,
+                    reputation: 100,
+                    status: "active".into(),
+                    performance_score: 500,
+                    contribution_count: 0,
+                    pq_pubkey: validator_mldsa44_pubkey_hex(key),
+                })
+                .collect(),
+        );
+        let next = ValidatorSet::new(vec![validator("next", &SigningKey::generate(&mut OsRng))]);
+        let unsigned = AuthenticatedValidatorSetSnapshot {
+            schema_version: VALIDATOR_SNAPSHOT_SCHEMA_VERSION,
+            effective_from_height: 10,
+            previous_block_hash: "a".repeat(64),
+            previous_validator_set_hash: canonical_validator_set_hash(&previous),
+            validator_set_hash: canonical_validator_set_hash(&next),
+            validators: next,
+            transition_signatures: vec![],
+        };
+        let message = validator_set_transition_message(&unsigned);
+        let signed_with = |signers: &[HybridSigningKey]| {
+            let mut snapshot = unsigned.clone();
+            for (index, key) in signers.iter().take(3).enumerate() {
+                let (signature, pq_signature) = sign_validator_message(key, message.as_bytes());
+                snapshot
+                    .transition_signatures
+                    .push(ValidatorSetTransitionSignature {
+                        validator_id: format!("v{index}"),
+                        validator_pubkey: hex::encode(key.public_key().ed25519_bytes()),
+                        signature,
+                        pq_signature,
+                    });
+            }
+            snapshot
+        };
+        let classical = signed_with(&ed_keys);
+        let hybrid = signed_with(&keys);
+
+        // effective_from_height 10: classical below activation 11, hybrid at
+        // activation 10 and above.
+        assert!(classical.validate_against(&previous, None).is_ok());
+        assert!(classical.validate_against(&previous, Some(11)).is_ok());
+        assert!(classical.validate_against(&previous, Some(10)).is_err());
+        assert!(hybrid.validate_against(&previous, Some(10)).is_ok());
+        assert!(hybrid.validate_against(&previous, Some(3)).is_ok());
+        assert!(hybrid.validate_against(&previous, Some(11)).is_err());
+        assert!(hybrid.validate_against(&previous, None).is_err());
+
+        // Persisted history is re-checked under the scheme its witness uses.
+        assert_eq!(classical.witness_is_hybrid(), Some(false));
+        assert_eq!(hybrid.witness_is_hybrid(), Some(true));
+        assert!(classical.validate_against_recorded(&previous).is_ok());
+        assert!(hybrid.validate_against_recorded(&previous).is_ok());
+        let mut mixed = hybrid.clone();
+        mixed.transition_signatures[0] = classical.transition_signatures[0].clone();
+        assert_eq!(mixed.witness_is_hybrid(), None);
+        assert_eq!(
+            mixed.validate_against_recorded(&previous),
+            Err("validator-set transition witness mixes signature schemes")
+        );
+
+        // A stripped ML-DSA-44 half is neither hybrid nor a valid classical
+        // signature, because the Ed25519 half signs M'.
+        let mut stripped = hybrid.clone();
+        for signature in &mut stripped.transition_signatures {
+            signature.pq_signature = None;
+        }
+        assert!(stripped.validate_against(&previous, Some(10)).is_err());
+        assert!(stripped.validate_against(&previous, None).is_err());
+
+        // A malformed component is refused before verification.
+        let mut malformed = hybrid.clone();
+        malformed.transition_signatures[0].pq_signature = Some("ab".repeat(10));
+        assert_eq!(
+            malformed.validate_structure(),
+            Err("validator-set transition witness has a malformed ML-DSA-44 signature")
+        );
+
+        // A signer without an enrolled ML-DSA-44 key cannot sign after
+        // activation.
+        let mut unenrolled = previous.clone();
+        unenrolled.validators[0].pq_pubkey = None;
+        let mut rebound = unsigned.clone();
+        rebound.previous_validator_set_hash = canonical_validator_set_hash(&unenrolled);
+        let rebound_message = validator_set_transition_message(&rebound);
+        for (index, key) in keys.iter().take(3).enumerate() {
+            let (signature, pq_signature) = sign_validator_message(key, rebound_message.as_bytes());
+            rebound
+                .transition_signatures
+                .push(ValidatorSetTransitionSignature {
+                    validator_id: format!("v{index}"),
+                    validator_pubkey: hex::encode(key.public_key().ed25519_bytes()),
+                    signature,
+                    pq_signature,
+                });
+        }
+        assert_eq!(
+            rebound.validate_against(&unenrolled, Some(10)),
+            Err("validator-set transition signer has no ML-DSA-44 key after hybrid activation")
+        );
     }
 }

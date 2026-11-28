@@ -49,7 +49,9 @@ pub const HYBRID_MLDSA_CONTEXT: &[u8] = b"creg-hybrid-sig-v1";
 /// Domain-separation prefix used to compute [`PublicKey::key_id`].
 pub const KEY_ID_DOMAIN_PREFIX: &[u8] = b"creg-key-id-v1";
 
-fn hybrid_message(message: &[u8]) -> Vec<u8> {
+/// `M' = "creg-hybrid-sig-v1" || 0x00 || message`: the bytes both halves of a
+/// [`SignatureScheme::HybridEd25519MlDsa44V1`] signature cover.
+pub fn hybrid_message(message: &[u8]) -> Vec<u8> {
     let mut m_prime = Vec::with_capacity(HYBRID_DOMAIN_PREFIX.len() + 1 + message.len());
     m_prime.extend_from_slice(HYBRID_DOMAIN_PREFIX);
     m_prime.push(0x00);
