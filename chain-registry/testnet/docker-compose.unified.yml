@@ -34,7 +34,7 @@ services:
       CREG_PUBLIC_FAUCET_HOST: ${CREG_PUBLIC_FAUCET_HOST:-faucet.testnet.cregnet.dev}
       # ADR-019 ECA-38: /sepolia and faucet /rpc go through the explorer's
       # method-allowlisted /rpc gateway; Caddy no longer proxies to an L1 RPC itself.
-      CREG_EXPLORER_RPC_GATEWAY: ${CREG_EXPLORER_RPC_GATEWAY:-creg-explorer-public-r27-stage:80}
+      CREG_EXPLORER_RPC_GATEWAY: ${CREG_EXPLORER_RPC_GATEWAY:-creg-explorer-public-r28:80}
       CREG_3NODE_EXPLORER_PORT: "80"
       CREG_3NODE_SPEC_HOST_PORT: "80"
       CREG_3NODE_IPFS_HOST_PORT: "5001"

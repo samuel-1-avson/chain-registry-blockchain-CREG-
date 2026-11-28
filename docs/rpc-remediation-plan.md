@@ -35,6 +35,8 @@ Related: [RPC-ALLOWLIST-REDEPLOY.md](../chain-registry/testnet/RPC-ALLOWLIST-RED
 | R-21 | Low | Tests | `json_rpc.rs` has 4 unit tests. Nothing covers batch, id types, body cap, the rate-limit class or CORS, and there is no post-deploy probe (which is why R-01 went unnoticed). | Code | 0, 2 |
 | R-22 | Low | Security | `creg testnet stake-*` passes the signing key to Foundry `cast` on argv (ADR-019 gap 1). | ADR | 6 |
 | R-23 | Med | Node | `CREG_TRUSTED_PROXIES` accepts exact IPs only, with no CIDR support, and Docker assigns container IPs dynamically. Trusting Caddy therefore needs a pinned container IP or CIDR support. The faucet already accepts CIDRs (`FAUCET_TRUSTED_PROXY_CIDRS`). | Code (`rate_limit.rs:49`) | 2 |
+| R-24 | High | Edge | `https://api.testnet.cregnet.dev/metrics` returns the node's Prometheus metrics to anyone (HTTP 200, 249 lines). The VM's local Caddyfile has `handle /metrics { reverse_proxy …node }`; the repo version answers 403 (ECA-39). | Live + VM capture | 1 |
+| R-25 | Med | Process | The edge VM runs a September checkout (`0e00734`) with uncommitted Caddy and compose edits. It also runs explorers r25, r25-canary, r26 and r27-stage, and the legacy `creg-unified-node`, none of which Caddy routes to. The live explorer, r28, was started by hand (no compose labels). | VM capture | 1, 6 |
 
 ---
 
@@ -56,6 +58,13 @@ Phases 2 and 3 touch different crates (`node` and `common`) and can run in paral
 
 **Status, 2026-11-27.** 0.2 is done: the baseline is in [`docs/testnet-heal-evidence/2026-11-27-rpc-phase0-baseline/`](testnet-heal-evidence/2026-11-27-rpc-phase0-baseline/README.md). 0.3 is answered from config (the variable is unset everywhere). 0.4 has an inventory and a proposed canonical path. 0.1 and 0.5 need `chain-registry/testnet/gcp/capture-rpc-edge-state.sh` run on the VM.
 
+**VM capture, 2026-11-27 (`creg-testnet-vm`, us-central1-b).** Phase 0 is complete.
+- **Upstream (0.5):** the active Caddy config proxies `/sepolia` and the explorer and faucet `/rpc` straight to `ethereum-sepolia-rpc.publicnode.com:443`. Nothing goes through an explorer gateway.
+- **Live explorer:** `creg-explorer-public-r28`. Its image has the allowlist module, but its Sepolia upstream is `https://api.testnet.cregnet.dev`, the edge itself. The repo's Caddy files named r27-stage, whose image has no allowlist; they now name r28.
+- **Trusted proxies (0.3):** `CREG_TRUSTED_PROXIES` is unset on o1 and on `creg-unified-node`, so the shared bucket is confirmed live. o1's L1 RPC is publicnode alone, with no fallbacks; the local `observer.docker-env` is stale.
+- **Network:** o1 publishes its API on `0.0.0.0:18080` and `creg-unified-node` on `0.0.0.0:28182`, but no firewall rule opens either port to the internet (the VM's tag is `creg-testnet`). Only VPC-internal and on-VM clients can reach them. Trusting the Docker network `172.21.0.0/16`, which holds Caddy (`.10`) and r28 (`.16`), is therefore safe once the Phase 2 image is deployed.
+- **New findings:** R-24 (public `/metrics`) and R-25 (VM drift and stale containers).
+
 ### Phase 1: close the open proxy (2–3 days)
 
 1. Execute `RPC-ALLOWLIST-REDEPLOY.md` (rebuild the image if step 0 requires it, stage, promote, then reload Caddy).
@@ -63,6 +72,20 @@ Phases 2 and 3 touch different crates (`node` and `common`) and can run in paral
 3. Run the probe against every public host.
 
 **Done when:** the probe passes on `api`, `rpc`, `explorer` and `faucet` hosts: `eth_getLogs` and `web3_clientVersion` return 403, the descriptors say "allowlisted", and `creg_*` is unchanged. **Rollback:** restore the saved Caddy files and the previous explorer digest.
+
+**Status, 2026-11-27 17:01Z: done.**
+- The cutover ran with stamp `20261127T170110Z`. The public probe went from PASS 13 / FAIL 33 to **PASS 41 / FAIL 5**, and every R-01 and R-14 check passes on all four Sepolia surfaces.
+- `api…/metrics` now returns 403, which closes R-24.
+- The explorer, faucet, spec and API health endpoints all answer 200.
+- Evidence: [`docs/testnet-heal-evidence/2026-11-27-rpc-phase1-cutover/`](testnet-heal-evidence/2026-11-27-rpc-phase1-cutover/README.md).
+- Rollback on the VM: `bash ~/creg-rpc-phase1/rollback-r28-allowlist.sh 20261127T170110Z`.
+- R-13 (legacy cloud-edge nginx configs) affects no running container (the capture found no `creg-cloud-*` explorer), so it moves to the Phase 6 cleanup.
+
+How Phase 1 was done:
+- **Staging:** `testnet/phase-c/stage-r28-allowlist.sh` started a copy of r28 on `127.0.0.1:3031` (same image, same node and indexer settings, upstream publicnode). It passed all 12 checks: explorer page, node health, GET 405, `eth_chainId`, `eth_blockNumber`, `eth_call`, `eth_getLogs` 403, `web3_clientVersion` 403, batch with a denied method 403, batch of 21 400, malformed body 400, and 70 KiB 413.
+- **Cutover:** `testnet/phase-c/cutover-r28-allowlist.sh` recreates r28 with that upstream and checks it before touching Caddy. It then installs the repo's `Caddyfile.unified` and `sepolia-public-rpc.caddy` in place, with backups, validates, and reloads. The same reload closes R-24 (`/metrics` becomes 403).
+- **Rollback:** `testnet/phase-c/rollback-r28-allowlist.sh STAMP`.
+- **Gateway upstream:** stays publicnode, the provider that serves today, so the cutover changes enforcement, not who answers. Moving to CREG-run nodes is Phase 3 (3.3, 3.4).
 
 ### Phase 2: native RPC fixes (`crates/node`, about 1 week)
 
@@ -81,7 +104,14 @@ Phases 2 and 3 touch different crates (`node` and `common`) and can run in paral
 
 **Done when:** the new tests pass, 31 calls in a minute from one IP return 200, a 429 parses as a JSON-RPC error, and `creg_health` shows tip age.
 
-**Status, 2026-11-27: implemented and tested in Linux Docker.** The laptop has no Visual Studio Build Tools, so the run used a test image that mirrors the builder stage of `chain-registry/Dockerfile` (Ubuntu 24.04, Rust 1.98.1, clang-17).
+**Deployed, 2026-11-27 21:47Z, to the public observer o1.**
+- Image: `creg-node@sha256:403144636cb1…`, source `b02c765`, Dockerfile target `node-runtime`, with `CREG_TRUSTED_PROXIES=172.21.0.0/16`.
+- The public probe is **PASS 47 / FAIL 0**. R-03, R-06 and R-08 are closed on the live node, and R-04 and R-23 are closed for o1, which now rate-limits per real client.
+- Evidence: [`docs/testnet-heal-evidence/2026-11-27-rpc-phase2-deploy/`](testnet-heal-evidence/2026-11-27-rpc-phase2-deploy/README.md).
+- Rollback: `bash ~/creg-rpc-phase2/rollback-o1-image.sh 20261127T214703Z`.
+- Still on v4, unchanged: the validators and the legacy `creg-unified-node`. They serve no public RPC.
+
+**Status before deploy: implemented and tested in Linux Docker.** The laptop has no Visual Studio Build Tools, so the run used a test image that mirrors the builder stage of `chain-registry/Dockerfile` (Ubuntu 24.04, Rust 1.98.1, clang-17).
 - Filtered node lib tests (`json_rpc rate_limit metrics public_v4`): **56 passed, 0 failed.** Every new test ran.
 - Full node lib suite: **363 passed, 1 failed.** The failure, `authority_adapter::…rejection_sidecar…`, needs a Node.js runtime, which the image does not have. It is unrelated.
 - `cargo check --bins`: passes (this includes the uncommitted `main.rs` / `p2p.rs` edits).
@@ -175,7 +205,7 @@ Still open in Phase 3:
 2. **Gateway upstream.** Recommend node A now, node B once it passes acceptance. Alternative: the third-party default.
 3. **Bounded `eth_getLogs` on the public gateway.** Recommend no for now (ADR-019 excludes it on purpose); revisit in Phase 4.
 4. **`eth_*` compatibility for CREG itself.** Recommend no: CREG is not an EVM chain. Ship an OpenRPC spec and the CLI instead.
-5. **Who runs the live `/sepolia` upstream?** Needed before Phase 1 so the new upstream can replace it knowingly. The probe shows a mixed Geth/reth pool behind Cloudflare; the `active_upstreams` line from the VM capture names it.
+5. **Who runs the live `/sepolia` upstream?** Needed before Phase 1 so the new upstream can replace it knowingly. Answered by the VM capture: `ethereum-sepolia-rpc.publicnode.com` (a mixed Geth/reth pool behind Cloudflare).
 
 ## 4. Not covered
 
