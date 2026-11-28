@@ -146,12 +146,15 @@ function updateButtons() {
   switchAccount.disabled = !wallet || busy;
   rescanWallets.disabled = busy;
   const identityReady = Boolean(connected && enrollment && !enrollment.identity_conflict);
+  // A registered validator signs again to add its ML-DSA-44 key (ADR-017).
+  const needsRegistration = !enrollment?.registered
+    || Boolean(config?.pq_key_fingerprint && !enrollment?.pq_registered);
   const confirmIdentity = byId("confirm-identity");
-  confirmIdentity.disabled = !identityReady || busy || Boolean(enrollment?.registered);
+  confirmIdentity.disabled = !identityReady || busy || !needsRegistration;
   stake.disabled = !identityReady || config?.manage_existing || busy || Boolean(pendingHash) || !canApply
     || walletState.balance < walletState.minimum || walletState.gas === 0n;
   register.disabled = !identityReady || busy || ![1, 2].includes(walletState.application)
-    || enrollment.registered || !confirmIdentity.checked;
+    || !needsRegistration || !confirmIdentity.checked;
   refreshButton.disabled = !wallet || busy;
   start.disabled = busy || !identityReady || !enrollment.registered || enrollment.launch_status === "starting"
     || enrollment.local_node !== "Local node unavailable";
@@ -227,7 +230,10 @@ async function refresh() {
     byId("stake-detail").textContent = "The R7 contract requires " + amount(walletState.minimum)
       + " tCREG and Sepolia ETH for gas. Application: "
       + (["None", "Pending", "Active", "Unbonding", "Withdrawn", "Rejected", "Expired"][walletState.application] || "Unknown");
-    byId("registration").textContent = enrollment.registered ? "Identity registered" : "Awaiting signed registration";
+    byId("registration").textContent = !enrollment.registered ? "Awaiting signed registration"
+      : enrollment.pq_registered ? "Identity and ML-DSA-44 key registered"
+      : config.pq_key_fingerprint ? "Identity registered. Sign again to add the ML-DSA-44 key (the R7 node must support ADR-017 key binding)."
+      : "Identity registered";
     const adm = enrollment.admission;
     byId("admission").textContent = enrollment.admitted ? "Active in the validator set"
       : adm?.stage ? adm.stage.replaceAll("_", " ")
@@ -582,6 +588,7 @@ api("config").then((result) => {
   config = result;
   byId("identity-node").textContent = config.node_id;
   byId("identity-key").textContent = config.public_key;
+  byId("identity-pq").textContent = config.pq_key_fingerprint || "Not configured";
   byId("stake-section").hidden = config.manage_existing;
   if (config.manage_existing) {
     document.title = "Manage CREG validator";

@@ -16,10 +16,18 @@
 // The Ed25519 key always comes from --ed-key-file (raw 32-byte hex, e.g. the
 // validator.key produced by `creg keygen validator` with an empty passphrase).
 //
+// ADR-017: --pq-binding-file adds the validator's ML-DSA-44 key. It is the
+// JSON printed by `cargo run -p chain-registry-cli --example
+// sign_validator_identity -- ... --validator-pq-key-hex <seed>` (for the same
+// node ID, Ed25519 key and chain ID), holding pq_pubkey and
+// pq_binding_signature. A validator already in the set re-registers with it
+// to have the network enrol the key.
+//
 // Usage:
 //   node register-validator.js --node-url http://127.0.0.1:8080 \
 //     --node-id validator-1 --ed-key-file ~/.creg-validator/validator.key \
-//     --evm-key-file ~/.creg-validator/evm.key [--alias "my validator"]
+//     --evm-key-file ~/.creg-validator/evm.key [--alias "my validator"] \
+//     [--pq-binding-file binding.json]
 //   node register-validator.js --selftest   # no network, verifies crypto wiring
 // ==============================================================================
 
@@ -67,6 +75,21 @@ function edVerify(pubkeyHex, message, sigHex) {
   ]);
   const pub = crypto.createPublicKey({ key: spki, format: 'der', type: 'spki' });
   return crypto.verify(null, Buffer.from(message, 'utf8'), pub, Buffer.from(sigHex, 'hex'));
+}
+
+// ADR-017 compact key binding: a 1,312-byte ML-DSA-44 key and a 2,484-byte
+// hybrid signature, both as lowercase hex.
+function parsePqBinding(value, edPubkey, label) {
+  const pqPubkey = value && value.pq_pubkey;
+  const signature = value && value.pq_binding_signature;
+  if (typeof pqPubkey !== 'string' || !/^[0-9a-f]{2624}$/.test(pqPubkey)
+    || typeof signature !== 'string' || !/^[0-9a-f]{4968}$/.test(signature)) {
+    throw new Error(`${label} must hold pq_pubkey (2,624 lowercase hex chars) and pq_binding_signature (4,968)`);
+  }
+  if (value.ed25519_pubkey && value.ed25519_pubkey.toLowerCase() !== edPubkey.toLowerCase()) {
+    throw new Error(`${label} was signed for a different Ed25519 key`);
+  }
+  return { pq_pubkey: pqPubkey, pq_binding_signature: signature };
 }
 
 function buildMessage({ chainId, evmAddress, nodeId, edPubkey, nonce }) {
@@ -123,7 +146,23 @@ async function selftest() {
     'ed25519_pubkey:ab6d12be97e73d2090ada1042b274c9020f395a798e2ce82cc1dbd711d0643ab\n' +
     'nonce:abc123';
   if (msg !== expected) throw new Error(`message format mismatch:\n${msg}`);
-  console.log('selftest: Ed25519 round-trip OK, message format OK');
+  // 3. ADR-017 key-binding input is checked before anything is sent.
+  const binding = { pq_pubkey: 'ab'.repeat(1312), pq_binding_signature: 'cd'.repeat(2484), ed25519_pubkey: pub };
+  const parsed = parsePqBinding(binding, pub, 'selftest');
+  if (parsed.pq_pubkey !== binding.pq_pubkey || Object.keys(parsed).length !== 2) {
+    throw new Error('key binding parse dropped or added fields');
+  }
+  for (const bad of [
+    { ...binding, pq_pubkey: 'AB'.repeat(1312) },
+    { ...binding, pq_binding_signature: 'cd'.repeat(2483) },
+    { ...binding, ed25519_pubkey: '00'.repeat(32) },
+    { pq_pubkey: binding.pq_pubkey },
+  ]) {
+    let rejected = false;
+    try { parsePqBinding(bad, pub, 'selftest'); } catch (_) { rejected = true; }
+    if (!rejected) throw new Error('malformed key binding accepted');
+  }
+  console.log('selftest: Ed25519 round-trip OK, message format OK, key binding input OK');
 }
 
 async function main() {
@@ -142,6 +181,11 @@ async function main() {
   const edSeed = readHexFile(edKeyFile, 'Ed25519 key', 32);
   const edPubkey = edPubkeyHex(edSeed);
   console.log(`Ed25519 pubkey: ${edPubkey}  (compare with your keygen output)`);
+  const pqBindingFile = arg('pq-binding-file', undefined);
+  const pqBinding = pqBindingFile
+    ? parsePqBinding(JSON.parse(fs.readFileSync(pqBindingFile, 'utf8')), edPubkey, pqBindingFile)
+    : {};
+  if (pqBindingFile) console.log('ML-DSA-44 key binding: included');
 
   let evmAddress, evmSignature;
   const manualSig = arg('evm-signature', undefined);
@@ -185,6 +229,7 @@ async function main() {
     evm_signature: '0x' + evmSignature,
     ed25519_signature: edSignature,
     ...(alias ? { alias } : {}),
+    ...pqBinding,
   };
   const res = await fetch(`${nodeUrl.replace(/\/$/, '')}/v1/validator/register`, {
     method: 'POST',

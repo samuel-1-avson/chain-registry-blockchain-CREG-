@@ -3849,6 +3849,8 @@ async fn get_validator_profile(
             "evm_address": validator.eth_address,
             "ed25519_pubkey": validator.pubkey,
             "stake_creg": validator.stake,
+            // ADR-017: the certified ML-DSA-44 key, once enrolled.
+            "pq_pubkey": validator.pq_pubkey,
         })),
         "registration_conflict": registration_conflict,
         "in_active_set": in_active_set,
