@@ -163,6 +163,7 @@ fn validate_peer_transition_certificate_chain(
     history: &PeerTransitionHistory,
     bootstrap: &ValidatorSet,
     checkpoint: Option<&AuthenticatedValidatorSetSnapshot>,
+    hybrid_activation_height: Option<u64>,
 ) -> Result<(), String> {
     if history.transitions.len() > MAX_TRANSITION_HISTORY_ENTRIES {
         return Err("validator-set transition history exceeds the entry limit".into());
@@ -209,7 +210,7 @@ fn validate_peer_transition_certificate_chain(
     };
     for transition in history.transitions.iter().skip(first_untrusted_index) {
         transition
-            .validate_against(&authority)
+            .validate_against(&authority, hybrid_activation_height)
             .map_err(|error| format!("invalid transition certificate: {error}"))?;
         authority = transition.validators.clone();
     }
@@ -246,8 +247,14 @@ fn validate_peer_transition_history(
     checkpoint: Option<&AuthenticatedValidatorSetSnapshot>,
     canonical_tip: u64,
     canonical_anchors: &HashMap<u64, String>,
+    hybrid_activation_height: Option<u64>,
 ) -> Result<(), String> {
-    validate_peer_transition_certificate_chain(history, bootstrap, checkpoint)?;
+    validate_peer_transition_certificate_chain(
+        history,
+        bootstrap,
+        checkpoint,
+        hybrid_activation_height,
+    )?;
     validate_peer_transition_anchors(history, canonical_tip, canonical_anchors)
 }
 
@@ -355,11 +362,12 @@ async fn select_transition_history_for_sync(
     peer_heights: &HashMap<String, u64>,
 ) -> anyhow::Result<Option<Vec<AuthenticatedValidatorSetSnapshot>>> {
     let candidates = fetch_peer_transition_histories(client, peer_urls, peer_heights).await;
-    let (bootstrap, data_dir) = {
+    let (bootstrap, data_dir, hybrid_activation_height) = {
         let state = state.read().await;
         (
             state.validator_set_bootstrap.clone(),
             state.config.data_dir.clone(),
+            state.config.vote_v4_activation_height,
         )
     };
     let checkpoint =
@@ -393,6 +401,7 @@ async fn select_transition_history_for_sync(
             &candidate,
             &bootstrap,
             checkpoint.as_ref(),
+            hybrid_activation_height,
         ) {
             Ok(()) => valid.push(candidate),
             Err(error) => tracing::warn!(
@@ -415,6 +424,7 @@ async fn select_transition_history_for_sync(
             checkpoint.as_ref(),
             canonical_tip,
             &canonical_anchors,
+            hybrid_activation_height,
         )
         .map_err(anyhow::Error::msg)?;
         return Ok(Some(local_transitions));
@@ -490,8 +500,14 @@ fn import_transition_history_through_locked(
         advertised_tip: u64::MAX,
         transitions: transitions.to_vec(),
     };
-    validate_peer_transition_certificate_chain(&history, &bootstrap, checkpoint.as_ref())
-        .map_err(anyhow::Error::msg)?;
+    let hybrid_activation_height = state.config.vote_v4_activation_height;
+    validate_peer_transition_certificate_chain(
+        &history,
+        &bootstrap,
+        checkpoint.as_ref(),
+        hybrid_activation_height,
+    )
+    .map_err(anyhow::Error::msg)?;
 
     let first_import_index = checkpoint
         .as_ref()
@@ -531,7 +547,7 @@ fn import_transition_history_through_locked(
         });
         if !is_configured_checkpoint {
             transition
-                .validate_against(&authority)
+                .validate_against(&authority, hybrid_activation_height)
                 .map_err(|error| anyhow::anyhow!("invalid transition certificate: {error}"))?;
         }
         if transition.effective_from_height <= max_effective_height {
@@ -562,6 +578,7 @@ fn import_transition_history_through_locked(
                 &data_dir,
                 transition.clone(),
                 previous,
+                hybrid_activation_height,
             )?;
         }
     }
@@ -725,9 +742,13 @@ async fn sync_once(state: Arc<RwLock<NodeState>>) -> anyhow::Result<()> {
         // the validator set that was active at THIS block's height (ISSUE-016 /
         // ISSUE-050), rooted in the immutable deployment bootstrap when no
         // certified transition covers it.
-        let (bootstrap_set, data_dir) = {
+        let (bootstrap_set, data_dir, hybrid_activation_height) = {
             let s = state.read().await;
-            (s.validator_set_bootstrap.clone(), s.config.data_dir.clone())
+            (
+                s.validator_set_bootstrap.clone(),
+                s.config.data_dir.clone(),
+                s.config.vote_v4_activation_height,
+            )
         };
         let effective_set = match crate::validator_set_history::verification_set_at(
             &data_dir,
@@ -744,7 +765,9 @@ async fn sync_once(state: Arc<RwLock<NodeState>>) -> anyhow::Result<()> {
                 break;
             }
         };
-        if let Err(e) = verify_block_consensus_certificate(&block, &effective_set) {
+        if let Err(e) =
+            verify_block_consensus_certificate(&block, &effective_set, hybrid_activation_height)
+        {
             tracing::error!(
                 "Block {} failed PBFT certificate verification: {} — halting sync",
                 height,
@@ -969,12 +992,13 @@ async fn attempt_reorg_recovery(
     };
 
     // ── 2. Fetch and fully validate the peers' branch before adopting ────
-    let (_validator_set, bootstrap_set, data_dir) = {
+    let (_validator_set, bootstrap_set, data_dir, hybrid_activation_height) = {
         let s = state.read().await;
         (
             s.validator_set.clone(),
             s.validator_set_bootstrap.clone(),
             s.config.data_dir.clone(),
+            s.config.vote_v4_activation_height,
         )
     };
 
@@ -990,6 +1014,7 @@ async fn attempt_reorg_recovery(
             &candidate_history,
             &bootstrap_set,
             checkpoint.as_ref(),
+            hybrid_activation_height,
         )
         .map_err(anyhow::Error::msg)?;
 
@@ -1094,7 +1119,9 @@ async fn attempt_reorg_recovery(
                 }
             }
         };
-        if let Err(e) = verify_block_consensus_certificate(&b, &effective_set) {
+        if let Err(e) =
+            verify_block_consensus_certificate(&b, &effective_set, hybrid_activation_height)
+        {
             tracing::error!(
                 "Reorg recovery: peer branch block {} failed PBFT certificate verification: {} — refusing to adopt fork",
                 h,
@@ -1312,10 +1339,12 @@ fn require_header_matches_validator_set(
 /// Verify the block-level PBFT COMMIT certificate and every header commitment
 /// before any transaction-specific evidence is considered. This covers blocks
 /// containing governance or validator lifecycle transactions as well as
-/// package publications.
+/// package publications. Signatures follow ADR-017's height rule for the
+/// signed `hybrid_activation_height`.
 pub(crate) fn verify_block_consensus_certificate(
     block: &common::Block,
     validator_set: &ValidatorSet,
+    hybrid_activation_height: Option<u64>,
 ) -> anyhow::Result<()> {
     if block.header.height == 0 {
         return Ok(());
@@ -1333,10 +1362,21 @@ pub(crate) fn verify_block_consensus_certificate(
         anyhow::bail!("block must carry both VRF output and proof or neither");
     }
 
-    let mut round = consensus::pbft::PbftRound::new(block.clone(), validator_set.clone().into());
+    let mut round = consensus::pbft::PbftRound::with_config(
+        block.clone(),
+        validator_set.clone().into(),
+        consensus::pbft::PbftConfig {
+            hybrid_activation_height,
+            ..consensus::pbft::PbftConfig::default()
+        },
+    );
     round
         .pre_prepare(&block.header.proposer_id)
         .map_err(|error| anyhow::anyhow!("invalid PBFT pre-prepare: {error}"))?;
+    let require_hybrid = common::validator_signature::hybrid_signatures_required(
+        hybrid_activation_height,
+        block.header.height,
+    );
 
     let allow_small_cluster_quorum = !cfg!(feature = "phase-c-real-fleet")
         && std::env::var("CREG_PBFT_ALLOW_SMALL_CLUSTER_QUORUM")
@@ -1384,11 +1424,14 @@ pub(crate) fn verify_block_consensus_certificate(
                 signature.validator_id
             );
         }
-        consensus::pbft::verify_pbft_phase_signature(
-            "commit",
-            &block_hash,
+        let message = consensus::pbft::pbft_signature_message("commit", &block_hash);
+        common::validator_signature::verify_validator_signature(
             &validator.pubkey,
+            validator.pq_pubkey.as_deref(),
+            message.as_bytes(),
             &signature.signature,
+            signature.pq_signature.as_deref(),
+            require_hybrid,
         )
         .map_err(|error| {
             anyhow::anyhow!(
@@ -1540,6 +1583,7 @@ mod tests {
                 validator_id: validator.id.clone(),
                 validator_pubkey: validator.pubkey.clone(),
                 signature: hex::encode(key.sign(message.as_bytes()).to_bytes()),
+                pq_signature: None,
             })
             .collect();
         transition
@@ -1811,8 +1855,15 @@ mod tests {
         };
         let anchors = HashMap::from([(1, anchor_one.clone()), (3, anchor_three.clone())]);
 
-        validate_peer_transition_history(&history, &bootstrap, Some(&checkpoint), 3, &anchors)
-            .expect("exact checkpoint-descended history should be accepted");
+        validate_peer_transition_history(
+            &history,
+            &bootstrap,
+            Some(&checkpoint),
+            3,
+            &anchors,
+            None,
+        )
+        .expect("exact checkpoint-descended history should be accepted");
 
         let missing_checkpoint = PeerTransitionHistory {
             transitions: vec![descendant],
@@ -1824,6 +1875,7 @@ mod tests {
             Some(&checkpoint),
             3,
             &anchors,
+            None,
         )
         .expect_err("a rebuilt node must not trust history missing its checkpoint");
         assert!(
@@ -1838,6 +1890,7 @@ mod tests {
             Some(&checkpoint),
             3,
             &fork_anchors,
+            None,
         )
         .expect_err("a transition anchored to another fork must be rejected");
         assert!(
@@ -1883,10 +1936,10 @@ mod tests {
         };
 
         assert!(
-            validate_peer_transition_certificate_chain(&history, &bootstrap, None).is_err(),
+            validate_peer_transition_certificate_chain(&history, &bootstrap, None, None).is_err(),
             "the pruned prefix no longer begins at bootstrap authority"
         );
-        validate_peer_transition_certificate_chain(&history, &bootstrap, Some(&checkpoint))
+        validate_peer_transition_certificate_chain(&history, &bootstrap, Some(&checkpoint), None)
             .expect("the exact pinned checkpoint is the trust root for its retained descendants");
         ensure_histories_are_prefix_compatible(&full_history, &history.transitions)
             .expect("a pruned pre-checkpoint prefix is compatible over its complete overlap");
@@ -1910,7 +1963,7 @@ mod tests {
             transitions: vec![checkpoint.clone(), candidate_descendant],
         };
 
-        validate_peer_transition_certificate_chain(&history, &bootstrap, Some(&checkpoint))
+        validate_peer_transition_certificate_chain(&history, &bootstrap, Some(&checkpoint), None)
             .expect("quorum and exact checkpoint remain mandatory before fork selection");
 
         let old_fork_anchors = HashMap::from([(1, common_anchor.clone()), (3, old_fork_anchor)]);
@@ -1920,6 +1973,7 @@ mod tests {
             Some(&checkpoint),
             3,
             &old_fork_anchors,
+            None,
         )
         .is_err());
 
@@ -1962,11 +2016,12 @@ mod tests {
                     signature: hex::encode(
                         keys[index].sign(checkpoint_message.as_bytes()).to_bytes(),
                     ),
+                    pq_signature: None,
                 },
             );
         }
         alternate_checkpoint_witness
-            .validate_against(&bootstrap)
+            .validate_against(&bootstrap, None)
             .expect("alternate peer quorum");
         ensure_histories_are_prefix_compatible(
             std::slice::from_ref(&checkpoint),
@@ -1997,6 +2052,7 @@ mod tests {
             Some(&checkpoint),
             1,
             &anchors,
+            None,
         )
         .expect_err("an internally valid long-range checkpoint replacement must be rejected");
         assert!(
@@ -2064,18 +2120,22 @@ mod tests {
             &validator_set,
             &signing_keys,
         );
-        verify_block_consensus_certificate(&canonical_block, &validator_set)
+        verify_block_consensus_certificate(&canonical_block, &validator_set, None)
             .expect("follower sync should accept the PBFT commit certificate");
+        assert!(
+            verify_block_consensus_certificate(&canonical_block, &validator_set, Some(1)).is_err(),
+            "classical COMMIT signatures are refused once hybrid signatures govern the height"
+        );
         verify_block_signatures(&canonical_block, &validator_set)
             .expect("follower sync should accept canonical aggregated votes");
 
         let mut missing_commit = canonical_block.clone();
         missing_commit.pbft_signatures.truncate(1);
-        assert!(verify_block_consensus_certificate(&missing_commit, &validator_set).is_err());
+        assert!(verify_block_consensus_certificate(&missing_commit, &validator_set, None).is_err());
 
         let mut wrong_set_hash = canonical_block.clone();
         wrong_set_hash.header.validator_set_hash = "f".repeat(64);
-        assert!(verify_block_consensus_certificate(&wrong_set_hash, &validator_set).is_err());
+        assert!(verify_block_consensus_certificate(&wrong_set_hash, &validator_set, None).is_err());
         assert!(
             verify_block_signatures(&wrong_set_hash, &validator_set).is_err(),
             "ISSUE-016: vote evidence must not accept a header that names a different set"
@@ -2085,7 +2145,9 @@ mod tests {
         duplicate_commit
             .pbft_signatures
             .push(duplicate_commit.pbft_signatures[0].clone());
-        assert!(verify_block_consensus_certificate(&duplicate_commit, &validator_set).is_err());
+        assert!(
+            verify_block_consensus_certificate(&duplicate_commit, &validator_set, None).is_err()
+        );
 
         let legacy_votes: Vec<_> = signing_keys
             .iter()
@@ -2155,6 +2217,7 @@ mod tests {
             dir.path(),
             signed_transition(5, &"a".repeat(64), &bootstrap, &rotated, &bootstrap_keys),
             &bootstrap,
+            None,
         )
         .expect("certified rotation");
 
@@ -2195,12 +2258,12 @@ mod tests {
         ];
 
         let honest_historical = authority_block_at(1, &historical, &historical_signers);
-        verify_block_consensus_certificate(&honest_historical, &historical)
+        verify_block_consensus_certificate(&honest_historical, &historical, None)
             .expect("pre-rotation block verifies against the set at that height");
         verify_block_signatures(&honest_historical, &historical)
             .expect("pre-rotation evidence verifies against the set at that height");
         assert!(
-            verify_block_consensus_certificate(&honest_historical, &current).is_err(),
+            verify_block_consensus_certificate(&honest_historical, &current, None).is_err(),
             "a later tip set must not re-validate earlier blocks"
         );
         assert!(
@@ -2209,16 +2272,16 @@ mod tests {
         );
 
         let honest_current = authority_block_at(5, &current, &current_signers);
-        verify_block_consensus_certificate(&honest_current, &current)
+        verify_block_consensus_certificate(&honest_current, &current, None)
             .expect("post-rotation block verifies against the rotated set");
         assert!(
-            verify_block_consensus_certificate(&honest_current, &historical).is_err(),
+            verify_block_consensus_certificate(&honest_current, &historical, None).is_err(),
             "ejected validators must not certify post-rotation blocks"
         );
 
         let backdated = authority_block_at(1, &rotated, &current_signers);
         assert!(
-            verify_block_consensus_certificate(&backdated, &historical).is_err(),
+            verify_block_consensus_certificate(&backdated, &historical, None).is_err(),
             "ISSUE-016: a backdated block signed by the current set must fail historical authority"
         );
         assert!(

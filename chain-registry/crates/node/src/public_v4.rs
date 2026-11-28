@@ -1003,6 +1003,7 @@ mod tests {
                         validator_id: m.validator.id.clone(),
                         validator_pubkey: m.validator.pubkey.clone(),
                         signature: m.ed.sign(msg.as_bytes()).to_hex(),
+                        pq_signature: None,
                     });
             }
             snap
@@ -1011,12 +1012,14 @@ mod tests {
             fx.store.data_dir(),
             make_transition(2, b1.hash()),
             &bootstrap,
+            None,
         )
         .expect("record height 2 transition");
         crate::validator_set_history::record_authenticated(
             fx.store.data_dir(),
             make_transition(999, "ff".repeat(32)),
             &bootstrap,
+            None,
         )
         .expect("record future transition");
 

@@ -39,6 +39,7 @@ mod package_status;
 mod pbft_safety;
 mod pending_pool;
 mod pidlock;
+mod pq_compact;
 mod proof;
 mod public_v4;
 mod publisher_index;
@@ -735,7 +736,12 @@ async fn main() -> Result<()> {
     }
     let tip = chain.tip_height()?;
     tracing::info!("  chain tip:   height={}", tip);
-    let mut pbft_engine = crate::state::PbftEngine::new();
+    // ADR-017: PBFT signatures are hybrid from the signed chain spec's
+    // activation height; the environment cannot set it.
+    let mut pbft_engine = crate::state::PbftEngine::with_config(consensus::pbft::PbftConfig {
+        hybrid_activation_height: config.vote_v4_activation_height,
+        ..consensus::pbft::PbftConfig::default()
+    });
     if cfg!(feature = "phase-c-real-fleet") && pbft_engine.allow_small_cluster_quorum() {
         anyhow::bail!("Phase C cannot enable a reduced small-cluster quorum");
     }
@@ -767,7 +773,7 @@ async fn main() -> Result<()> {
                 &vote_context,
                 &certificate,
                 &pbft_authority,
-                pbft_engine.allow_small_cluster_quorum(),
+                pbft_engine.rules(),
             )?;
             if height <= tip {
                 let canonical = chain
@@ -785,7 +791,9 @@ async fn main() -> Result<()> {
                 anyhow::bail!("recovered prepared value cannot be attached to the canonical tip");
             }
         }
-        for (height, prev_hash, block_hash, signature) in journal.recovered_commits()? {
+        for (height, prev_hash, block_hash, signature, pq_signature) in
+            journal.recovered_commits()?
+        {
             if height <= tip {
                 let canonical = chain
                     .get_block_by_height(height)?
@@ -802,7 +810,7 @@ async fn main() -> Result<()> {
                 validator_id: config.node_id.clone(),
                 pubkey: journal.validator_pubkey().to_owned(),
                 signature,
-                pq_signature: None,
+                pq_signature,
             };
             pbft_engine
                 .commit(&block_hash, &config.node_id, vote)
@@ -826,11 +834,7 @@ async fn main() -> Result<()> {
             )
             .map_err(anyhow::Error::msg)?;
             let pbft_authority: consensus::ValidatorSet = authority.into();
-            consensus::pbft::verify_view_change_vote(
-                &vote,
-                &pbft_authority,
-                pbft_engine.allow_small_cluster_quorum(),
-            )?;
+            consensus::pbft::verify_view_change_vote(&vote, &pbft_authority, pbft_engine.rules())?;
             if vote.height <= tip {
                 continue;
             }

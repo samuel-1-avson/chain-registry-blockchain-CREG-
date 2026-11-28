@@ -565,7 +565,11 @@ impl NodeState {
                 &self.validator_set_bootstrap,
             )
             .map_err(anyhow::Error::msg)?;
-            crate::sync::verify_block_consensus_certificate(&block, &authority)?;
+            crate::sync::verify_block_consensus_certificate(
+                &block,
+                &authority,
+                self.config.vote_v4_activation_height,
+            )?;
             if self.pbft_engine.observe_finalized_block(&block)? {
                 reconciled += 1;
             }
@@ -626,7 +630,11 @@ impl NodeState {
                 &self.validator_set_bootstrap,
             )
             .map_err(anyhow::Error::msg)?;
-            crate::sync::verify_block_consensus_certificate(&block, &authority)?;
+            crate::sync::verify_block_consensus_certificate(
+                &block,
+                &authority,
+                self.config.vote_v4_activation_height,
+            )?;
             if self.pending_pool.remove_durable(&canonical)?.is_some() {
                 self.clear_package_round(&canonical);
                 retired += 1;
@@ -700,7 +708,10 @@ impl NodeState {
         block_hash: &str,
         signature: &common::BlockSignature,
     ) {
-        if !self.equivocation.is_enabled() {
+        // ADR-016 evidence is Ed25519-only (EVIDENCE_VERSION 1). A hybrid
+        // vote (ADR-017) cannot be expressed in it yet, so detection skips
+        // it rather than failing verification on every post-activation vote.
+        if !self.equivocation.is_enabled() || signature.pq_signature.is_some() {
             return;
         }
         let evidence = self.equivocation.observe_vote(phase, block_hash, signature);

@@ -20,6 +20,10 @@ pub struct ValidatorInfo {
     /// Reputation score 0–100. Starts at 50 for new validators.
     pub reputation: u8,
     pub is_active: bool,
+    /// ADR-017 ML-DSA-44 public key (lowercase hex) from the certified set.
+    /// Required to verify this validator's signatures from hybrid activation.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pq_pubkey: Option<String>,
 }
 
 #[derive(Debug, Clone)]
@@ -114,6 +118,7 @@ impl From<common::ValidatorSet> for ValidatorSet {
                 stake: v.stake,
                 reputation: v.reputation.try_into().unwrap_or(100),
                 is_active: common::validator_status_is_active(&v.status),
+                pq_pubkey: v.pq_pubkey.clone(),
             });
         }
         vs
@@ -177,6 +182,7 @@ mod tests {
             stake: 100,
             reputation: 100,
             is_active: false,
+            pq_pubkey: None,
         });
         assert_eq!(vs.len(), 0);
         assert!(!vs.is_member("core-1"));

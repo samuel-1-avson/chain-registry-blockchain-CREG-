@@ -90,6 +90,15 @@ if [ -n "$CREG_ONBOARDING_KEY_FILE" ]; then
             --env "CREG_VALIDATOR_KEY_FILE=/keys/validator.key"
             --mount "type=bind,source=$CREG_ONBOARDING_KEY_FILE,target=/keys/validator.key,readonly"
         )
+        # ADR-017: the ML-DSA-44 seed that `creg validator onboard` keeps next
+        # to the Ed25519 key (validator.key -> validator.pq.key).
+        PQ_KEY_FILE="${CREG_ONBOARDING_KEY_FILE%.key}.pq.key"
+        if [ -f "$PQ_KEY_FILE" ]; then
+            EXTRA_AUTO_ARGS+=(
+                --env "CREG_VALIDATOR_PQ_KEY_FILE=/keys/validator.pq.key"
+                --mount "type=bind,source=$PQ_KEY_FILE,target=/keys/validator.pq.key,readonly"
+            )
+        fi
     fi
     docker run -d --name "$CONTAINER_NAME" --restart unless-stopped \
         --label "dev.creg.validator=$EXPECTED_LABEL" --env-file "$PROFILE" \
@@ -133,6 +142,23 @@ else
     echo -e "${GREEN}[OK] Loaded existing validator key from ${DATA_DIR}/validator.key${NC}"
 fi
 
+# ADR-017: an independent ML-DSA-44 seed next to the Ed25519 key, the same
+# file `creg validator onboard` creates and registers. The node signs with it
+# only from the hybrid activation height in the signed chain spec.
+PQ_KEY_PATH="$DATA_DIR/validator.pq.key"
+if [ ! -f "$PQ_KEY_PATH" ]; then
+    openssl rand -hex 32 > "$PQ_KEY_PATH"
+    chmod 600 "$PQ_KEY_PATH"
+    echo -e "${GREEN}[OK] Generated new ML-DSA-44 seed: ${PQ_KEY_PATH}${NC}"
+else
+    echo -e "${GREEN}[OK] Loaded existing ML-DSA-44 seed from ${PQ_KEY_PATH}${NC}"
+fi
+VALIDATOR_PQ_KEY=$(tr -d '\r\n ' < "$PQ_KEY_PATH")
+if ! printf '%s' "$VALIDATOR_PQ_KEY" | grep -Eq '^(0x)?[0-9a-fA-F]{64}$'; then
+    echo -e "${RED}The ML-DSA-44 seed at ${PQ_KEY_PATH} must contain 32 bytes of hex.${NC}" >&2
+    exit 1
+fi
+
 # Operator API Key
 if [ ! -f "${DATA_DIR}/operator_api.key" ]; then
     OPERATOR_KEY=$(openssl rand -hex 32)
@@ -151,6 +177,7 @@ CREG_DATA_DIR=/data
 CREG_IS_VALIDATOR=true
 CREG_NODE_ROLE=validator
 CREG_VALIDATOR_KEY=${VALIDATOR_KEY}
+CREG_VALIDATOR_PQ_KEY=${VALIDATOR_PQ_KEY}
 CREG_OPERATOR_API_KEY=${OPERATOR_KEY}
 CREG_ETH_RPC=${ETH_RPC}
 CREG_CHAIN_ID=${CHAIN_ID}
@@ -205,6 +232,7 @@ echo -e "${GREEN}============================================================${N
 echo -e "Node ID:         ${CYAN}${NODE_ID}${NC}"
 echo -e "Chain Data:      ${CYAN}${CHAIN_DATA_DIR}${NC}"
 echo -e "Key Location:    ${CYAN}$KEY_PATH${NC}"
+echo -e "ML-DSA-44 Seed:  ${CYAN}$PQ_KEY_PATH${NC}"
 echo -e "Docker Image:    ${CYAN}${CHOSEN_IMAGE}${NC}"
 echo -e "P2P Port:        ${CYAN}${P2P_PORT} (Firewall: OPEN TCP/UDP ${P2P_PORT})${NC}"
 if [ "$HTTP_PORT" = 0 ]; then
@@ -215,7 +243,7 @@ fi
 echo -e "P2P Seeds:       ${CYAN}${BOOTNODE:-from the signed R7 spec}${NC}"
 echo -e ""
 echo -e "${YELLOW}--- KEY BACKUP NOTICE ---${NC}"
-echo -e "Back up ${DATA_DIR}/validator.key through the operator's secret storage."
+echo -e "Back up ${DATA_DIR}/validator.key and ${PQ_KEY_PATH} through the operator's secret storage."
 echo -e "Do not print or paste the private key into terminal history."
 echo -e ""
 echo -e "${YELLOW}--- REMOTE VERIFICATION ---${NC}"

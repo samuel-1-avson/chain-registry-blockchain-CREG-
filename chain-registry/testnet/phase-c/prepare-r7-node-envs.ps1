@@ -183,6 +183,7 @@ foreach ($slot in $slots) {
 }
 
 $validatorKeys = @{}
+$validatorPqKeys = @{}
 $publicKeyScript = Join-Path $PSScriptRoot 'ed25519-public-from-env.js'
 foreach ($slot in $slots | Where-Object { $_.Validator }) {
     $key = (& gcloud secrets versions access latest "--secret=$($slot.Secret)" "--project=$ValidatorSecretProject" 2>$null | Out-String).Trim()
@@ -205,6 +206,21 @@ foreach ($slot in $slots | Where-Object { $_.Validator }) {
     }
     $validatorKeys[$slot.Slot] = $key
     $key = $null
+
+    # ADR-017: the optional, independent ML-DSA-44 seed stored beside the
+    # Ed25519 secret. Without it the validator stays Ed25519-only and cannot
+    # sign once hybrid signatures are activated.
+    $pqSecret = $slot.Secret -replace '-ed25519$', '-mldsa44'
+    $pqKey = (& gcloud secrets versions access latest "--secret=$pqSecret" "--project=$ValidatorSecretProject" 2>$null | Out-String).Trim()
+    if ($LASTEXITCODE -ne 0 -or -not $pqKey) {
+        "{0}: no ML-DSA-44 seed in Secret Manager; the node stays Ed25519-only" -f $slot.Slot
+    } elseif ($pqKey -notmatch '^(0x)?[0-9a-fA-F]{64}$') {
+        $pqKey = $null
+        throw "The ML-DSA-44 seed secret for $($slot.Id) is malformed."
+    } else {
+        $validatorPqKeys[$slot.Slot] = $pqKey
+    }
+    $pqKey = $null
 }
 
 foreach ($slot in $slots) {
@@ -266,9 +282,13 @@ foreach ($slot in $slots) {
     $lines.Add("CREG_SCANNER_PROFILE_DIGEST=$ScannerProfileDigest")
     $lines.Add("CREG_OPERATOR_API_KEY=$([Convert]::ToHexString([Security.Cryptography.RandomNumberGenerator]::GetBytes(32)).ToLowerInvariant())")
     if ($slot.Validator) { $lines.Add("CREG_VALIDATOR_KEY=$($validatorKeys[$slot.Slot])") }
+    if ($slot.Validator -and $validatorPqKeys.ContainsKey($slot.Slot)) {
+        $lines.Add("CREG_VALIDATOR_PQ_KEY=$($validatorPqKeys[$slot.Slot])")
+    }
 
     $envPath = Join-Path $slotDir 'node.env'
     [IO.File]::WriteAllText($envPath, (($lines -join "`n") + "`n"), [Text.UTF8Encoding]::new($false))
     "{0}: prepared private r7 environment; public signer roster matched; scanner profile pinned" -f $slot.Slot
 }
 $validatorKeys.Clear()
+$validatorPqKeys.Clear()

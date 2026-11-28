@@ -312,8 +312,14 @@ pub struct ValidatorSet {
 pub struct ValidatorSetTransitionSignature {
     pub validator_id: String,
     pub validator_pubkey: String,
-    /// Hex-encoded Ed25519 signature over the domain-separated transition message.
+    /// Hex-encoded Ed25519 signature over the domain-separated transition
+    /// message (over `M'` when hybrid, ADR-017).
     pub signature: String,
+    /// ADR-017 ML-DSA-44 component (4,840 lowercase hex characters).
+    /// Required when `effective_from_height` is at or above the signed
+    /// `hybrid_signature_activation_height`; omitted before it.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub pq_signature: Option<String>,
 }
 
 /// Quorum-certified validator-set transition. The receiving node independently

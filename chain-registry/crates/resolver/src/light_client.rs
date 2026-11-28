@@ -452,8 +452,13 @@ impl AuthorityTimeline {
             {
                 bail!("authority transition at height 1 does not anchor to signed genesis");
             }
+            // ADR-017: the signed spec's activation height decides the
+            // transition's signature scheme.
             transition
-                .validate_against(&current)
+                .validate_against(
+                    &current,
+                    spec.consensus_params.hybrid_signature_activation_height,
+                )
                 .map_err(anyhow::Error::msg)?;
             if phase_c
                 && transition
@@ -2408,14 +2413,20 @@ mod tests {
             transition_signatures: vec![],
         };
         let msg = common::validator_set_transition_message(&transition);
+        // The rotation takes effect at height 2, after hybrid activation at
+        // height 1, so its approvals are hybrid (ADR-017 Increment 4a).
         for i in 0..3 {
-            let ed = common::crypto::SigningKey::from_ed25519_seed(&fx.ed_seeds[i]);
+            let (signature, pq_signature) = common::validator_signature::sign_validator_message(
+                &fx.hybrid_keys[i],
+                msg.as_bytes(),
+            );
             transition
                 .transition_signatures
                 .push(common::ValidatorSetTransitionSignature {
                     validator_id: fx.validators[i].id.clone(),
                     validator_pubkey: fx.validators[i].pubkey.clone(),
-                    signature: hex::encode(ed.sign(msg.as_bytes()).ed25519_bytes()),
+                    signature,
+                    pq_signature,
                 });
         }
 

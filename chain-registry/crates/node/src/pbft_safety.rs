@@ -42,8 +42,19 @@ struct PersistedDecision {
     phase: PbftVotePhase,
     value_hash: String,
     signing_message: String,
+    /// Ed25519 hex for PREPARE and COMMIT; for a view change, the vote's
+    /// single-field signature (Ed25519, or the full hybrid signature from
+    /// ADR-017 activation).
     signature: String,
+    /// ADR-017 ML-DSA-44 component of a hybrid PREPARE or COMMIT. Omitted
+    /// when absent, so classical records keep their bytes.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pq_signature: Option<String>,
 }
+
+/// One recovered local COMMIT: height, parent, block hash, Ed25519
+/// signature and, from hybrid activation, its ML-DSA-44 component.
+pub type RecoveredCommit = (u64, String, String, String, Option<String>);
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 struct PersistedPrepared {
@@ -162,7 +173,8 @@ impl PbftSigningJournal {
 
     /// Record a locally signed PBFT message durably before it is broadcast.
     /// PREPARE locks are per view; COMMIT locks span all views at one
-    /// height/parent; view-change locks are per target view.
+    /// height/parent; view-change locks are per target view. `pq_signature`
+    /// is the ADR-017 ML-DSA-44 component of a hybrid PREPARE or COMMIT.
     #[allow(clippy::too_many_arguments)]
     pub fn record_decision(
         &self,
@@ -173,6 +185,7 @@ impl PbftSigningJournal {
         value_hash: &str,
         signing_message: &str,
         signature: &str,
+        pq_signature: Option<&str>,
     ) -> Result<()> {
         if phase == PbftVotePhase::ViewChange {
             bail!("local view changes require atomic full-vote persistence");
@@ -185,6 +198,7 @@ impl PbftSigningJournal {
             value_hash,
             signing_message,
             signature,
+            pq_signature,
             None,
         )
     }
@@ -195,12 +209,12 @@ impl PbftSigningJournal {
         &self,
         vote: &ViewChangeVote,
         validator_set: &consensus::ValidatorSet,
-        allow_small_cluster_quorum: bool,
+        rules: consensus::pbft::PbftRules,
     ) -> Result<()> {
         if vote.validator_id != self.identity.validator_id {
             bail!("local view-change vote belongs to another validator");
         }
-        consensus::pbft::verify_view_change_vote(vote, validator_set, allow_small_cluster_quorum)?;
+        consensus::pbft::verify_view_change_vote(vote, validator_set, rules)?;
         let message = vote.signing_message();
         self.record_decision_inner(
             PbftVotePhase::ViewChange,
@@ -210,6 +224,7 @@ impl PbftSigningJournal {
             &common::sha256_hex(message.as_bytes()),
             &message,
             &vote.signature,
+            None,
             Some(vote),
         )
     }
@@ -224,6 +239,7 @@ impl PbftSigningJournal {
         value_hash: &str,
         signing_message: &str,
         signature: &str,
+        pq_signature: Option<&str>,
         local_vote: Option<&ViewChangeVote>,
     ) -> Result<()> {
         if height == 0 {
@@ -232,7 +248,12 @@ impl PbftSigningJournal {
         let prev_hash = normalize_hash(prev_hash, "PBFT parent hash")?;
         let value_hash = normalize_hash(value_hash, "PBFT value hash")?;
         validate_signing_payload(phase, view_number, &value_hash, signing_message)?;
-        verify_signature(&self.identity.validator_pubkey, signing_message, signature)?;
+        verify_signature(
+            &self.identity.validator_pubkey,
+            signing_message,
+            signature,
+            pq_signature,
+        )?;
 
         let decision = PersistedDecision {
             schema_version: 1,
@@ -244,6 +265,7 @@ impl PbftSigningJournal {
             value_hash,
             signing_message: signing_message.to_owned(),
             signature: normalize_hex(signature),
+            pq_signature: pq_signature.map(normalize_hex),
         };
         let key = decision_key(&decision);
         let bytes = serde_json::to_vec(&decision)?;
@@ -334,7 +356,7 @@ impl PbftSigningJournal {
             if let Some(bytes) = self.db.get(&vote_key)? {
                 let previous: PersistedViewChange = serde_json::from_slice(&bytes)?;
                 if previous.vote.signing_message() != signing_message
-                    || previous.vote.signature != vote.signature
+                    || !same_signer_output(&previous.vote.signature, &vote.signature)
                 {
                     bail!("local view-change recovery payload conflicts with its signing lock");
                 }
@@ -404,7 +426,7 @@ impl PbftSigningJournal {
     /// Recover signed local COMMIT votes so an active prepared round retains
     /// its vote and the existing rebroadcast worker can resend it after a
     /// restart. A COMMIT without its full prepared value is rejected at startup.
-    pub fn recovered_commits(&self) -> Result<Vec<(u64, String, String, String)>> {
+    pub fn recovered_commits(&self) -> Result<Vec<RecoveredCommit>> {
         let prefix = b"decision/commit/";
         let mut commits = Vec::new();
         for entry in self.db.prefix_iterator(prefix) {
@@ -425,6 +447,7 @@ impl PbftSigningJournal {
                 decision.prev_hash,
                 decision.value_hash,
                 decision.signature,
+                decision.pq_signature,
             ));
         }
         Ok(commits)
@@ -438,7 +461,7 @@ impl PbftSigningJournal {
         block: &Block,
         certificate: &PreparedCertificate,
         validator_set: &consensus::ValidatorSet,
-        allow_small_cluster_quorum: bool,
+        rules: consensus::pbft::PbftRules,
     ) -> Result<()> {
         let header = &certificate.header;
         if header.height == 0 {
@@ -460,7 +483,7 @@ impl PbftSigningJournal {
             &vote_context,
             certificate,
             validator_set,
-            allow_small_cluster_quorum,
+            rules,
         )?;
         let block_hash = certificate.block().hash();
         if block.hash() != block_hash
@@ -538,9 +561,9 @@ impl PbftSigningJournal {
         &self,
         vote: &ViewChangeVote,
         validator_set: &consensus::ValidatorSet,
-        allow_small_cluster_quorum: bool,
+        rules: consensus::pbft::PbftRules,
     ) -> Result<()> {
-        consensus::pbft::verify_view_change_vote(vote, validator_set, allow_small_cluster_quorum)?;
+        consensus::pbft::verify_view_change_vote(vote, validator_set, rules)?;
         let record = PersistedViewChange {
             schema_version: 1,
             identity: self.identity.clone(),
@@ -559,7 +582,7 @@ impl PbftSigningJournal {
             let previous: PersistedViewChange =
                 serde_json::from_slice(&previous).context("decode received view-change vote")?;
             if previous.vote.signing_message() != vote.signing_message()
-                || previous.vote.signature != vote.signature
+                || !same_signer_output(&previous.vote.signature, &vote.signature)
             {
                 bail!("refusing equivocated durable view-change vote");
             }
@@ -620,6 +643,7 @@ impl PbftSigningJournal {
                 &self.identity.validator_pubkey,
                 &decision.signing_message,
                 &decision.signature,
+                decision.pq_signature.as_deref(),
             )?;
             if decision.phase == PbftVotePhase::ViewChange {
                 let vote_key = [
@@ -638,7 +662,7 @@ impl PbftSigningJournal {
                     "durable local view-change decision lacks its original full vote; signing is blocked")?;
                 let recovered: PersistedViewChange = serde_json::from_slice(&payload)?;
                 if recovered.vote.signing_message() != decision.signing_message
-                    || recovered.vote.signature != decision.signature
+                    || !same_signer_output(&recovered.vote.signature, &decision.signature)
                 {
                     bail!("durable view-change payload does not match its signing decision");
                 }
@@ -782,18 +806,29 @@ fn local_view_key(height: u64, prev_hash: &str) -> Vec<u8> {
     key
 }
 
+/// Whether two signatures over the same message come from the same signing
+/// decision. The Ed25519 half is deterministic, while the hedged ML-DSA-44
+/// half of an ADR-017 hybrid signature differs on every signing, so only the
+/// Ed25519 half is compared. Callers compare the signed message separately.
+fn same_signer_output(previous: &str, next: &str) -> bool {
+    common::validator_signature::ed25519_part_of_signature_hex(previous)
+        == common::validator_signature::ed25519_part_of_signature_hex(next)
+}
+
 fn same_decision(previous: &PersistedDecision, next: &PersistedDecision) -> bool {
+    let same_signed_value = previous.schema_version == next.schema_version
+        && previous.identity == next.identity
+        && previous.height == next.height
+        && previous.prev_hash == next.prev_hash
+        && previous.phase == next.phase
+        && previous.value_hash == next.value_hash
+        && previous.signing_message == next.signing_message
+        && same_signer_output(&previous.signature, &next.signature);
     if previous.phase == PbftVotePhase::Commit && next.phase == PbftVotePhase::Commit {
-        previous.schema_version == next.schema_version
-            && previous.identity == next.identity
-            && previous.height == next.height
-            && previous.prev_hash == next.prev_hash
-            && previous.phase == next.phase
-            && previous.value_hash == next.value_hash
-            && previous.signing_message == next.signing_message
-            && previous.signature == next.signature
+        // A COMMIT lock spans every view at one height and parent.
+        same_signed_value
     } else {
-        previous == next
+        same_signed_value && previous.view_number == next.view_number
     }
 }
 
@@ -816,14 +851,46 @@ fn verify_pubkey(pubkey: &str) -> Result<()> {
     Ok(())
 }
 
-fn verify_signature(pubkey: &str, message: &str, signature: &str) -> Result<()> {
-    let bytes = hex::decode(normalize_hex(signature)).context("decode PBFT signature")?;
-    let signature =
+/// Check that a journaled signature is this validator's own. A hybrid
+/// (ADR-017) signature is recognised by its ML-DSA-44 component, given
+/// separately for PREPARE and COMMIT or appended in a view change's single
+/// signature field; its Ed25519 half is then checked over
+/// `M' = "creg-hybrid-sig-v1" || 0x00 || M` and its ML-DSA-44 half for shape.
+/// The journal holds no ML-DSA-44 public key: the consensus engine verifies
+/// the full signature before the vote is used, and this check only keeps
+/// foreign or corrupted bytes out of the lock database.
+fn verify_signature(
+    pubkey: &str,
+    message: &str,
+    signature: &str,
+    pq_signature: Option<&str>,
+) -> Result<()> {
+    let signature = normalize_hex(signature);
+    let (ed25519, mldsa44) = match pq_signature {
+        Some(pq) => (signature.as_str(), Some(normalize_hex(pq))),
+        None if signature.len() == common::vote_v4::HYBRID_SIGNATURE_HEX_LEN => {
+            let (ed25519, mldsa44) =
+                common::validator_signature::split_hybrid_signature_hex(&signature)
+                    .context("decode hybrid PBFT signature")?;
+            (ed25519, Some(mldsa44.to_owned()))
+        }
+        None => (signature.as_str(), None),
+    };
+    let bytes = hex::decode(ed25519).context("decode PBFT signature")?;
+    let ed25519 =
         Signature::from_bytes(SignatureScheme::Ed25519, &bytes).context("parse PBFT signature")?;
     let key_bytes = hex::decode(pubkey).context("decode PBFT validator public key")?;
     let key = PublicKey::from_bytes(SignatureScheme::Ed25519, &key_bytes)
         .context("parse PBFT validator public key")?;
-    key.verify(message.as_bytes(), &signature, VerifyMode::Strict)
+    let signed = match &mldsa44 {
+        Some(mldsa44) => {
+            common::validator_signature::validate_mldsa44_signature_hex(mldsa44)
+                .context("journaled ML-DSA-44 signature is malformed")?;
+            common::crypto::hybrid_message(message.as_bytes())
+        }
+        None => message.as_bytes().to_vec(),
+    };
+    key.verify(&signed, &ed25519, VerifyMode::Strict)
         .context("verify PBFT signing decision")
 }
 
@@ -861,6 +928,7 @@ mod tests {
                 &value,
                 &message,
                 &signature,
+                None,
             )
             .unwrap();
         drop(journal);
@@ -879,6 +947,7 @@ mod tests {
                 &conflicting_value,
                 &conflicting_message,
                 &hex::encode(key.sign(conflicting_message.as_bytes()).to_bytes()),
+                None,
             )
             .is_err());
         assert!(recovered
@@ -890,6 +959,7 @@ mod tests {
                 &value,
                 &message,
                 &signature,
+                None,
             )
             .is_ok());
     }
@@ -914,6 +984,7 @@ mod tests {
                 &value,
                 &message,
                 &signature,
+                None,
             )
             .unwrap();
         journal
@@ -925,6 +996,7 @@ mod tests {
                 &value,
                 &message,
                 &signature,
+                None,
             )
             .unwrap();
         let conflicting_value = "dd".repeat(32);
@@ -939,6 +1011,7 @@ mod tests {
                 &conflicting_value,
                 &conflicting_message,
                 &hex::encode(key.sign(conflicting_message.as_bytes()).to_bytes()),
+                None,
             )
             .is_err());
         drop(journal);
@@ -975,7 +1048,7 @@ mod tests {
         };
         vote.signature = hex::encode(key.sign(vote.signing_message().as_bytes()).to_bytes());
         journal
-            .record_local_view_change(&vote, &authority, false)
+            .record_local_view_change(&vote, &authority, consensus::pbft::PbftRules::default())
             .unwrap();
         drop(journal);
 
@@ -992,6 +1065,7 @@ mod tests {
                 &stale_value,
                 &stale_message,
                 &hex::encode(key.sign(stale_message.as_bytes()).to_bytes()),
+                None,
             )
             .is_err());
 
@@ -1006,7 +1080,139 @@ mod tests {
                 &current_value,
                 &current_message,
                 &hex::encode(key.sign(current_message.as_bytes()).to_bytes()),
+                None,
             )
             .is_ok());
+    }
+
+    #[test]
+    fn hybrid_decisions_survive_reopen_and_hedged_resigning_is_the_same_decision() {
+        use common::validator_signature::{
+            sign_validator_message, sign_validator_message_combined, validator_ed25519_pubkey_hex,
+            validator_mldsa44_pubkey_hex,
+        };
+        let dir = tempdir().unwrap();
+        let hybrid = common::crypto::SigningKey::hybrid_from_seeds(&[44; 32], &[144; 32]);
+        let validator_id = "validator-1".to_owned();
+        let pubkey = validator_ed25519_pubkey_hex(&hybrid);
+        let journal =
+            PbftSigningJournal::open(dir.path(), &"aa".repeat(32), &validator_id, &pubkey).unwrap();
+        let parent = "bb".repeat(32);
+        let value = "cc".repeat(32);
+        let message = consensus::pbft::pbft_signature_message("commit", &value);
+        let (signature, pq) = sign_validator_message(&hybrid, message.as_bytes());
+        let pq = pq.unwrap();
+        journal
+            .record_decision(
+                PbftVotePhase::Commit,
+                7,
+                &parent,
+                0,
+                &value,
+                &message,
+                &signature,
+                Some(&pq),
+            )
+            .unwrap();
+
+        // Re-signing gives the same Ed25519 half and a new hedged ML-DSA-44
+        // half: still the same decision, in a later view too.
+        let (again, again_pq) = sign_validator_message(&hybrid, message.as_bytes());
+        let again_pq = again_pq.unwrap();
+        assert_eq!(again, signature);
+        assert_ne!(again_pq, pq);
+        journal
+            .record_decision(
+                PbftVotePhase::Commit,
+                7,
+                &parent,
+                1,
+                &value,
+                &message,
+                &again,
+                Some(&again_pq),
+            )
+            .unwrap();
+
+        // The hybrid Ed25519 half without its ML-DSA-44 half is not a
+        // classical signature over M, and a malformed half is refused.
+        let next_value = "dd".repeat(32);
+        let next_message = consensus::pbft::pbft_signature_message("commit", &next_value);
+        let (next_signature, _) = sign_validator_message(&hybrid, next_message.as_bytes());
+        assert!(journal
+            .record_decision(
+                PbftVotePhase::Commit,
+                8,
+                &parent,
+                0,
+                &next_value,
+                &next_message,
+                &next_signature,
+                None,
+            )
+            .is_err());
+        assert!(journal
+            .record_decision(
+                PbftVotePhase::Commit,
+                8,
+                &parent,
+                0,
+                &next_value,
+                &next_message,
+                &next_signature,
+                Some("ab"),
+            )
+            .is_err());
+
+        // Hybrid view change: the single signature field carries both halves.
+        let authority: consensus::ValidatorSet =
+            common::ValidatorSet::new(vec![common::Validator {
+                id: validator_id.clone(),
+                pubkey: pubkey.clone(),
+                stake: 100,
+                reputation: 100,
+                status: "active".into(),
+                pq_pubkey: validator_mldsa44_pubkey_hex(&hybrid),
+                ..Default::default()
+            }])
+            .into();
+        let rules = consensus::pbft::PbftRules {
+            allow_small_cluster_quorum: false,
+            hybrid_activation_height: Some(1),
+        };
+        let mut vote = ViewChangeVote {
+            height: 9,
+            prev_hash: parent.clone(),
+            new_view: 1,
+            validator_id: validator_id.clone(),
+            prepared: None,
+            signature: String::new(),
+        };
+        vote.signature =
+            sign_validator_message_combined(&hybrid, vote.signing_message().as_bytes());
+        journal
+            .record_local_view_change(&vote, &authority, rules)
+            .unwrap();
+        let mut resigned = vote.clone();
+        resigned.signature =
+            sign_validator_message_combined(&hybrid, vote.signing_message().as_bytes());
+        assert_ne!(resigned.signature, vote.signature);
+        journal
+            .record_local_view_change(&resigned, &authority, rules)
+            .unwrap();
+        journal
+            .record_received_view_change(&vote, &authority, rules)
+            .unwrap();
+        drop(journal);
+
+        let recovered =
+            PbftSigningJournal::open(dir.path(), &"aa".repeat(32), &validator_id, &pubkey).unwrap();
+        let commits = recovered.recovered_commits().unwrap();
+        assert_eq!(commits.len(), 1);
+        assert_eq!(commits[0].3, signature);
+        assert!(commits[0].4.is_some());
+        let votes = recovered.recovered_view_change_votes().unwrap();
+        assert_eq!(votes.len(), 1);
+        assert_eq!(votes[0].signing_message(), vote.signing_message());
     }
 }

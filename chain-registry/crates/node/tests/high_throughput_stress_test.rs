@@ -99,6 +99,7 @@ fn test_1000_tps_admission_and_pbft_consensus_burst() {
             stake: 100,
             reputation: 90,
             is_active: true,
+            pq_pubkey: None,
         });
     }
 

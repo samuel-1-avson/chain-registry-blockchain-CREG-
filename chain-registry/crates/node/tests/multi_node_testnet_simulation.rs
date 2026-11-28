@@ -173,6 +173,7 @@ fn test_multi_node_testnet_cluster_full_simulation() {
             stake: 100,
             reputation: 80,
             is_active: true,
+            pq_pubkey: None,
         });
     }
 

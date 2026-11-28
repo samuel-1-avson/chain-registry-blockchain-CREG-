@@ -20,6 +20,7 @@ pub mod shielded_wire;
 pub mod status_tree;
 pub mod test_support;
 pub mod transparency_log;
+pub mod validator_signature;
 pub mod validator_snapshot;
 pub mod verdict;
 pub mod vote_v4;
@@ -328,17 +329,27 @@ pub enum GossipMessage {
         target_view: u32,
         leader_id: String,
         view_change_certificate: Vec<ViewChangeVote>,
+        /// Ed25519 hex before hybrid activation, the full hybrid signature
+        /// hex from it (ADR-017).
         leader_signature: String,
     },
     PbftPrepare {
         block_hash: String,
         validator_id: String,
         signature: String,
+        /// ADR-017 ML-DSA-44 component, required from hybrid activation and
+        /// absent before it.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        pq_signature: Option<String>,
     },
     PbftCommit {
         block_hash: String,
         validator_id: String,
         signature: String,
+        /// ADR-017 ML-DSA-44 component, required from hybrid activation and
+        /// absent before it.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        pq_signature: Option<String>,
     },
     /// A validator identity registration, gossiped so one POST to any node
     /// propagates the (evm_address, node_id, ed25519_pubkey) binding to the

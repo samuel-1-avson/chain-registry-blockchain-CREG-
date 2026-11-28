@@ -1114,6 +1114,7 @@ impl ApprovalPlan {
         expected_pq_pubkey: Option<&str>,
         tip_height: u64,
         tip_hash: &str,
+        hybrid_activation_height: Option<u64>,
     ) -> anyhow::Result<()> {
         validate_single_addition_transition(
             &self.transition,
@@ -1121,8 +1122,8 @@ impl ApprovalPlan {
             identity,
             expected_pq_pubkey,
             self.applicant,
-            tip_height,
-            tip_hash,
+            (tip_height, tip_hash),
+            hybrid_activation_height,
         )?;
         anyhow::ensure!(
             active_signer(current, self.submitter),
@@ -1142,12 +1143,12 @@ fn validate_single_addition_transition(
     identity: &common::ValidatorIdentity,
     expected_pq_pubkey: Option<&str>,
     applicant: Address,
-    tip_height: u64,
-    tip_hash: &str,
+    (tip_height, tip_hash): (u64, &str),
+    hybrid_activation_height: Option<u64>,
 ) -> anyhow::Result<()> {
     crate::validator_set_history::validate_transition_at_tip(transition, tip_height, tip_hash)?;
     transition
-        .validate_against(current)
+        .validate_against(current, hybrid_activation_height)
         .map_err(anyhow::Error::msg)?;
     let next = &transition.validators.validators;
     let candidate = next
@@ -2069,13 +2070,17 @@ async fn auto_tick(
 
     if head.l1_state == 2u8 {
         // ── Phase 2: Quorum-certified CREG validator-set transition ──────────
-        let Some(ref privkey_secret) = validator_privkey else {
+        if validator_privkey.is_none() {
             return Ok(());
-        };
-        let ed_sk = ed25519_signing_key_from_hex(privkey_secret.expose_secret())?;
-        let ed_pubkey_hex = ed_sk.public_key().to_hex();
+        }
 
-        let (fresh_tip_height, fresh_tip_hash, fresh_authority) = {
+        let (
+            fresh_tip_height,
+            fresh_tip_hash,
+            fresh_authority,
+            signing_keys,
+            hybrid_activation_height,
+        ) = {
             let s = state.read().await;
             let h = s.chain.tip_height()?;
             let hash = s.chain.tip_hash()?;
@@ -2085,8 +2090,20 @@ async fn auto_tick(
                 &s.validator_set_bootstrap,
             )
             .map_err(anyhow::Error::msg)?;
-            (h, hash, auth)
+            (
+                h,
+                hash,
+                auth,
+                s.config
+                    .validator_signing_keys()
+                    .map_err(anyhow::Error::msg)?,
+                s.config.vote_v4_activation_height,
+            )
         };
+        let Some(signing_keys) = signing_keys else {
+            return Ok(());
+        };
+        let ed_pubkey_hex = signing_keys.pubkey_hex();
 
         let is_member = fresh_authority.validators.iter().any(|validator| {
             validator.id == node_id
@@ -2134,10 +2151,18 @@ async fn auto_tick(
             transition_signatures: Vec::new(),
         };
         let message = common::validator_set_transition_message(&unsigned);
+        // ADR-017: the transition governs `effective_from_height`, so that
+        // height decides whether the approval is hybrid.
+        let (signature_hex, pq_signature) = signing_keys.sign_at(
+            hybrid_activation_height,
+            effective_from_height,
+            message.as_bytes(),
+        )?;
         let signature = common::ValidatorSetTransitionSignature {
             validator_id: node_id.clone(),
             validator_pubkey: ed_pubkey_hex,
-            signature: ed_sk.sign(message.as_bytes()).to_hex(),
+            signature: signature_hex,
+            pq_signature,
         };
 
         let proposal_key = TransitionProposalKey {
@@ -2192,8 +2217,8 @@ async fn auto_tick(
             &head.registration.identity,
             head.registration.pq_pubkey.as_deref(),
             head.applicant,
-            fresh_tip_height,
-            &fresh_tip_hash,
+            (fresh_tip_height, &fresh_tip_hash),
+            hybrid_activation_height,
         )?;
 
         {
@@ -2209,6 +2234,7 @@ async fn auto_tick(
                 &s.config.data_dir,
                 snapshot.clone(),
                 &fresh_authority,
+                hybrid_activation_height,
             )?;
             s.refresh_runtime_validator_set_from_certified_history()?;
         }
@@ -2346,6 +2372,7 @@ async fn check_plan(
         registration.pq_pubkey.as_deref(),
         tip_height,
         &tip_hash,
+        s.config.vote_v4_activation_height,
     )
 }
 
@@ -2781,7 +2808,7 @@ pub(crate) async fn accept_transition_gossip(
         } => {
             let applicant_addr: Address = applicant.parse()?;
             let applicant_key = format!("0x{:040x}", applicant_addr);
-            let (tip_height, tip_hash, authority, registration_ok) = {
+            let (tip_height, tip_hash, authority, registration_ok, hybrid_activation_height) = {
                 let s = state.read().await;
                 let tip_height = s.chain.tip_height()?;
                 let tip_hash = s.chain.tip_hash()?;
@@ -2795,7 +2822,13 @@ pub(crate) async fn accept_transition_gossip(
                     .validator_registrations
                     .get(&applicant_key)
                     .is_some_and(|r| r.registered_with_node && r.identity.normalized().is_complete());
-                (tip_height, tip_hash, authority, reg_ok)
+                (
+                    tip_height,
+                    tip_hash,
+                    authority,
+                    reg_ok,
+                    s.config.vote_v4_activation_height,
+                )
             };
 
             if !registration_ok
@@ -2829,14 +2862,19 @@ pub(crate) async fn accept_transition_gossip(
                 transition_signatures: Vec::new(),
             };
             let message = common::validator_set_transition_message(&placeholder);
-            let pubkey_bytes = hex::decode(&signer.pubkey)?;
-            let sig_bytes = hex::decode(signature.signature.trim().trim_start_matches("0x"))?;
-            let pk = PublicKey::from_bytes(SignatureScheme::Ed25519, &pubkey_bytes)
-                .map_err(|e| anyhow::anyhow!("invalid transition signer pubkey: {e}"))?;
-            let sig = Signature::from_bytes(SignatureScheme::Ed25519, &sig_bytes)
-                .map_err(|e| anyhow::anyhow!("invalid transition signature: {e}"))?;
-            pk.verify(message.as_bytes(), &sig, VerifyMode::Strict)
-                .map_err(|e| anyhow::anyhow!("transition signature verification failed: {e}"))?;
+            // ADR-017: the approval's scheme follows the height it governs.
+            common::validator_signature::verify_validator_signature(
+                &signer.pubkey,
+                signer.pq_pubkey.as_deref(),
+                message.as_bytes(),
+                &signature.signature,
+                signature.pq_signature.as_deref(),
+                common::validator_signature::hybrid_signatures_required(
+                    hybrid_activation_height,
+                    effective_from_height,
+                ),
+            )
+            .map_err(|e| anyhow::anyhow!("transition signature verification failed: {e}"))?;
 
             let key = TransitionProposalKey {
                 applicant: applicant_key,
@@ -3458,25 +3496,26 @@ mod tests {
                     validator_id: v.id.clone(),
                     validator_pubkey: v.pubkey.clone(),
                     signature: hex::encode(key.sign(message.as_bytes()).to_bytes()),
+                    pq_signature: None,
                 })
                 .collect();
         };
         assert!(plan
-            .validate_transition(&old, &identity, None, 21, &hash)
+            .validate_transition(&old, &identity, None, 21, &hash, None)
             .is_err());
         resign(&mut plan.transition);
-        plan.validate_transition(&old, &identity, None, 21, &hash)
+        plan.validate_transition(&old, &identity, None, 21, &hash, None)
             .unwrap();
         assert!(plan
-            .validate_transition(&old, &identity, None, 22, &hash)
+            .validate_transition(&old, &identity, None, 22, &hash, None)
             .is_err());
         assert!(plan
-            .validate_transition(&old, &identity, None, 21, &"bb".repeat(32))
+            .validate_transition(&old, &identity, None, 21, &"bb".repeat(32), None)
             .is_err());
         let mut wrong_identity = identity.clone();
         wrong_identity.ed25519_pubkey = "cc".repeat(32);
         assert!(plan
-            .validate_transition(&old, &wrong_identity, None, 21, &hash)
+            .validate_transition(&old, &wrong_identity, None, 21, &hash, None)
             .is_err());
 
         // ADR-017: the certified applicant must carry exactly the ML-DSA-44
@@ -3484,7 +3523,7 @@ mod tests {
         let pq = "ab".repeat(common::crypto::MLDSA44_PUBLIC_KEY_LEN);
         let other_pq = "cd".repeat(common::crypto::MLDSA44_PUBLIC_KEY_LEN);
         assert!(plan
-            .validate_transition(&old, &identity, Some(&pq), 21, &hash)
+            .validate_transition(&old, &identity, Some(&pq), 21, &hash, None)
             .is_err());
         let mut bound = ApprovalPlan {
             transition: plan.transition.clone(),
@@ -3493,19 +3532,19 @@ mod tests {
         bound.transition.validators.validators[4].pq_pubkey = Some(pq.clone());
         resign(&mut bound.transition);
         bound
-            .validate_transition(&old, &identity, Some(&pq), 21, &hash)
+            .validate_transition(&old, &identity, Some(&pq), 21, &hash, None)
             .unwrap();
         assert!(bound
-            .validate_transition(&old, &identity, None, 21, &hash)
+            .validate_transition(&old, &identity, None, 21, &hash, None)
             .is_err());
         assert!(bound
-            .validate_transition(&old, &identity, Some(&other_pq), 21, &hash)
+            .validate_transition(&old, &identity, Some(&other_pq), 21, &hash, None)
             .is_err());
 
         plan.transition.validators.validators[0].stake += 1;
         resign(&mut plan.transition);
         assert!(plan
-            .validate_transition(&old, &identity, None, 21, &hash)
+            .validate_transition(&old, &identity, None, 21, &hash, None)
             .is_err());
     }
 
@@ -3767,6 +3806,7 @@ mod tests {
             validator_id: "validator-1".into(),
             validator_pubkey: "cc".repeat(32),
             signature: "dd".repeat(64),
+            pq_signature: None,
         };
 
         {
@@ -3879,6 +3919,7 @@ mod tests {
             validator_id: "validator-1".into(),
             validator_pubkey: "ee".repeat(32),
             signature: "ff".repeat(64),
+            pq_signature: None,
         };
         assert!(store.insert_transition_approval(stale_key.clone(), sig.clone()).await);
         assert!(store.insert_transition_approval(next_key.clone(), sig).await);
@@ -3999,9 +4040,10 @@ mod tests {
                 validator_id: v.id.clone(),
                 validator_pubkey: v.pubkey.clone(),
                 signature: hex::encode(sk.sign(msg.as_bytes()).to_bytes()),
+                pq_signature: None,
             })
             .collect();
-        crate::validator_set_history::record_authenticated(dir.path(), snapshot, &bootstrap)
+        crate::validator_set_history::record_authenticated(dir.path(), snapshot, &bootstrap, None)
             .unwrap();
 
         assert!(try_activate_candidate_validator(&state).await.unwrap());

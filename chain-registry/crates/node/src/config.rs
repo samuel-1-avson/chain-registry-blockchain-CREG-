@@ -50,6 +50,73 @@ impl ValidatorSigningKeys {
             Some(&self.ed25519)
         }
     }
+
+    fn key_at(
+        &self,
+        activation_height: Option<u64>,
+        height: u64,
+    ) -> anyhow::Result<&common::crypto::SigningKey> {
+        self.for_height(activation_height, height).ok_or_else(|| {
+            anyhow::anyhow!(
+                "refusing to sign at height {height}: ADR-017 hybrid signatures are required from height {} and CREG_VALIDATOR_PQ_KEY is not loaded",
+                activation_height.unwrap_or_default()
+            )
+        })
+    }
+
+    /// Sign a consensus message that governs `height`: Ed25519 before hybrid
+    /// activation, hybrid Ed25519 + ML-DSA-44 from it. Returns the Ed25519
+    /// signature hex and the ML-DSA-44 component. A validator without its
+    /// ML-DSA-44 seed refuses to sign after activation instead of signing
+    /// Ed25519-only (ADR-017 §4).
+    pub fn sign_at(
+        &self,
+        activation_height: Option<u64>,
+        height: u64,
+        message: &[u8],
+    ) -> anyhow::Result<(String, Option<String>)> {
+        Ok(common::validator_signature::sign_validator_message(
+            self.key_at(activation_height, height)?,
+            message,
+        ))
+    }
+
+    /// [`Self::sign_at`] for messages with a single signature field
+    /// (view-change votes, re-proposal envelopes).
+    pub fn sign_combined_at(
+        &self,
+        activation_height: Option<u64>,
+        height: u64,
+        message: &[u8],
+    ) -> anyhow::Result<String> {
+        let key = self.key_at(activation_height, height)?;
+        Ok(common::validator_signature::sign_validator_message_combined(key, message))
+    }
+
+    /// PBFT PREPARE or COMMIT signature for `block_hash` at `height`.
+    pub fn pbft_signature_at(
+        &self,
+        activation_height: Option<u64>,
+        height: u64,
+        validator_id: &str,
+        phase: &str,
+        block_hash: &str,
+    ) -> anyhow::Result<common::BlockSignature> {
+        let message = consensus::pbft::pbft_signature_message(phase, block_hash);
+        let (signature, pq_signature) =
+            self.sign_at(activation_height, height, message.as_bytes())?;
+        Ok(common::BlockSignature {
+            validator_id: validator_id.to_owned(),
+            pubkey: self.pubkey_hex(),
+            signature,
+            pq_signature,
+        })
+    }
+
+    /// The Ed25519 public key that identifies this validator in both schemes.
+    pub fn pubkey_hex(&self) -> String {
+        common::validator_signature::validator_ed25519_pubkey_hex(&self.ed25519)
+    }
 }
 
 fn decode_seed(
@@ -547,6 +614,36 @@ impl NodeConfig {
                     Err(err) => config.secrets_config_errors.push(format!(
                         "failed to load validator ML-DSA-44 seed from secrets backend: {err}"
                     )),
+                }
+                // ADR-017: the ML-DSA-44 seed file that `creg validator
+                // onboard` writes next to the Ed25519 key (`validator.pq.key`),
+                // mounted the same way as `CREG_VALIDATOR_KEY_FILE`.
+                if let Some(pq_key_file) = nonempty_env("CREG_VALIDATOR_PQ_KEY_FILE") {
+                    if matches!(
+                        secrets.backend(),
+                        chain_registry_secrets::SecretsBackend::Vault
+                    ) {
+                        config.secrets_config_errors.push(
+                            "CREG_VALIDATOR_PQ_KEY_FILE must not be set when CREG_SECRETS_BACKEND=vault"
+                                .to_string(),
+                        );
+                    } else if config.validator_pq_seed.is_none() {
+                        match std::fs::read_to_string(&pq_key_file) {
+                            Ok(raw) => {
+                                let trimmed = raw.trim().to_string();
+                                if trimmed.is_empty() {
+                                    config.secrets_config_errors.push(format!(
+                                        "CREG_VALIDATOR_PQ_KEY_FILE ({pq_key_file}) is empty"
+                                    ));
+                                } else {
+                                    config.validator_pq_seed = Some(trimmed.into());
+                                }
+                            }
+                            Err(err) => config.secrets_config_errors.push(format!(
+                                "failed to read CREG_VALIDATOR_PQ_KEY_FILE ({pq_key_file}): {err}"
+                            )),
+                        }
+                    }
                 }
             }
             Err(err) => {
