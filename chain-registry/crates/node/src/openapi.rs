@@ -870,11 +870,14 @@ pub mod paths {
     /// Register the caller's validator identity (EVM address ↔ ed25519 pubkey ↔ node id).
     /// Requires an Ethereum personal-sign signature from the EVM address and
     /// an Ed25519 signature from the validator key over the same binding message.
+    /// Optionally binds an ML-DSA-44 key (ADR-017): `pq_pubkey` plus a
+    /// `pq_binding_signature` over `creg-pq-binding-v1|node_id|ed25519_pubkey|pq_pubkey|chain_id`
+    /// signed by both keys, sent together or not at all.
     #[utoipa::path(
         post,
         path = "/v1/validators/register",
         tag = "validators",
-        request_body(content = Object, description = "alias, evm_address, node_id, ed25519_pubkey, nonce, evm_signature, ed25519_signature"),
+        request_body(content = Object, description = "alias, evm_address, node_id, ed25519_pubkey, nonce, evm_signature, ed25519_signature, optional pq_pubkey + pq_binding_signature"),
         responses(
             (status = 200, body = ValidatorRegistration),
             (status = 400, body = ApiError),

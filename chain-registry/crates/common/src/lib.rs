@@ -353,6 +353,15 @@ pub enum GossipMessage {
         nonce: String,
         evm_signature: String,
         ed25519_signature: String,
+        /// ADR-017 ML-DSA-44 public key, sent together with
+        /// `pq_binding_signature` (both or neither). Omitted when unset, so
+        /// classical registrations keep their bytes and older peers ignore it.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        pq_pubkey: Option<String>,
+        /// Compact `creg-pq-binding-v1` hybrid signature over the registered
+        /// node ID, Ed25519 key, `pq_pubkey` and chain ID.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        pq_binding_signature: Option<String>,
     },
     /// A quorum-signed validator-set transition. Receivers must verify the
     /// certificate against their own persisted prior set before accepting it.

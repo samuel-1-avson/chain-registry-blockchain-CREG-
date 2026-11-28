@@ -131,6 +131,7 @@ pub fn validate_validator_identities(set: &ValidatorSet) -> Result<(), &'static 
     }
     let mut ids = HashSet::with_capacity(set.validators.len());
     let mut pubkeys = HashSet::with_capacity(set.validators.len());
+    let mut pq_pubkeys = HashSet::new();
     for validator in &set.validators {
         if validator.id.trim().is_empty() {
             return Err("validator set contains an empty validator identity");
@@ -155,6 +156,9 @@ pub fn validate_validator_identities(set: &ValidatorSet) -> Result<(), &'static 
         if let Some(ref pq) = validator.pq_pubkey {
             if !is_lower_hex(pq, crate::vote_v4::MLDSA44_PUBLIC_KEY_HEX_LEN) {
                 return Err("validator set contains a non-canonical ML-DSA-44 public key");
+            }
+            if !pq_pubkeys.insert(pq.as_str()) {
+                return Err("validator set contains duplicate ML-DSA-44 public keys");
             }
         }
     }

@@ -32,6 +32,11 @@ pub use consensus::pbft::PbftEngine;
 pub struct ValidatorRegistrationStatus {
     pub alias: String,
     pub identity: ValidatorIdentity,
+    /// ADR-017 ML-DSA-44 public key whose `creg-pq-binding-v1` proof this
+    /// node verified for `identity`. Admission carries it into the validator
+    /// set it certifies.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub pq_pubkey: Option<String>,
     pub registered_with_node: bool,
     pub applied_on_chain: bool,
     pub governance_approved: bool,

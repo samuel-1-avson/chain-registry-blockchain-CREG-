@@ -7,7 +7,7 @@
 
 use crate::crypto::{
     PublicKey, Signature, SignatureScheme, SigningKey, VerifyMode, ED25519_PUBLIC_KEY_LEN,
-    ED25519_SIGNATURE_LEN, MLDSA44_PUBLIC_KEY_LEN, MLDSA44_SIGNATURE_LEN,
+    ED25519_SIGNATURE_LEN, HYBRID_SIGNATURE_LEN, MLDSA44_PUBLIC_KEY_LEN, MLDSA44_SIGNATURE_LEN,
 };
 use crate::{sha256_hex, AnalysisBundleRefs, DeterministicRiskSummary, Validator};
 use anyhow::{bail, Context, Result};
@@ -26,6 +26,9 @@ pub const MAX_TRIGGER_WITNESS_WIRE_BYTES: usize = 4_096;
 pub const MLDSA44_SIGNATURE_HEX_LEN: usize = MLDSA44_SIGNATURE_LEN * 2;
 /// Fixed lowercase-hex byte length of a 1,312-byte ML-DSA-44 public key.
 pub const MLDSA44_PUBLIC_KEY_HEX_LEN: usize = MLDSA44_PUBLIC_KEY_LEN * 2;
+/// Fixed lowercase-hex length of a 2,484-byte hybrid signature
+/// (`ed25519_sig || mldsa44_sig`), the compact `PqKeyBindingV1` signature form.
+pub const HYBRID_SIGNATURE_HEX_LEN: usize = HYBRID_SIGNATURE_LEN * 2;
 /// Maximum serialized wire size of a signed hybrid `TriggerWitnessV1`.
 pub const MAX_HYBRID_TRIGGER_WITNESS_WIRE_BYTES: usize =
     MAX_TRIGGER_WITNESS_WIRE_BYTES + MLDSA44_SIGNATURE_HEX_LEN + 64;
@@ -370,6 +373,70 @@ impl PqKeyBindingV1 {
         pk.verify(self.binding_message().as_bytes(), &sig, VerifyMode::Strict)
             .context("PqKeyBindingV1 dual signature verification failed")
     }
+
+    /// Rebuild a binding from the compact form that chain-spec entries and
+    /// validator registrations carry: canonical lowercase hex for the
+    /// ML-DSA-44 key and for the hybrid signature (`ed25519_sig ||
+    /// mldsa44_sig`, 4,968 chars), with no `0x` prefix.
+    pub fn from_compact(
+        validator_id: &str,
+        ed25519_pubkey: &str,
+        pq_pubkey: &str,
+        chain_id: &str,
+        binding_signature: &str,
+    ) -> Result<Self> {
+        if !is_lower_hex_exact(pq_pubkey, MLDSA44_PUBLIC_KEY_HEX_LEN) {
+            bail!(
+                "pq_pubkey must be {} lowercase hex chars",
+                MLDSA44_PUBLIC_KEY_HEX_LEN
+            );
+        }
+        if !is_lower_hex_exact(binding_signature, HYBRID_SIGNATURE_HEX_LEN) {
+            bail!(
+                "pq_binding_signature must be {} lowercase hex chars",
+                HYBRID_SIGNATURE_HEX_LEN
+            );
+        }
+        let (ed_sig, pq_sig) = binding_signature.split_at(ED25519_SIGNATURE_LEN * 2);
+        Ok(Self {
+            validator_id: validator_id.to_string(),
+            ed25519_pubkey: ed25519_pubkey.to_string(),
+            pq_pubkey: pq_pubkey.to_string(),
+            chain_id: chain_id.to_string(),
+            ed25519_signature: ed_sig.to_string(),
+            pq_signature: pq_sig.to_string(),
+        })
+    }
+
+    /// The hybrid signature as one lowercase-hex string, the inverse of
+    /// [`PqKeyBindingV1::from_compact`].
+    pub fn compact_signature(&self) -> String {
+        format!(
+            "{}{}",
+            self.ed25519_signature.to_ascii_lowercase(),
+            self.pq_signature.to_ascii_lowercase()
+        )
+    }
+}
+
+/// Verify the compact `creg-pq-binding-v1` possession proof that binds
+/// `pq_pubkey` to a validator's Ed25519 `pubkey` on `chain_id` (`ADR-017`
+/// §4). Both halves of the hybrid signature must verify.
+pub fn verify_pq_key_binding(
+    validator_id: &str,
+    ed25519_pubkey: &str,
+    pq_pubkey: &str,
+    chain_id: &str,
+    binding_signature: &str,
+) -> Result<()> {
+    PqKeyBindingV1::from_compact(
+        validator_id,
+        ed25519_pubkey,
+        pq_pubkey,
+        chain_id,
+        binding_signature,
+    )?
+    .verify()
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
@@ -682,5 +749,104 @@ mod tests {
         stripped.pq_signature = None;
         assert!(stripped.verify(&val, true).is_err());
         assert!(stripped.verify(&val, false).is_err());
+    }
+
+    #[test]
+    fn compact_pq_key_binding_roundtrip_and_rejections() {
+        let (val, sk) = hybrid_validator("v-beta", 21);
+        let pq = val.pq_pubkey.clone().unwrap();
+        let binding = PqKeyBindingV1::sign_with("v-beta", "creg-testnet-1", &sk).unwrap();
+        let compact = binding.compact_signature();
+        assert_eq!(compact.len(), HYBRID_SIGNATURE_HEX_LEN);
+        assert_eq!(
+            PqKeyBindingV1::from_compact("v-beta", &val.pubkey, &pq, "creg-testnet-1", &compact)
+                .unwrap(),
+            binding
+        );
+        verify_pq_key_binding("v-beta", &val.pubkey, &pq, "creg-testnet-1", &compact).unwrap();
+
+        // Every bound field is covered by the signature.
+        assert!(
+            verify_pq_key_binding("v-other", &val.pubkey, &pq, "creg-testnet-1", &compact).is_err()
+        );
+        assert!(
+            verify_pq_key_binding("v-beta", &val.pubkey, &pq, "creg-mainnet-1", &compact).is_err()
+        );
+        let (other, _) = hybrid_validator("v-gamma", 22);
+        assert!(
+            verify_pq_key_binding("v-beta", &other.pubkey, &pq, "creg-testnet-1", &compact)
+                .is_err()
+        );
+        assert!(verify_pq_key_binding(
+            "v-beta",
+            &val.pubkey,
+            other.pq_pubkey.as_deref().unwrap(),
+            "creg-testnet-1",
+            &compact
+        )
+        .is_err());
+
+        // A tampered half fails: both keys must sign.
+        let mut tampered_ed = compact.clone().into_bytes();
+        tampered_ed[0] = if tampered_ed[0] == b'0' { b'1' } else { b'0' };
+        let tampered_ed = String::from_utf8(tampered_ed).unwrap();
+        assert!(
+            verify_pq_key_binding("v-beta", &val.pubkey, &pq, "creg-testnet-1", &tampered_ed)
+                .is_err()
+        );
+        let mut tampered_pq = compact.clone().into_bytes();
+        let last = tampered_pq.len() - 1;
+        tampered_pq[last] = if tampered_pq[last] == b'0' {
+            b'1'
+        } else {
+            b'0'
+        };
+        let tampered_pq = String::from_utf8(tampered_pq).unwrap();
+        assert!(
+            verify_pq_key_binding("v-beta", &val.pubkey, &pq, "creg-testnet-1", &tampered_pq)
+                .is_err()
+        );
+
+        // An Ed25519-only signature over the binding message is not a binding.
+        let ed_only = SigningKey::from_ed25519_seed(&[21u8; 32])
+            .sign(binding.binding_message().as_bytes())
+            .to_hex();
+        assert!(
+            verify_pq_key_binding("v-beta", &val.pubkey, &pq, "creg-testnet-1", &ed_only).is_err()
+        );
+
+        // Only the canonical compact encoding is accepted.
+        assert!(PqKeyBindingV1::from_compact(
+            "v-beta",
+            &val.pubkey,
+            &pq,
+            "creg-testnet-1",
+            &compact.to_ascii_uppercase()
+        )
+        .is_err());
+        assert!(PqKeyBindingV1::from_compact(
+            "v-beta",
+            &val.pubkey,
+            &pq.to_ascii_uppercase(),
+            "creg-testnet-1",
+            &compact
+        )
+        .is_err());
+        assert!(PqKeyBindingV1::from_compact(
+            "v-beta",
+            &val.pubkey,
+            &pq,
+            "creg-testnet-1",
+            &format!("0x{compact}")
+        )
+        .is_err());
+        assert!(PqKeyBindingV1::from_compact(
+            "v-beta",
+            &val.pubkey,
+            &pq,
+            "creg-testnet-1",
+            &compact[..compact.len() - 2]
+        )
+        .is_err());
     }
 }

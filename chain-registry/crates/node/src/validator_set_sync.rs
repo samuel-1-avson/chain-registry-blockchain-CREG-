@@ -560,7 +560,8 @@ fn validator_from_registration(
         // New performance fields default for freshly synced validators
         performance_score: 500,
         contribution_count: 0,
-        pq_pubkey: None,
+        // Verified against its `creg-pq-binding-v1` proof on registration.
+        pq_pubkey: registration.pq_pubkey.clone(),
     })
 }
 
@@ -655,6 +656,18 @@ async fn reconcile_state_from_worker(
                 if let Some(from_registration) =
                     validator_from_registration(registration, existing.stake, &node_id)
                 {
+                    // An ML-DSA-44 key is bound to one (id, Ed25519 key)
+                    // pair: a changed pair takes the registration's binding
+                    // (or none), and an unchanged one keeps its binding
+                    // unless the registration replaces it.
+                    if existing.id != from_registration.id
+                        || !existing
+                            .pubkey
+                            .eq_ignore_ascii_case(&from_registration.pubkey)
+                        || from_registration.pq_pubkey.is_some()
+                    {
+                        existing.pq_pubkey = from_registration.pq_pubkey;
+                    }
                     existing.id = from_registration.id;
                     existing.alias = from_registration.alias;
                     existing.pubkey = from_registration.pubkey;

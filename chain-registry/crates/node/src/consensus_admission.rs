@@ -1095,6 +1095,7 @@ impl ApprovalPlan {
         &self,
         current: &common::ValidatorSet,
         identity: &common::ValidatorIdentity,
+        expected_pq_pubkey: Option<&str>,
         tip_height: u64,
         tip_hash: &str,
     ) -> anyhow::Result<()> {
@@ -1102,6 +1103,7 @@ impl ApprovalPlan {
             &self.transition,
             current,
             identity,
+            expected_pq_pubkey,
             self.applicant,
             tip_height,
             tip_hash,
@@ -1114,10 +1116,15 @@ impl ApprovalPlan {
     }
 }
 
+/// `expected_pq_pubkey` is the ML-DSA-44 key this node verified in the
+/// applicant's `creg-pq-binding-v1` registration proof (ADR-017), or `None`
+/// for a classical registration. The certified set must carry exactly that
+/// key, so no signer certifies a key it has not seen proven.
 fn validate_single_addition_transition(
     transition: &common::AuthenticatedValidatorSetSnapshot,
     current: &common::ValidatorSet,
     identity: &common::ValidatorIdentity,
+    expected_pq_pubkey: Option<&str>,
     applicant: Address,
     tip_height: u64,
     tip_hash: &str,
@@ -1138,6 +1145,10 @@ fn validate_single_addition_transition(
                 && common::validator_status_is_active(&validator.status)
         })
         .context("the certified transition does not add the registered applicant")?;
+    anyhow::ensure!(
+        candidate.pq_pubkey.as_deref() == expected_pq_pubkey,
+        "the certified transition does not carry the applicant's verified ML-DSA-44 key"
+    );
     let previous = common::ValidatorSet::new(
         next.iter()
             .filter(|v| v.id != candidate.id)
@@ -1211,7 +1222,9 @@ fn build_next_validator_set_for_candidate(
         status: "active".to_string(),
         performance_score: 500,
         contribution_count: 0,
-        pq_pubkey: None,
+        // Verified against its `creg-pq-binding-v1` proof on registration;
+        // the validator-set hash commits to it.
+        pq_pubkey: registration.pq_pubkey.clone(),
     });
     validators.sort_by(|left, right| {
         left.id.cmp(&right.id).then_with(|| {
@@ -2161,6 +2174,7 @@ async fn auto_tick(
             &snapshot,
             &fresh_authority,
             &head.registration.identity,
+            head.registration.pq_pubkey.as_deref(),
             head.applicant,
             fresh_tip_height,
             &fresh_tip_hash,
@@ -2310,7 +2324,13 @@ async fn check_plan(
         matches_node_wallet(&authority, &s.config.node_id, signer),
         "the admission signer does not match this validator in certified chain history"
     );
-    plan.validate_transition(&authority, &registration.identity, tip_height, &tip_hash)
+    plan.validate_transition(
+        &authority,
+        &registration.identity,
+        registration.pq_pubkey.as_deref(),
+        tip_height,
+        &tip_hash,
+    )
 }
 
 struct TickCtx {
@@ -3388,27 +3408,82 @@ mod tests {
                 .collect();
         };
         assert!(plan
-            .validate_transition(&old, &identity, 21, &hash)
+            .validate_transition(&old, &identity, None, 21, &hash)
             .is_err());
         resign(&mut plan.transition);
-        plan.validate_transition(&old, &identity, 21, &hash)
+        plan.validate_transition(&old, &identity, None, 21, &hash)
             .unwrap();
         assert!(plan
-            .validate_transition(&old, &identity, 22, &hash)
+            .validate_transition(&old, &identity, None, 22, &hash)
             .is_err());
         assert!(plan
-            .validate_transition(&old, &identity, 21, &"bb".repeat(32))
+            .validate_transition(&old, &identity, None, 21, &"bb".repeat(32))
             .is_err());
         let mut wrong_identity = identity.clone();
         wrong_identity.ed25519_pubkey = "cc".repeat(32);
         assert!(plan
-            .validate_transition(&old, &wrong_identity, 21, &hash)
+            .validate_transition(&old, &wrong_identity, None, 21, &hash)
             .is_err());
+
+        // ADR-017: the certified applicant must carry exactly the ML-DSA-44
+        // key this signer verified in the applicant's binding proof.
+        let pq = "ab".repeat(common::crypto::MLDSA44_PUBLIC_KEY_LEN);
+        let other_pq = "cd".repeat(common::crypto::MLDSA44_PUBLIC_KEY_LEN);
+        assert!(plan
+            .validate_transition(&old, &identity, Some(&pq), 21, &hash)
+            .is_err());
+        let mut bound = ApprovalPlan {
+            transition: plan.transition.clone(),
+            ..plan
+        };
+        bound.transition.validators.validators[4].pq_pubkey = Some(pq.clone());
+        resign(&mut bound.transition);
+        bound
+            .validate_transition(&old, &identity, Some(&pq), 21, &hash)
+            .unwrap();
+        assert!(bound
+            .validate_transition(&old, &identity, None, 21, &hash)
+            .is_err());
+        assert!(bound
+            .validate_transition(&old, &identity, Some(&other_pq), 21, &hash)
+            .is_err());
+
         plan.transition.validators.validators[0].stake += 1;
         resign(&mut plan.transition);
         assert!(plan
-            .validate_transition(&old, &identity, 21, &hash)
+            .validate_transition(&old, &identity, None, 21, &hash)
             .is_err());
+    }
+
+    #[test]
+    fn next_validator_set_carries_the_registered_pq_pubkey() {
+        let key = SigningKey::from_bytes(&[9; 32]);
+        let current = common::ValidatorSet::new(vec![member(
+            "validator-0",
+            &SigningKey::from_bytes(&[8; 32]),
+            Address::repeat_byte(8),
+        )]);
+        let applicant = member("validator-1", &key, Address::repeat_byte(9));
+        let mut registration = crate::ValidatorRegistrationStatus {
+            identity: common::ValidatorIdentity {
+                evm_address: applicant.eth_address.clone(),
+                node_id: applicant.id.clone(),
+                ed25519_pubkey: applicant.pubkey.clone(),
+            },
+            ..Default::default()
+        };
+        let classical = build_next_validator_set_for_candidate(&current, &registration, 100);
+        assert_eq!(classical.validators[1].pq_pubkey, None);
+
+        let pq = "ab".repeat(common::crypto::MLDSA44_PUBLIC_KEY_LEN);
+        registration.pq_pubkey = Some(pq.clone());
+        let bound = build_next_validator_set_for_candidate(&current, &registration, 100);
+        assert_eq!(bound.validators[1].pq_pubkey.as_deref(), Some(pq.as_str()));
+        assert_ne!(
+            common::canonical_validator_set_hash(&bound),
+            common::canonical_validator_set_hash(&classical),
+            "the validator-set hash commits to the ML-DSA-44 key"
+        );
     }
 
     /// Fixed test vectors so that any divergence from the contract's digest
