@@ -36,6 +36,9 @@ const LOCAL_NODE_MISMATCH: &str = "Local node identity or network does not match
 #[derive(Clone)]
 struct Enrollment {
     signing_key: Arc<SigningKey>,
+    /// ADR-017 `creg-pq-binding-v1` proof for this validator's ML-DSA-44 key,
+    /// sent with the registration so the network can enrol the key.
+    pq_binding: Option<Arc<common::PqKeyBindingV1>>,
     client: Client,
     network: Url,
     local_node: Url,
@@ -70,6 +73,8 @@ struct BrowserConfig {
     faucet: String,
     node_id: String,
     public_key: String,
+    /// SHA-256 of the ML-DSA-44 public key, shown for the operator to check.
+    pq_key_fingerprint: Option<String>,
     manage_existing: bool,
     launch_log: Option<String>,
     approve: String,
@@ -92,6 +97,8 @@ struct ChainStats {
 #[derive(Deserialize)]
 struct Registration {
     identity: ValidatorIdentity,
+    #[serde(default)]
+    pq_pubkey: Option<String>,
     #[serde(default)]
     registered_with_node: bool,
     #[serde(default)]
@@ -123,6 +130,8 @@ struct SyncHealth {
 #[derive(Serialize)]
 struct EnrollmentStatus {
     registered: bool,
+    /// The network recorded this validator's ML-DSA-44 key binding.
+    pq_registered: bool,
     admitted: bool,
     identity_conflict: Option<String>,
     local_node: &'static str,
@@ -322,12 +331,14 @@ fn runtime_key_path(node_id: &str) -> Result<PathBuf> {
     Ok(home.join(dir).join("validator.key"))
 }
 
-fn runtime_key(path: &Path, create: bool) -> Result<SigningKey> {
+/// Read a 32-byte hex seed, creating it first when `create` is set and the
+/// file is missing.
+fn runtime_seed(path: &Path, create: bool, label: &str) -> Result<[u8; 32]> {
     if create && !path.exists() {
         crate::keygen::refuse_in_repo_key_path(path)?;
         let parent = path
             .parent()
-            .context("Validator key needs a parent directory")?;
+            .with_context(|| format!("The {label} needs a parent directory"))?;
         std::fs::create_dir_all(parent)?;
         let mut file = tempfile::NamedTempFile::new_in(parent)?;
         file.write_all(hex::encode(rand::random::<[u8; 32]>()).as_bytes())?;
@@ -336,16 +347,46 @@ fn runtime_key(path: &Path, create: bool) -> Result<SigningKey> {
         match file.persist_noclobber(path) {
             Ok(_) => {}
             Err(err) if err.error.kind() == std::io::ErrorKind::AlreadyExists => {}
-            Err(err) => return Err(err.error).context("Could not create validator key"),
+            Err(err) => {
+                return Err(err.error).with_context(|| format!("Could not create the {label}"))
+            }
         }
     }
     let text = std::fs::read_to_string(path)
-        .with_context(|| format!("Could not read validator key at {}", path.display()))?;
+        .with_context(|| format!("Could not read the {label} at {}", path.display()))?;
     let mut seed = [0; 32];
-    hex::decode_to_slice(text.trim().trim_start_matches("0x"), &mut seed).map_err(|_| {
-        anyhow::anyhow!("The node key file must contain a 32-byte Ed25519 seed in hex")
-    })?;
-    Ok(SigningKey::from_bytes(&seed))
+    hex::decode_to_slice(text.trim().trim_start_matches("0x"), &mut seed)
+        .map_err(|_| anyhow::anyhow!("The {label} file must contain a 32-byte seed in hex"))?;
+    Ok(seed)
+}
+
+fn runtime_key(path: &Path, create: bool) -> Result<SigningKey> {
+    Ok(SigningKey::from_bytes(&runtime_seed(
+        path,
+        create,
+        "validator key",
+    )?))
+}
+
+/// The ML-DSA-44 seed sits next to the Ed25519 key (`validator.key` →
+/// `validator.pq.key`); the two seeds are independent (ADR-017 §4).
+fn pq_seed_path(key_path: &Path) -> PathBuf {
+    key_path.with_extension("pq.key")
+}
+
+/// Sign the `creg-pq-binding-v1` proof with both of the validator's keys.
+fn pq_key_binding(
+    key: &SigningKey,
+    pq_seed: &[u8; 32],
+    node_id: &str,
+    chain_id: &str,
+) -> Result<common::PqKeyBindingV1> {
+    let hybrid = common::crypto::SigningKey::hybrid_from_seeds(&key.to_bytes(), pq_seed);
+    common::PqKeyBindingV1::sign_with(node_id, chain_id, &hybrid)
+}
+
+fn pq_key_fingerprint(binding: &common::PqKeyBindingV1) -> Result<String> {
+    Ok(common::sha256_hex(&hex::decode(&binding.pq_pubkey)?))
 }
 
 fn selector(signature: &str) -> String {
@@ -375,6 +416,7 @@ fn browser_config(node_id: String, key: &SigningKey) -> Result<BrowserConfig> {
         faucet: "https://faucet.testnet.cregnet.dev".into(),
         node_id,
         public_key: hex::encode(key.verifying_key().as_bytes()),
+        pq_key_fingerprint: None,
         manage_existing: false,
         launch_log: None,
         approve: selector("approve(address,uint256)"),
@@ -879,6 +921,10 @@ async fn status(
         .iter()
         .find(|record| record.identity.normalized() == identity);
     let registered = found.is_some_and(|record| record.registered_with_node);
+    let pq_registered = registered
+        && state.pq_binding.as_ref().is_some_and(|binding| {
+            found.and_then(|record| record.pq_pubkey.as_deref()) == Some(binding.pq_pubkey.as_str())
+        });
     let admitted = certified.as_ref().is_ok_and(|certified| {
         *certified || found.is_some_and(|record| record.admitted_to_consensus && record.active)
     });
@@ -1000,6 +1046,7 @@ async fn status(
     let launch_status = *state.launch_status.lock().await;
     Ok(Json(EnrollmentStatus {
         registered,
+        pq_registered,
         admitted,
         identity_conflict,
         local_node,
@@ -1046,6 +1093,19 @@ async fn register(
     let ed_signature = state
         .signing_key
         .sign(state.challenge(&identity).as_bytes());
+    let mut request = serde_json::json!({
+        "evm_address": identity.evm_address,
+        "node_id": identity.node_id,
+        "ed25519_pubkey": identity.ed25519_pubkey,
+        "nonce": state.nonce,
+        "evm_signature": proof.signature,
+        "ed25519_signature": hex::encode(ed_signature.to_bytes())
+    });
+    if let Some(binding) = &state.pq_binding {
+        // Nodes before ADR-017 Increment 3 ignore these fields.
+        request["pq_pubkey"] = serde_json::json!(binding.pq_pubkey);
+        request["pq_binding_signature"] = serde_json::json!(binding.compact_signature());
+    }
     let response = state
         .client
         .post(
@@ -1054,14 +1114,7 @@ async fn register(
                 .join("/v1/validator/register")
                 .map_err(|_| unavailable())?,
         )
-        .json(&serde_json::json!({
-            "evm_address": identity.evm_address,
-            "node_id": identity.node_id,
-            "ed25519_pubkey": identity.ed25519_pubkey,
-            "nonce": state.nonce,
-            "evm_signature": proof.signature,
-            "ed25519_signature": hex::encode(ed_signature.to_bytes())
-        }))
+        .json(&request)
         .send()
         .await
         .map_err(|_| unavailable())?;
@@ -1202,6 +1255,12 @@ pub async fn run(
     });
     let mut config = browser_config(node_id, &key)?;
     config.manage_existing = manage_existing;
+    // ADR-017: a new or existing validator gets an independent ML-DSA-44 seed
+    // and proves possession of it with its registration.
+    let pq_path = pq_seed_path(&key_path);
+    let pq_seed = runtime_seed(&pq_path, true, "ML-DSA-44 seed")?;
+    let pq_binding = pq_key_binding(&key, &pq_seed, &config.node_id, &config.chain_id)?;
+    config.pq_key_fingerprint = Some(pq_key_fingerprint(&pq_binding)?);
     let http_port = local_node_url
         .as_ref()
         .and_then(|_| local_node.port_or_known_default());
@@ -1216,6 +1275,7 @@ pub async fn run(
     let listener = tokio::net::TcpListener::bind((std::net::Ipv4Addr::LOCALHOST, 0)).await?;
     let state = Enrollment {
         signing_key: Arc::new(key),
+        pq_binding: Some(Arc::new(pq_binding)),
         client: Client::builder()
             .redirect(reqwest::redirect::Policy::none())
             .timeout(Duration::from_secs(8))
@@ -1257,6 +1317,15 @@ pub async fn run(
     }
     println!("Validator onboarding: {url}");
     println!("Local validator key: {}", key_path.display());
+    println!(
+        "Local ML-DSA-44 seed: {} (public key SHA-256 {})",
+        pq_path.display(),
+        state
+            .config
+            .pq_key_fingerprint
+            .as_deref()
+            .unwrap_or_default()
+    );
     println!("Keep this process open while using the onboarding page. The session expires in 60 minutes.");
     axum::serve(listener, app(state))
         .with_graceful_shutdown(async {
@@ -1573,6 +1642,7 @@ mod tests {
                     Json(match &*proof {
                         Some(proof) => json!([{
                             "identity": { "evm_address": registered_address, "node_id": proof["node_id"], "ed25519_pubkey": proof["ed25519_pubkey"] },
+                            "pq_pubkey": proof["pq_pubkey"],
                             "registered_with_node": true
                         }]),
                         None => json!([]),
@@ -1591,8 +1661,12 @@ mod tests {
         let server = tokio::spawn(async move { axum::serve(mock, node).await.unwrap() });
         let http = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
         let origin = format!("http://{}", http.local_addr().unwrap());
+        let chain_id = config.chain_id.clone();
+        let pq_binding =
+            pq_key_binding(&key, &[13; 32], "fixture-validator", &config.chain_id).unwrap();
         let state = Enrollment {
             signing_key: Arc::new(key.clone()),
+            pq_binding: Some(Arc::new(pq_binding.clone())),
             client: Client::new(),
             network: url.clone(),
             local_node: url,
@@ -1661,6 +1735,7 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(received["registered"], true);
+        assert_eq!(received["pq_registered"], true);
         assert_eq!(received["admitted"], false);
         assert_eq!(
             received["local_node"],
@@ -1683,8 +1758,39 @@ mod tests {
         key.verifying_key()
             .verify(message.as_bytes(), &ed_signature)
             .unwrap();
+        // ADR-017: the registration proves possession of the ML-DSA-44 key
+        // with both keys, for this node ID and chain.
+        assert_eq!(proof["pq_pubkey"], pq_binding.pq_pubkey);
+        common::verify_pq_key_binding(
+            "fixture-validator",
+            proof["ed25519_pubkey"].as_str().unwrap(),
+            proof["pq_pubkey"].as_str().unwrap(),
+            &chain_id,
+            proof["pq_binding_signature"].as_str().unwrap(),
+        )
+        .unwrap();
         enrollment.abort();
         server.abort();
+    }
+
+    #[test]
+    fn ml_dsa_seed_is_kept_next_to_the_validator_key_and_reused() {
+        let dir = tempfile::tempdir().unwrap();
+        let key_path = dir.path().join("validator.key");
+        let key = runtime_key(&key_path, true).unwrap();
+        let pq_path = pq_seed_path(&key_path);
+        assert_eq!(pq_path, dir.path().join("validator.pq.key"));
+        let seed = runtime_seed(&pq_path, true, "ML-DSA-44 seed").unwrap();
+        assert_eq!(
+            runtime_seed(&pq_path, true, "ML-DSA-44 seed").unwrap(),
+            seed
+        );
+        assert_ne!(seed, key.to_bytes(), "the two seeds are independent");
+        let first = pq_key_binding(&key, &seed, "node-1", "creg-testnet-1").unwrap();
+        let second = pq_key_binding(&key, &seed, "node-1", "creg-testnet-1").unwrap();
+        assert_eq!(first.pq_pubkey, second.pq_pubkey);
+        assert_eq!(pq_key_fingerprint(&first).unwrap().len(), 64);
+        assert!(runtime_seed(&dir.path().join("missing.pq.key"), false, "seed").is_err());
     }
 
     #[tokio::test]
@@ -1796,6 +1902,7 @@ mod tests {
         let origin = format!("http://{}", http.local_addr().unwrap());
         let state = Enrollment {
             signing_key: Arc::new(key),
+            pq_binding: None,
             client: Client::new(),
             network: url.clone(),
             local_node: url,
@@ -1862,6 +1969,7 @@ mod tests {
         let task = tokio::spawn(async move { axum::serve(server, router).await.unwrap() });
         let state = Enrollment {
             signing_key: Arc::new(key),
+            pq_binding: None,
             client: Client::new(),
             network: Url::parse(&origin).unwrap(),
             local_node: Url::parse(&origin).unwrap(),
@@ -1892,6 +2000,7 @@ mod tests {
         let origin = format!("http://{}", http.local_addr().unwrap());
         let state = Enrollment {
             signing_key: Arc::new(key),
+            pq_binding: None,
             client: Client::new(),
             network: Url::parse("http://127.0.0.1:1").unwrap(),
             local_node: Url::parse("http://127.0.0.1:1").unwrap(),
@@ -1921,7 +2030,13 @@ mod tests {
         assert!(html.contains("id=\"wallet-list\""));
         assert!(html.contains("id=\"switch-account\""));
         assert!(html.contains("id=\"rescan-wallets\""));
-        for field in ["identity-wallet", "identity-node", "identity-key", "confirm-identity"] {
+        for field in [
+            "identity-wallet",
+            "identity-node",
+            "identity-key",
+            "identity-pq",
+            "confirm-identity",
+        ] {
             assert!(html.contains(&format!("id=\"{field}\"")));
         }
 

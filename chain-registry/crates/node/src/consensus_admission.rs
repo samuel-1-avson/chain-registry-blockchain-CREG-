@@ -34,6 +34,8 @@ use anyhow::Context;
 use chain_registry_secrets::{HotKeyRole, SecretsProvider};
 use common::crypto::{PublicKey, Signature, SignatureScheme, VerifyMode};
 
+mod pq_enrollment;
+
 pub(crate) const TOPIC: &str = "creg/v1/admission-attestations";
 pub(crate) const TRANSITION_TOPIC: &str = "creg/v1/admission-transitions";
 pub(crate) const MAX_GOSSIP_BYTES: usize = 2_048;
@@ -442,6 +444,9 @@ struct StoreData {
     cached_l1: CachedL1Snapshot,
     signer_override: Option<Option<chain_registry_secrets::SecretString>>,
     finality_lag_override: Option<u64>,
+    /// ADR-017 key enrollment candidate (next validator-set hash) and when
+    /// this node first saw it unchanged; see `pq_enrollment`.
+    pq_enrollment_watch: Option<(String, i64)>,
 }
 
 #[derive(Default)]
@@ -1002,7 +1007,14 @@ pub async fn run_tick(
         tracing::warn!(%error, "Candidate auto-activation check failed");
     }
 
-    auto_tick(state, store, p2p).await
+    // Admission runs first: only one validator-set transition can be certified
+    // per height, and admitting a validator takes precedence over enrolling an
+    // existing member's ML-DSA-44 key (ADR-017).
+    let admission = auto_tick(state, store, p2p).await;
+    if let Err(error) = pq_enrollment::tick(state, store, p2p).await {
+        tracing::warn!(%error, "ML-DSA-44 key enrollment tick will retry");
+    }
+    admission
 }
 
 struct AdmissionSettings {

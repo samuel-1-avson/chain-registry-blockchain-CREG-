@@ -30,6 +30,7 @@ function parseArgs() {
         valKey: null,
         nodeId: 'ext-val-primary',
         alias: 'External Validator Primary',
+        pqBindingFile: null,
         chainId: 'creg-testnet-1',
         endpoints: ['http://localhost:8080', 'https://api.testnet.cregnet.dev']
     };
@@ -44,6 +45,8 @@ function parseArgs() {
             parsed.nodeId = args[++i];
         } else if (arg === '--alias') {
             parsed.alias = args[++i];
+        } else if (arg === '--pq-binding-file') {
+            parsed.pqBindingFile = args[++i];
         } else if (arg === '--help' || arg === '-h') {
             printHelp();
             process.exit(0);
@@ -61,10 +64,27 @@ function printHelp() {
   --validator-key <HEX_OR_PATH>  Ed25519 validator private key (default: ~/.creg-validator/validator.key)
   --node-id <NODE_ID>            Node ID (default: ext-val-primary)
   --alias <NAME>                 Display name (default: External Validator Primary)
+  --pq-binding-file <PATH>       ADR-017 ML-DSA-44 key binding JSON (pq_pubkey, pq_binding_signature)
+                                 printed by the sign_validator_identity example with --validator-pq-key-hex
 
 \x1b[1mEXAMPLE:\x1b[0m
   node testnet/register-validator-identity.js --key 0xYOUR_SEPOLIA_PRIVATE_KEY
 `);
+}
+
+// ADR-017 compact key binding: a 1,312-byte ML-DSA-44 key and a 2,484-byte
+// hybrid signature over the node ID, Ed25519 key and chain ID, as lowercase hex.
+function readPqBinding(file, edPubkey) {
+    if (!file) return {};
+    const value = JSON.parse(fs.readFileSync(file, 'utf8'));
+    if (!/^[0-9a-f]{2624}$/.test(value.pq_pubkey || '')
+        || !/^[0-9a-f]{4968}$/.test(value.pq_binding_signature || '')) {
+        throw new Error(`${file} must hold pq_pubkey (2,624 lowercase hex chars) and pq_binding_signature (4,968)`);
+    }
+    if (value.ed25519_pubkey && value.ed25519_pubkey.toLowerCase() !== edPubkey.toLowerCase()) {
+        throw new Error(`${file} was signed for a different Ed25519 key`);
+    }
+    return { pq_pubkey: value.pq_pubkey, pq_binding_signature: value.pq_binding_signature };
 }
 
 function getEd25519Key(valKeyInput) {
@@ -101,6 +121,7 @@ async function main() {
     }
 
     const { privKey: edPrivKey, pubkeyHex: edPubkey } = getEd25519Key(opts.valKey);
+    const pqBinding = readPqBinding(opts.pqBindingFile, edPubkey);
     const wallet = new ethers.Wallet(opts.evmKey);
     const evmAddress = wallet.address.toLowerCase();
     const nonce = Date.now().toString();
@@ -134,7 +155,8 @@ async function main() {
         alias: opts.alias,
         nonce: nonce,
         evm_signature: evmSignature,
-        ed25519_signature: edSignature
+        ed25519_signature: edSignature,
+        ...pqBinding
     };
 
     console.log('\x1b[32m  ✓ Dual signatures generated successfully!\x1b[0m\n');
