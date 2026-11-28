@@ -72,6 +72,7 @@ body { margin: 0; background: var(--bg); color: var(--text); }
 .table { width: 100%; border-collapse: collapse; font-size: 12px; }
 .table th, .table td { text-align: left; padding: 8px; border-bottom: 1px solid var(--border); }
 .table th { color: var(--muted); font-weight: 600; }
+.r7-identity-value { overflow-wrap: anywhere; }
 
 .tabs { display: flex; gap: 8px; }
 .tab { padding: 7px 12px; border-radius: 6px; border: 1px solid var(--border); background: var(--surface); color: var(--muted); cursor: pointer; font-size: 12px; font-weight: 600; }

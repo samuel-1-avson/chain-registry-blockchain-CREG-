@@ -33,14 +33,73 @@ pub struct NodeOverview {
 #[derive(Debug, Serialize)]
 pub struct R7NodeHealth {
     pub is_validator: bool,
-    pub synced: bool,
+    pub chain_healthy: bool,
+    pub chain_lag_blocks: u64,
+    pub tip_height: u64,
     pub finalized_height: u64,
+    pub peer_count: u64,
+    pub sepolia_sync_state: String,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct R7CertifiedIdentity {
+    pub node_id: String,
+    pub evm_address: String,
+    pub ed25519_pubkey: String,
+}
+
+pub(crate) async fn fetch_r7_certified_identity(
+    port: u16,
+    node_id: &str,
+) -> Option<R7CertifiedIdentity> {
+    let client = reqwest::Client::builder()
+        .timeout(Duration::from_secs(4))
+        .no_proxy()
+        .redirect(reqwest::redirect::Policy::none())
+        .build()
+        .ok()?;
+    let profile = client
+        .get(format!(
+            "http://127.0.0.1:{port}/v1/public/validators/{}",
+            encode_segment(node_id)
+        ))
+        .send()
+        .await
+        .ok()?
+        .error_for_status()
+        .ok()?
+        .json::<serde_json::Value>()
+        .await
+        .ok()?;
+    let identity: R7CertifiedIdentity = if let Some(certified) = profile.get("certified_membership")
+    {
+        serde_json::from_value(certified.clone()).ok()?
+    } else {
+        // The deployed v4 endpoint exposes the authoritative identity in
+        // these top-level fields, separately from its registration record.
+        if profile["in_active_set"].as_bool() != Some(true)
+            || !matches!(
+                profile["status"].as_str(),
+                Some("active" | "online" | "self")
+            )
+        {
+            return None;
+        }
+        R7CertifiedIdentity {
+            node_id: profile["node_id"].as_str()?.to_owned(),
+            evm_address: profile["eth_address"].as_str()?.to_owned(),
+            ed25519_pubkey: profile["pubkey"].as_str()?.to_owned(),
+        }
+    };
+    (identity.node_id == node_id).then_some(identity)
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct R7AdmissionSummary {
     pub stage: String,
     pub stage_reason: String,
+    pub certified_member: bool,
+    pub registration_conflict: bool,
     pub l1_approvals_collected: u64,
     pub l1_approvals_required: u64,
     pub transition_approvals_collected: u64,
@@ -78,6 +137,10 @@ struct AdmissionApplicantResponse {
     stage: String,
     #[serde(default)]
     stage_reason: String,
+    #[serde(default)]
+    certified_member: Option<bool>,
+    #[serde(default)]
+    registration_conflict: bool,
     #[serde(default)]
     l1_approvals_collected: u64,
     #[serde(default)]
@@ -134,6 +197,11 @@ async fn fetch_admission_endpoint(
         }
     }
     AdmissionFetchOutcome::Applicant(R7AdmissionSummary {
+        certified_member: app.certified_member.unwrap_or(matches!(
+            app.stage.as_str(),
+            "active_voting" | "activated_awaiting_first_vote"
+        )),
+        registration_conflict: app.registration_conflict,
         stage: app.stage,
         stage_reason: app.stage_reason,
         l1_approvals_collected: app.l1_approvals_collected,
@@ -156,8 +224,8 @@ fn merge_admission_summaries(
 ) -> Option<R7AdmissionSummary> {
     match (local, public) {
         (Some(loc), Some(pub_)) => {
-            let prefer_public_stage =
-                pub_.stage == "active_voting" && loc.stage != "active_voting";
+            let prefer_public_stage = (pub_.certified_member && !loc.certified_member)
+                || (pub_.stage == "active_voting" && loc.stage != "active_voting");
             let (stage, stage_reason) = if prefer_public_stage {
                 (pub_.stage, pub_.stage_reason)
             } else {
@@ -190,9 +258,9 @@ fn merge_admission_summaries(
             Some(R7AdmissionSummary {
                 stage,
                 stage_reason,
-                l1_approvals_collected: loc
-                    .l1_approvals_collected
-                    .max(pub_.l1_approvals_collected),
+                certified_member: loc.certified_member || pub_.certified_member,
+                registration_conflict: loc.registration_conflict || pub_.registration_conflict,
+                l1_approvals_collected: loc.l1_approvals_collected.max(pub_.l1_approvals_collected),
                 l1_approvals_required: loc.l1_approvals_required.max(pub_.l1_approvals_required),
                 transition_approvals_collected: loc
                     .transition_approvals_collected
@@ -279,6 +347,8 @@ pub(crate) async fn fetch_r7_admission_status(
 
     saw_not_found.then(|| R7AdmissionSummary {
         stage: "rollout_pending".to_string(),
+        certified_member: false,
+        registration_conflict: false,
         stage_reason:
             "R7 node does not yet expose /v1/public/validator/admission-status (HTTP 404); validator fleet rollout is pending"
                 .to_string(),
@@ -316,6 +386,7 @@ struct R7SyncResponse {
 struct R7StatsResponse {
     chain_id: String,
     spec_signature_verified: bool,
+    tip_height: u64,
     finalized_height: u64,
     validator_set_sync_state: String,
     peer_count: u64,
@@ -349,11 +420,12 @@ pub(crate) async fn fetch_r7_health(
     );
     Ok(R7NodeHealth {
         is_validator: health.is_validator,
-        synced: health.sync.healthy
-            && health.sync.lag_blocks == 0
-            && stats.validator_set_sync_state == "synced"
-            && stats.peer_count > 0,
+        chain_healthy: health.sync.healthy,
+        chain_lag_blocks: health.sync.lag_blocks,
+        tip_height: stats.tip_height,
         finalized_height: stats.finalized_height,
+        peer_count: stats.peer_count,
+        sepolia_sync_state: stats.validator_set_sync_state,
     })
 }
 
@@ -775,7 +847,10 @@ mod tests {
     fn merge_admission_summaries_fills_public_sepolia_tx_into_local_active_status() {
         let local = R7AdmissionSummary {
             stage: "active_voting".to_string(),
-            stage_reason: "Certified at block #22; first finalized vote recorded at block #22".to_string(),
+            certified_member: true,
+            registration_conflict: true,
+            stage_reason: "Certified at block #22; first finalized vote recorded at block #22"
+                .to_string(),
             l1_approvals_collected: 4,
             l1_approvals_required: 4,
             transition_approvals_collected: 4,
@@ -790,7 +865,10 @@ mod tests {
         };
         let public = R7AdmissionSummary {
             stage: "active_voting".to_string(),
-            stage_reason: "Certified at block #22; first finalized vote recorded at block #22".to_string(),
+            certified_member: true,
+            registration_conflict: false,
+            stage_reason: "Certified at block #22; first finalized vote recorded at block #22"
+                .to_string(),
             l1_approvals_collected: 4,
             l1_approvals_required: 4,
             transition_approvals_collected: 4,
@@ -805,6 +883,7 @@ mod tests {
         };
 
         let merged = merge_admission_summaries(Some(local), Some(public)).expect("merged");
+        assert!(merged.certified_member && merged.registration_conflict);
         assert_eq!(merged.l1_tx_status, "confirmed");
         assert_eq!(
             merged.l1_tx_hash.as_deref(),

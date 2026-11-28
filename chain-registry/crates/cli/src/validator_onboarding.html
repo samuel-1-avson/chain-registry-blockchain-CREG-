@@ -11,7 +11,7 @@
   <main>
     <header>
       <p class="network">CREG <span>R7 · Sepolia testnet</span></p>
-      <h1>Join as a validator</h1>
+      <h1 id="enrollment-heading">Join as a validator</h1>
       <p>Approve transactions in your browser wallet. CREG uses your local validator key to sign the registration.</p>
     </header>
     <p id="status" class="notice" role="status">Checking the R7 network…</p>
@@ -28,7 +28,7 @@
       <p id="balance"></p>
       <a id="faucet" href="https://faucet.testnet.cregnet.dev" target="_blank" rel="noopener noreferrer">Open tCREG faucet</a>
     </section>
-    <section>
+    <section id="stake-section">
       <h2>Stake and apply</h2>
       <p id="stake-detail">The application uses Sepolia ETH for gas.</p>
       <button id="stake" disabled>Apply as validator</button>
@@ -36,7 +36,13 @@
     </section>
     <section>
       <h2>Register validator identity</h2>
-      <p id="identity" class="mono"></p>
+      <dl>
+        <div><dt>Sepolia wallet</dt><dd id="identity-wallet" class="mono">Connect a wallet</dd></div>
+        <div><dt>Node ID</dt><dd id="identity-node" class="mono"></dd></div>
+        <div><dt>Ed25519 public key</dt><dd id="identity-key" class="mono"></dd></div>
+      </dl>
+      <label><input type="checkbox" id="confirm-identity" disabled> I verified this wallet, node ID, and public key.</label>
+      <p id="identity-conflict" role="alert"></p>
       <button id="register" disabled>Sign and register</button>
       <p id="registration">Connect your wallet to check registration.</p>
     </section>

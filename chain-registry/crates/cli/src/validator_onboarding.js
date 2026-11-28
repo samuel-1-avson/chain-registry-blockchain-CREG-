@@ -145,12 +145,15 @@ function updateButtons() {
   switchAccount.hidden = !wallet;
   switchAccount.disabled = !wallet || busy;
   rescanWallets.disabled = busy;
-  stake.disabled = !connected || busy || Boolean(pendingHash) || !canApply
+  const identityReady = Boolean(connected && enrollment && !enrollment.identity_conflict);
+  const confirmIdentity = byId("confirm-identity");
+  confirmIdentity.disabled = !identityReady || busy || Boolean(enrollment?.registered);
+  stake.disabled = !identityReady || config?.manage_existing || busy || Boolean(pendingHash) || !canApply
     || walletState.balance < walletState.minimum || walletState.gas === 0n;
-  register.disabled = !connected || busy || ![1, 2].includes(walletState.application)
-    || !enrollment || enrollment.registered;
+  register.disabled = !identityReady || busy || ![1, 2].includes(walletState.application)
+    || enrollment.registered || !confirmIdentity.checked;
   refreshButton.disabled = !wallet || busy;
-  start.disabled = busy || !enrollment?.registered || enrollment.launch_status === "starting"
+  start.disabled = busy || !identityReady || !enrollment.registered || enrollment.launch_status === "starting"
     || enrollment.local_node !== "Local node unavailable";
 }
 
@@ -218,6 +221,8 @@ async function refresh() {
     if (address !== wallet) return;
     walletState = nextWalletState;
     enrollment = nextEnrollment;
+    byId("identity-conflict").textContent = enrollment.identity_conflict || "";
+    if (enrollment.identity_conflict) byId("confirm-identity").checked = false;
     byId("balance").textContent = amount(walletState.balance) + " tCREG · " + amount(walletState.gas) + " Sepolia ETH";
     byId("stake-detail").textContent = "The R7 contract requires " + amount(walletState.minimum)
       + " tCREG and Sepolia ETH for gas. Application: "
@@ -293,6 +298,9 @@ function resetWallet() {
   walletState = undefined;
   enrollment = undefined;
   pendingHash = undefined;
+  byId("identity-wallet").textContent = "Connect a wallet";
+  byId("identity-conflict").textContent = "";
+  byId("confirm-identity").checked = false;
   for (const id of ["wallet", "balance", "transaction"]) byId(id).textContent = "";
   byId("stake-detail").textContent = "The application uses Sepolia ETH for gas.";
   byId("registration").textContent = "Connect your wallet to check registration.";
@@ -487,6 +495,7 @@ async function connectSelectedWallet({ requestPermissions = false } = {}) {
   wallet = address;
   connectedWalletName = selected.name;
   byId("wallet").textContent = connectedWalletName + " · " + address;
+  byId("identity-wallet").textContent = address;
   await refresh();
   notice(selected.name + " connected. Follow the application and registration steps below.");
 }
@@ -542,6 +551,9 @@ stake.addEventListener("click", () => withAction(async () => {
 
 register.addEventListener("click", () => withAction(async () => {
   const address = wallet;
+  if (!byId("confirm-identity").checked || enrollment?.identity_conflict) {
+    throw new Error("Review the validator identity before signing.");
+  }
   const current = await readWallet(address);
   if (![1, 2].includes(current.application)) throw new Error("Submit the validator application before registering.");
   const { message } = await api("challenge", { address });
@@ -568,9 +580,17 @@ setInterval(() => {
 
 api("config").then((result) => {
   config = result;
-  byId("identity").textContent = config.node_id + " · " + config.public_key;
+  byId("identity-node").textContent = config.node_id;
+  byId("identity-key").textContent = config.public_key;
+  byId("stake-section").hidden = config.manage_existing;
+  if (config.manage_existing) {
+    document.title = "Manage CREG validator";
+    byId("enrollment-heading").textContent = "Manage existing validator";
+  }
   byId("faucet").href = config.faucet;
   start.hidden = !config.launch_log;
   updateButtons();
   notice("R7 verified. Connect a Sepolia wallet to begin.");
 }).catch((error) => notice(error.message, true));
+
+byId("confirm-identity").addEventListener("change", updateButtons);

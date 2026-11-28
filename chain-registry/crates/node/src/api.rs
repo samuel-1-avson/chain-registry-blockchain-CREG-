@@ -1451,11 +1451,40 @@ pub(crate) async fn apply_validator_registration(
     {
         let mut s = state.write().await;
 
-        if s.validator_registrations.iter().any(|(key, registration)| {
-            *key != normalized_key
-                && (registration.identity.node_id == node_id
-                    || registration.identity.ed25519_pubkey == ed25519_pubkey)
-        }) {
+        let next_height = s
+            .chain
+            .tip_height()
+            .map_err(|_| {
+                (
+                    StatusCode::SERVICE_UNAVAILABLE,
+                    "Validator authority is unavailable".to_string(),
+                )
+            })?
+            .saturating_add(1);
+        let authority = crate::validator_set_history::verification_set_at(
+            &s.config.data_dir,
+            next_height,
+            &s.validator_set_bootstrap,
+        )
+        .map_err(|error| {
+            tracing::warn!(%error, "Could not verify validator authority for registration");
+            (
+                StatusCode::SERVICE_UNAVAILABLE,
+                "Validator authority is unavailable".to_string(),
+            )
+        })?;
+        let matches_authority =
+            check_certified_registration(&authority, &evm_address, &node_id, &ed25519_pubkey)?;
+
+        // Accept repairs to a certified identity even if stale metadata from
+        // another wallet incorrectly claimed its ID or public key.
+        if !matches_authority
+            && s.validator_registrations.iter().any(|(key, registration)| {
+                *key != normalized_key
+                    && (registration.identity.node_id == node_id
+                        || registration.identity.ed25519_pubkey == ed25519_pubkey)
+            })
+        {
             return Err((
                 StatusCode::CONFLICT,
                 "node_id or Ed25519 pubkey is already registered to another wallet".to_string(),
@@ -1516,6 +1545,36 @@ pub(crate) async fn apply_validator_registration(
 
         Ok(response)
     }
+}
+
+fn check_certified_registration(
+    authority: &common::ValidatorSet,
+    wallet: &str,
+    node_id: &str,
+    public_key: &str,
+) -> Result<bool, (StatusCode, String)> {
+    let mut exact = false;
+    for validator in authority
+        .validators
+        .iter()
+        .filter(|validator| common::validator_status_is_active(&validator.status))
+    {
+        let same_wallet = validator.eth_address.eq_ignore_ascii_case(wallet);
+        let same_node = validator.id.eq_ignore_ascii_case(node_id);
+        let same_key = validator.pubkey.eq_ignore_ascii_case(public_key);
+        if same_wallet && same_node && same_key {
+            exact = true;
+        } else if same_wallet || same_node || same_key {
+            return Err((
+                StatusCode::CONFLICT,
+                format!(
+                    "Registration conflicts with certified validator {}",
+                    validator.id
+                ),
+            ));
+        }
+    }
+    Ok(exact)
 }
 
 async fn register_validator_identity(
@@ -3686,7 +3745,6 @@ async fn get_validator_profile(
     let s = state.read().await;
 
     // Support either EVM address or node id for lookup
-    let registration = s.validator_registrations.get(&normalized).cloned();
     let active = s
         .validator_set
         .validators
@@ -3696,6 +3754,50 @@ async fn get_validator_profile(
                 || v.id.eq_ignore_ascii_case(&normalized)
         })
         .cloned();
+    let certified = s
+        .chain
+        .tip_height()
+        .ok()
+        .and_then(|tip| {
+            crate::validator_set_history::verification_set_at(
+                &s.config.data_dir,
+                tip.saturating_add(1),
+                &s.validator_set_bootstrap,
+            )
+            .ok()
+        })
+        .and_then(|authority| {
+            authority.validators.into_iter().find(|validator| {
+                common::validator_status_is_active(&validator.status)
+                    && (validator.eth_address.eq_ignore_ascii_case(&normalized)
+                        || validator.id.eq_ignore_ascii_case(&normalized))
+            })
+        });
+    let registration = s
+        .validator_registrations
+        .get(&normalized)
+        .or_else(|| {
+            certified.as_ref().and_then(|validator| {
+                s.validator_registrations
+                    .get(&validator.eth_address.to_ascii_lowercase())
+            })
+        })
+        .cloned();
+    let registration_conflict =
+        registration
+            .as_ref()
+            .zip(certified.as_ref())
+            .is_some_and(|(registration, validator)| {
+                let identity = registration.identity.normalized();
+                identity.node_id != validator.id
+                    || !identity
+                        .ed25519_pubkey
+                        .eq_ignore_ascii_case(&validator.pubkey)
+                    || !identity
+                        .evm_address
+                        .eq_ignore_ascii_case(&validator.eth_address)
+            });
+    let active = certified.clone().or(active);
 
     if registration.is_none() && active.is_none() {
         return not_found(format!("Validator not found: {}", address));
@@ -3742,6 +3844,13 @@ async fn get_validator_profile(
     Json(serde_json::json!({
         "address": normalized,
         "registration": registration,
+        "certified_membership": certified.as_ref().map(|validator| serde_json::json!({
+            "node_id": validator.id,
+            "evm_address": validator.eth_address,
+            "ed25519_pubkey": validator.pubkey,
+            "stake_creg": validator.stake,
+        })),
+        "registration_conflict": registration_conflict,
         "in_active_set": in_active_set,
         "stake": stake,
         "stake_unit": "CREG",
@@ -6637,6 +6746,82 @@ mod tests {
         other["pq_binding_signature"] = serde_json::json!(other_binding.compact_signature());
         assert_eq!(post(other).await?, StatusCode::CONFLICT);
 
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn certified_identity_survives_conflicting_registration_and_can_repair_it(
+    ) -> anyhow::Result<()> {
+        let (state, _tempdir, _, _, _) = make_test_state(0).await?;
+        let (wallet_key, wallet) = make_evm_keypair();
+        let (node_key, pubkey) = make_keypair();
+        let (wrong_key, wrong_pubkey) = make_keypair();
+        let chain_id = {
+            let mut state = state.write().await;
+            state
+                .validator_set_bootstrap
+                .validators
+                .push(common::Validator {
+                    id: "node-1".into(),
+                    eth_address: wallet.clone(),
+                    pubkey: pubkey.clone(),
+                    stake: 100,
+                    status: "active".into(),
+                    ..Default::default()
+                });
+            state.validator_registrations.insert(
+                wallet.clone(),
+                ValidatorRegistrationStatus {
+                    identity: ValidatorIdentity {
+                        evm_address: wallet.clone(),
+                        node_id: "another-node".into(),
+                        ed25519_pubkey: wrong_pubkey.clone(),
+                    },
+                    registered_with_node: true,
+                    ..Default::default()
+                },
+            );
+            node_chain_id(&state.config)
+        };
+        let store = AttestationStore::new();
+        let report = crate::consensus_admission::build_admission_status_report(
+            &state,
+            &store,
+            Some(&wallet),
+            Some("node-1"),
+        )
+        .await;
+        assert_eq!(report.applicants.len(), 1);
+        let applicant = &report.applicants[0];
+        assert_eq!(applicant.ed25519_pubkey, pubkey);
+        assert_eq!(applicant.stake_creg, 100);
+        assert!(applicant.certified_member && applicant.registration_conflict);
+        assert_eq!(applicant.stage, "activated_awaiting_first_vote");
+
+        let proof = |key, pubkey: &str| {
+            serde_json::from_value(identity_proof_request(
+                &chain_id,
+                &wallet_key,
+                &wallet,
+                key,
+                pubkey,
+            ))
+        };
+        let rejection = apply_validator_registration(&state, &proof(&wrong_key, &wrong_pubkey)?)
+            .await
+            .expect_err("wrong key must be rejected");
+        assert_eq!(rejection.0, StatusCode::CONFLICT);
+        assert_eq!(
+            state.read().await.validator_registrations[&wallet]
+                .identity
+                .node_id,
+            "another-node"
+        );
+        let repaired = apply_validator_registration(&state, &proof(&node_key, &pubkey)?)
+            .await
+            .map_err(|(_, error)| anyhow::anyhow!(error))?;
+        assert_eq!(repaired.identity.node_id, "node-1");
+        assert_eq!(repaired.identity.ed25519_pubkey, pubkey);
         Ok(())
     }
 

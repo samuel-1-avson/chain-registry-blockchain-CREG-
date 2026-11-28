@@ -10,7 +10,8 @@ param(
     [string]$EthRpc = "",
     [int]$HttpPort = 8080,
     [int]$P2pPort = 9000,
-    [string]$CustomKey = ""
+    [string]$CustomKey = "",
+    [string]$DockerNetwork = $env:CREG_R7_DOCKER_NETWORK
 )
 
 $ErrorActionPreference = "Stop"
@@ -28,6 +29,15 @@ Write-Host "============================================================" -Foreg
 if (-not (Get-Command docker -ErrorAction SilentlyContinue)) {
     Write-Error "Docker is not found. Please install and start Docker Desktop."
     exit 1
+}
+$networkArgs = @()
+if ($DockerNetwork) {
+    if ($DockerNetwork -notmatch '^[a-zA-Z0-9][a-zA-Z0-9_.-]*$') {
+        throw "The Docker network name is invalid."
+    }
+    docker network inspect $DockerNetwork *> $null
+    if ($LASTEXITCODE -ne 0) { throw "The configured R7 Docker network is unavailable." }
+    $networkArgs = @("--network", $DockerNetwork)
 }
 
 # Resolve Node ID and isolated Data Directory (allows running multiple nodes on one host)
@@ -68,10 +78,12 @@ if ($env:CREG_ONBOARDING_KEY_FILE) {
     }
     $reviewedImageId = "sha256:2b472a089fe6ac651edfbae51b616456ed335f35992c0374f10c1ea80ce6caa3"
     $reviewedConfigId = "sha256:8731cc85c73e6267e2e00014e8df50aef3f4d60ce6cfcaddb8fd0a3584eb2ad9"
-    $image = $null
-    foreach ($candidate in @($reviewedImageId, $reviewedConfigId)) {
-        docker image inspect $candidate *> $null
-        if ($LASTEXITCODE -eq 0) { $image = $candidate; break }
+    $image = $env:CREG_OBSERVER_IMAGE
+    if (-not $image) {
+        foreach ($candidate in @($reviewedImageId, $reviewedConfigId)) {
+            docker image inspect $candidate *> $null
+            if ($LASTEXITCODE -eq 0) { $image = $candidate; break }
+        }
     }
     if (-not $image) {
         $image = "us-central1-docker.pkg.dev/gen-lang-client-0022105784/creg-testnet/creg-node@$reviewedImageId"
@@ -81,15 +93,16 @@ if ($env:CREG_ONBOARDING_KEY_FILE) {
     $observerData = Join-Path $dataDir "onboarding-observer-r7"
     New-Item -ItemType Directory -Path $observerData -Force | Out-Null
     $autoActivate = ($env:CREG_ADMISSION_AUTO_ACTIVATE -eq "true" -or $env:CREG_ADMISSION_AUTO_ACTIVATE -eq "1")
-    if ($env:CREG_OBSERVER_IMAGE) {
-        $image = $env:CREG_OBSERVER_IMAGE
-    }
     $observerArgs = @("run", "-d", "--name", $containerName, "--restart", "unless-stopped",
         "--label", "dev.creg.validator=$expectedLabel", "--env-file", $profile,
         "--env", "CREG_NODE_ID=$NodeId", "--env", "CREG_IS_VALIDATOR=false",
         "--publish", "${httpBind}:8080",
         "--mount", "type=bind,source=$observerData,target=/data",
         "--mount", "type=bind,source=$scannerDir,target=/scanner,readonly")
+    $observerArgs += $networkArgs
+    if ($env:BOOTNODE) {
+        $observerArgs += @("--env", "CREG_P2P_SEEDS=$env:BOOTNODE")
+    }
     if ($autoActivate) {
         $resolvedKey = (Resolve-Path -LiteralPath $env:CREG_ONBOARDING_KEY_FILE).Path
         $observerArgs += @(
@@ -230,9 +243,9 @@ $dockerArgs = @(
     "-p", "${httpBind}:8080",
     "-p", "$($P2pPort):9000",
     "-v", "${chainDataDir}:/data",
-    "-v", "${scannerDir}:/scanner:ro",
-    $chosenImage
+    "-v", "${scannerDir}:/scanner:ro"
 )
+$dockerArgs += $networkArgs + @($chosenImage)
 & docker @dockerArgs | Out-Null
 if ($LASTEXITCODE -ne 0) { throw "Failed to start the R7 validator container." }
 

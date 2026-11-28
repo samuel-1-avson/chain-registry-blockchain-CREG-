@@ -216,7 +216,7 @@ async fn start_test_node() -> (String, tokio::task::JoinHandle<()>) {
         Arc::clone(&state),
         event_bus,
         limiter,
-        AttestationStore::new(),
+        AttestationStore::for_chain(None),
         config.cors.clone(),
         tx_s.clone(),
         p2p.clone(),

@@ -370,6 +370,10 @@ pub struct AdmissionProgressView {
     pub applicant: String,
     pub node_id: String,
     pub ed25519_pubkey: String,
+    #[serde(default)]
+    pub certified_member: bool,
+    #[serde(default)]
+    pub registration_conflict: bool,
     pub stage: String,
     pub stage_reason: String,
     pub staking_state: String,
@@ -2952,12 +2956,13 @@ pub async fn build_admission_status_report(
         )
     };
 
-    let authority = crate::validator_set_history::verification_set_at(
+    let certified_authority = crate::validator_set_history::verification_set_at(
         &data_dir,
         tip_height.saturating_add(1),
         &bootstrap,
     )
-    .unwrap_or(validator_set);
+    .ok();
+    let authority = certified_authority.as_ref().unwrap_or(&validator_set);
     let active_in_authority = authority
         .validators
         .iter()
@@ -3009,13 +3014,40 @@ pub async fn build_admission_status_report(
 
     let mut applicants = Vec::new();
     let mut keys: Vec<String> = registrations.keys().cloned().collect();
+    if let Some(authority) = &certified_authority {
+        keys.extend(authority.validators.iter().filter_map(|validator| {
+            (common::validator_status_is_active(&validator.status)
+                && validator.eth_address.parse::<Address>().is_ok())
+            .then(|| validator.eth_address.to_ascii_lowercase())
+        }));
+    }
     keys.sort();
+    keys.dedup();
 
     for key in keys {
-        let Some(reg) = registrations.get(&key) else {
+        let reg = registrations.get(&key);
+        let registered_identity = reg.map(|record| record.identity.normalized());
+        let certified = certified_authority.as_ref().and_then(|authority| {
+            authority.validators.iter().find(|validator| {
+                validator.eth_address.eq_ignore_ascii_case(&key)
+                    && common::validator_status_is_active(&validator.status)
+            })
+        });
+        let certified_identity = certified.map(|validator| {
+            common::ValidatorIdentity {
+                node_id: validator.id.clone(),
+                ed25519_pubkey: validator.pubkey.clone(),
+                evm_address: validator.eth_address.clone(),
+            }
+            .normalized()
+        });
+        let registration_conflict = certified_identity
+            .as_ref()
+            .zip(registered_identity.as_ref())
+            .is_some_and(|(certified, registered)| certified != registered);
+        let Some(identity) = certified_identity.or(registered_identity) else {
             continue;
         };
-        let identity = reg.identity.normalized();
         let applicant_addr = identity.evm_address.clone();
         if let Some(ref filter) = applicant_filter_norm {
             if &applicant_addr != filter {
@@ -3032,14 +3064,16 @@ pub async fn build_admission_status_report(
         let staking_state = l1_info
             .map(|c| c.staking_state.clone())
             .filter(|s| !s.is_empty())
-            .unwrap_or_else(|| {
-                if reg.staking_state.is_empty() {
-                    "unknown".to_string()
-                } else {
-                    reg.staking_state.clone()
-                }
-            });
-        let stake_creg = l1_info.map(|c| c.stake_creg).unwrap_or(reg.stake);
+            .or_else(|| {
+                reg.map(|r| r.staking_state.clone())
+                    .filter(|s| !s.is_empty())
+            })
+            .unwrap_or_else(|| "unknown".to_string());
+        let stake_creg = certified
+            .map(|validator| validator.stake)
+            .or_else(|| l1_info.map(|c| c.stake_creg))
+            .or_else(|| reg.map(|record| record.stake))
+            .unwrap_or_default();
         let application_nonce = l1_info.map(|c| c.applied_at).filter(|&n| n > 0);
         let expires_at = l1_info
             .and_then(|c| c.expires_at)
@@ -3084,7 +3118,7 @@ pub async fn build_admission_status_report(
             }
         }
 
-        let voting_activation_height = if identity.is_complete() {
+        let voting_activation_height = if certified.is_some() && identity.is_complete() {
             crate::validator_set_history::certified_activation_height_for(
                 &data_dir,
                 &identity.node_id,
@@ -3097,7 +3131,14 @@ pub async fn build_admission_status_report(
             None
         };
 
-        let mut first_finalized_vote_height = cached_votes.get(&applicant_addr).copied();
+        let in_certified_set = certified.is_some();
+        let mut first_finalized_vote_height =
+            cached_votes.get(&applicant_addr).copied().filter(|height| {
+                in_certified_set
+                    && *height <= tip_height
+                    && voting_activation_height
+                        .map_or(!registration_conflict, |activation| *height >= activation)
+            });
         if first_finalized_vote_height.is_none() {
             if let Some(act_h) = voting_activation_height {
                 first_finalized_vote_height = find_first_finalized_vote_height(
@@ -3147,7 +3188,6 @@ pub async fn build_admission_status_report(
             ),
         };
 
-        let in_certified_set = candidate_in_authority(&authority, &identity).unwrap_or(false);
         let (stage, stage_reason) = if let Some(vote_h) = first_finalized_vote_height {
             (
                 "active_voting".to_string(),
@@ -3159,9 +3199,9 @@ pub async fn build_admission_status_report(
         } else if in_certified_set {
             (
                 "activated_awaiting_first_vote".to_string(),
-                format!(
-                    "Certified in R7 voting set at block #{}; waiting for next finalized block containing this validator's PBFT vote",
-                    voting_activation_height.unwrap_or(next_height)
+                voting_activation_height.map_or_else(
+                    || "Certified in the R7 voting set; waiting for a finalized PBFT vote".to_string(),
+                    |height| format!("Certified in the R7 voting set from block #{height}; waiting for a finalized PBFT vote"),
                 ),
             )
         } else if let Some(err) = cached_l1.rpc_error.as_ref() {
@@ -3258,6 +3298,8 @@ pub async fn build_admission_status_report(
             applicant: applicant_addr,
             node_id: identity.node_id,
             ed25519_pubkey: identity.ed25519_pubkey,
+            certified_member: in_certified_set,
+            registration_conflict,
             stage,
             stage_reason,
             staking_state: staking_state.clone(),
