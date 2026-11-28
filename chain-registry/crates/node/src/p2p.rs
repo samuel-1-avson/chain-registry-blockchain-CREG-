@@ -1173,6 +1173,8 @@ impl P2PNode {
                                     nonce,
                                     evm_signature,
                                     ed25519_signature,
+                                    pq_pubkey,
+                                    pq_binding_signature,
                                 }) => {
                                     let proof = crate::validator_registry_gossip::RegistrationProof {
                                         evm_address,
@@ -1182,6 +1184,8 @@ impl P2PNode {
                                         nonce,
                                         evm_signature,
                                         ed25519_signature,
+                                        pq_pubkey,
+                                        pq_binding_signature,
                                     };
                                     match crate::api::apply_validator_registration(&state, &proof).await {
                                         Ok(status) => {

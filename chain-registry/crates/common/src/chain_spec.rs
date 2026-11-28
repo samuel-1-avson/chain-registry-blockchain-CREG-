@@ -196,8 +196,17 @@ pub struct ValidatorSpecEntry {
     pub stake: u64,
     pub reputation: u32,
     pub status: String, // active | pending | jailed
+    /// ADR-017 ML-DSA-44 public key (2,624 lowercase hex chars). When set,
+    /// `pq_binding_signature` must prove possession of it.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub pq_pubkey: Option<String>,
+    /// Compact `creg-pq-binding-v1` hybrid signature (4,968 lowercase hex
+    /// chars) by both of this validator's keys over its `id`, `pubkey`,
+    /// `pq_pubkey` and the spec's `chain_id`. Signed spec data, but not part
+    /// of the genesis or validator-set hash: those commit to `pq_pubkey`, and
+    /// hedged ML-DSA signatures differ on every signing.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pq_binding_signature: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -285,6 +294,7 @@ impl ChainSpec {
         }
         let bootstrap = self.to_runtime_validator_set();
         crate::validate_validator_identities(&bootstrap).map_err(anyhow::Error::msg)?;
+        self.validate_pq_key_bindings()?;
         if phase_c
             && bootstrap
                 .validators
@@ -310,6 +320,39 @@ impl ChainSpec {
                 if crate::validator_status_is_active(&validator.status) && validator.stake == 0 {
                     anyhow::bail!("active Phase C validator has no stake");
                 }
+            }
+        }
+        Ok(())
+    }
+
+    /// Every bootstrap `pq_pubkey` must carry a `creg-pq-binding-v1` proof
+    /// signed by both of that validator's keys for this chain (ADR-017 §4),
+    /// and a binding signature without a key is rejected as unsigned data.
+    fn validate_pq_key_bindings(&self) -> anyhow::Result<()> {
+        for entry in &self.validator_set.validators {
+            match (&entry.pq_pubkey, &entry.pq_binding_signature) {
+                (None, None) => {}
+                (Some(pq_pubkey), Some(signature)) => crate::verify_pq_key_binding(
+                    &entry.id,
+                    &entry.pubkey,
+                    pq_pubkey,
+                    &self.chain_id,
+                    signature,
+                )
+                .map_err(|error| {
+                    anyhow::anyhow!(
+                        "validator {} has an invalid ML-DSA-44 key binding: {error:#}",
+                        entry.id
+                    )
+                })?,
+                (Some(_), None) => anyhow::bail!(
+                    "validator {} has a pq_pubkey without a pq_binding_signature",
+                    entry.id
+                ),
+                (None, Some(_)) => anyhow::bail!(
+                    "validator {} has a pq_binding_signature without a pq_pubkey",
+                    entry.id
+                ),
             }
         }
         Ok(())
@@ -639,6 +682,7 @@ mod tests {
                     reputation: 100,
                     status: "active".into(),
                     pq_pubkey: None,
+                    pq_binding_signature: None,
                 }],
             },
             services: Services {
@@ -800,6 +844,7 @@ mod tests {
                     reputation: 100,
                     status: "active".into(),
                     pq_pubkey: None,
+                    pq_binding_signature: None,
                 }
             })
             .collect();
@@ -811,6 +856,115 @@ mod tests {
 
         spec.consensus_params.consensus_encoding = Some("unknown-encoding-v99".into());
         assert!(spec.validate_consensus_identity_for_client().is_err());
+    }
+
+    fn hybrid_spec_entry(spec: &ChainSpec, i: u8) -> (ValidatorSpecEntry, String) {
+        let key = crate::crypto::SigningKey::hybrid_from_seeds(&[i + 10; 32], &[i + 60; 32]);
+        let (ed_pk, pq_pk) = key.public_key().hybrid_parts().unwrap();
+        let id = format!("val-{i}");
+        let binding = crate::PqKeyBindingV1::sign_with(id.clone(), spec.chain_id.clone(), &key)
+            .unwrap()
+            .compact_signature();
+        (
+            ValidatorSpecEntry {
+                id: id.clone(),
+                alias: id,
+                pubkey: hex::encode(ed_pk),
+                eth_address: format!("0x{:040x}", i + 1),
+                stake: 100,
+                reputation: 100,
+                status: "active".into(),
+                pq_pubkey: Some(hex::encode(pq_pk)),
+                pq_binding_signature: Some(binding.clone()),
+            },
+            binding,
+        )
+    }
+
+    fn rehash(mut spec: ChainSpec) -> ChainSpec {
+        spec.genesis_hash = spec.compute_genesis_hash().unwrap();
+        spec
+    }
+
+    #[test]
+    fn pq_pubkey_requires_a_valid_binding_for_this_chain() {
+        let mut spec = test_spec();
+        spec.consensus_params.consensus_encoding =
+            Some(crate::PHASE_C_CONSENSUS_ENCODING.to_string());
+        spec.validator_set.validators = (0..4).map(|i| hybrid_spec_entry(&spec, i).0).collect();
+        let spec = rehash(spec);
+        spec.validate_consensus_identity_for_client()
+            .expect("bound ML-DSA-44 keys are accepted");
+
+        // The binding signature is signed data but not part of the genesis
+        // hash: re-signing (hedged) leaves the chain identity unchanged.
+        let (_, resigned) = hybrid_spec_entry(&spec, 0);
+        let mut resigned_spec = spec.clone();
+        resigned_spec.validator_set.validators[0].pq_binding_signature = Some(resigned);
+        assert_eq!(
+            resigned_spec.compute_genesis_hash().unwrap(),
+            spec.genesis_hash
+        );
+        resigned_spec
+            .validate_consensus_identity_for_client()
+            .expect("a fresh binding signature is equally valid");
+
+        // The ML-DSA-44 key is committed to by the genesis hash.
+        let mut without_pq = spec.clone();
+        without_pq.validator_set.validators[0].pq_pubkey = None;
+        without_pq.validator_set.validators[0].pq_binding_signature = None;
+        assert_ne!(
+            without_pq.compute_genesis_hash().unwrap(),
+            spec.genesis_hash
+        );
+
+        let mut missing = spec.clone();
+        missing.validator_set.validators[0].pq_binding_signature = None;
+        let err = rehash(missing)
+            .validate_consensus_identity_for_client()
+            .unwrap_err();
+        assert!(err.to_string().contains("without a pq_binding_signature"));
+
+        let mut orphan = spec.clone();
+        orphan.validator_set.validators[0].pq_pubkey = None;
+        let err = rehash(orphan)
+            .validate_consensus_identity_for_client()
+            .unwrap_err();
+        assert!(err.to_string().contains("without a pq_pubkey"));
+
+        // A binding made for another validator id or another chain is rejected.
+        let mut swapped = spec.clone();
+        let other = swapped.validator_set.validators[1]
+            .pq_binding_signature
+            .clone();
+        swapped.validator_set.validators[0].pq_binding_signature = other;
+        let err = rehash(swapped)
+            .validate_consensus_identity_for_client()
+            .unwrap_err();
+        assert!(err.to_string().contains("invalid ML-DSA-44 key binding"));
+
+        let mut other_chain = spec.clone();
+        other_chain.chain_id = "creg-other-1".into();
+        assert!(rehash(other_chain)
+            .validate_consensus_identity_for_client()
+            .is_err());
+
+        // Two validators may not share one ML-DSA-44 key.
+        let mut shared = spec.clone();
+        let pq = shared.validator_set.validators[0].pq_pubkey.clone();
+        shared.validator_set.validators[1].pq_pubkey = pq;
+        let err = rehash(shared)
+            .validate_consensus_identity_for_client()
+            .unwrap_err();
+        assert!(err.to_string().contains("duplicate ML-DSA-44"));
+    }
+
+    #[test]
+    fn pq_binding_signature_is_omitted_when_unset() {
+        let value = serde_json::to_value(test_spec()).unwrap();
+        let entry = &value["validator_set"]["validators"][0];
+        assert!(entry.get("pq_pubkey").is_none());
+        assert!(entry.get("pq_binding_signature").is_none());
     }
 
     // ── Sepolia chain-spec ↔ on-chain Staking.sol drift guard ────────────────

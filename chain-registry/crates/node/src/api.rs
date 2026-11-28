@@ -1002,6 +1002,13 @@ struct RegisterValidatorIdentityRequest {
     evm_signature: String,
     ed25519_signature: String,
     alias: Option<String>,
+    /// ADR-017 ML-DSA-44 public key (2,624 lowercase hex chars), sent with
+    /// `pq_binding_signature` or not at all.
+    #[serde(default)]
+    pq_pubkey: Option<String>,
+    /// Compact `creg-pq-binding-v1` hybrid signature (4,968 lowercase hex chars).
+    #[serde(default)]
+    pq_binding_signature: Option<String>,
 }
 
 fn non_zero_address(value: &str) -> Option<String> {
@@ -1363,6 +1370,36 @@ fn verify_validator_identity_proofs(
     verify_ed25519_identity_signature(&message, ed25519_pubkey, ed25519_signature)
 }
 
+/// ADR-017 §4: a registration may bind an ML-DSA-44 key with a compact
+/// `creg-pq-binding-v1` proof signed by both of the validator's keys over its
+/// node ID, Ed25519 key and this chain's ID. Returns the verified key, or
+/// `None` for a classical registration.
+fn verify_registration_pq_binding(
+    chain_id: &str,
+    node_id: &str,
+    ed25519_pubkey: &str,
+    pq_pubkey: Option<&str>,
+    pq_binding_signature: Option<&str>,
+) -> Result<Option<String>, (StatusCode, String)> {
+    match (pq_pubkey, pq_binding_signature) {
+        (None, None) => Ok(None),
+        (Some(pq_pubkey), Some(signature)) => {
+            common::verify_pq_key_binding(node_id, ed25519_pubkey, pq_pubkey, chain_id, signature)
+                .map_err(|error| {
+                    (
+                        StatusCode::UNAUTHORIZED,
+                        format!("Invalid ML-DSA-44 key binding: {error:#}"),
+                    )
+                })?;
+            Ok(Some(pq_pubkey.to_string()))
+        }
+        _ => Err((
+            StatusCode::BAD_REQUEST,
+            "pq_pubkey and pq_binding_signature must be sent together".to_string(),
+        )),
+    }
+}
+
 /// Validate, verify ownership proofs, and apply a validator identity
 /// registration to local state (insert + reconcile). Shared by the HTTP
 /// handler and the gossip-receive path so a registration is processed
@@ -1395,6 +1432,13 @@ pub(crate) async fn apply_validator_registration(
         &proof.ed25519_signature,
     )
     .map_err(|e| (StatusCode::UNAUTHORIZED, e))?;
+    let pq_pubkey = verify_registration_pq_binding(
+        &chain_id,
+        &node_id,
+        &ed25519_pubkey,
+        proof.pq_pubkey.as_deref(),
+        proof.pq_binding_signature.as_deref(),
+    )?;
 
     let normalized_key = normalized_validator_key(&evm_address);
     let alias = proof
@@ -1417,6 +1461,16 @@ pub(crate) async fn apply_validator_registration(
                 "node_id or Ed25519 pubkey is already registered to another wallet".to_string(),
             ));
         }
+        if let Some(pq) = &pq_pubkey {
+            if s.validator_registrations.iter().any(|(key, registration)| {
+                *key != normalized_key && registration.pq_pubkey.as_ref() == Some(pq)
+            }) {
+                return Err((
+                    StatusCode::CONFLICT,
+                    "ML-DSA-44 pubkey is already registered to another wallet".to_string(),
+                ));
+            }
+        }
 
         let identity = ValidatorIdentity {
             evm_address,
@@ -1433,6 +1487,14 @@ pub(crate) async fn apply_validator_registration(
                 ..ValidatorRegistrationStatus::default()
             });
 
+        // A classical proof (for example an older one replayed over gossip)
+        // keeps the ML-DSA-44 key already bound to this same identity; a new
+        // binding replaces it, and a changed identity drops it.
+        registration.pq_pubkey = match pq_pubkey {
+            Some(pq) => Some(pq),
+            None if registration.identity == identity => registration.pq_pubkey.take(),
+            None => None,
+        };
         registration.alias = alias;
         registration.identity = identity;
         registration.registered_with_node = true;
@@ -1469,6 +1531,8 @@ async fn register_validator_identity(
         nonce: request.nonce,
         evm_signature: request.evm_signature,
         ed25519_signature: request.ed25519_signature,
+        pq_pubkey: request.pq_pubkey,
+        pq_binding_signature: request.pq_binding_signature,
     };
 
     match apply_validator_registration(&state, &proof).await {
@@ -6470,6 +6534,108 @@ mod tests {
             )
             .await?;
         assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn rest_register_validator_identity_binds_a_verified_pq_key() -> anyhow::Result<()> {
+        let (state, _tempdir, p2p_handle, tx_sender, _tx_receiver) = make_test_state(0).await?;
+        let chain_id = {
+            let s = state.read().await;
+            node_chain_id(&s.config)
+        };
+        let (evm_key, evm_address) = make_evm_keypair();
+        let (ed_key, ed_pubkey) = make_keypair();
+        let hybrid = common::crypto::SigningKey::hybrid_from_seeds(&ed_key.to_bytes(), &[42; 32]);
+        let binding = common::PqKeyBindingV1::sign_with("node-1", chain_id.clone(), &hybrid)?;
+        let app = router(
+            state.clone(),
+            new_event_bus(),
+            RateLimiter::new(RateLimitConfig::default()),
+            AttestationStore::new(),
+            crate::config::CorsConfig::default(),
+            tx_sender,
+            p2p_handle,
+        );
+        let post = |body: serde_json::Value| {
+            let app = app.clone();
+            async move {
+                let response = app
+                    .oneshot(
+                        Request::post("/v1/validators/register")
+                            .header("content-type", "application/json")
+                            .body(Body::from(serde_json::to_vec(&body)?))?,
+                    )
+                    .await?;
+                anyhow::Ok(response.status())
+            }
+        };
+        let stored_pq = || async {
+            state
+                .read()
+                .await
+                .validator_registrations
+                .get(&evm_address)
+                .and_then(|registration| registration.pq_pubkey.clone())
+        };
+        let classical =
+            identity_proof_request(&chain_id, &evm_key, &evm_address, &ed_key, &ed_pubkey);
+
+        // Half a binding is malformed.
+        let mut half = classical.clone();
+        half["pq_pubkey"] = serde_json::json!(binding.pq_pubkey);
+        assert_eq!(post(half).await?, StatusCode::BAD_REQUEST);
+
+        // A binding signed for another chain is not proof for this one.
+        let foreign = common::PqKeyBindingV1::sign_with("node-1", "creg-other-1", &hybrid)?;
+        let mut wrong_chain = classical.clone();
+        wrong_chain["pq_pubkey"] = serde_json::json!(foreign.pq_pubkey);
+        wrong_chain["pq_binding_signature"] = serde_json::json!(foreign.compact_signature());
+        assert_eq!(post(wrong_chain).await?, StatusCode::UNAUTHORIZED);
+        assert_eq!(stored_pq().await, None);
+
+        let mut bound = classical.clone();
+        bound["pq_pubkey"] = serde_json::json!(binding.pq_pubkey);
+        bound["pq_binding_signature"] = serde_json::json!(binding.compact_signature());
+        assert_eq!(post(bound).await?, StatusCode::ACCEPTED);
+        assert_eq!(stored_pq().await, Some(binding.pq_pubkey.clone()));
+
+        // Replaying the classical proof keeps the bound key.
+        assert_eq!(post(classical).await?, StatusCode::ACCEPTED);
+        assert_eq!(stored_pq().await, Some(binding.pq_pubkey.clone()));
+
+        // Another wallet cannot claim the same ML-DSA-44 key.
+        let (other_evm_key, other_evm_address) = make_evm_keypair();
+        let (other_ed_key, other_ed_pubkey) = make_keypair();
+        let other_hybrid =
+            common::crypto::SigningKey::hybrid_from_seeds(&other_ed_key.to_bytes(), &[42; 32]);
+        let mut other = identity_proof_request(
+            &chain_id,
+            &other_evm_key,
+            &other_evm_address,
+            &other_ed_key,
+            &other_ed_pubkey,
+        );
+        // A distinct node ID, so only the ML-DSA-44 key collides.
+        let message = validator_identity_registration_message(
+            &chain_id,
+            &other_evm_address,
+            "node-2",
+            &other_ed_pubkey,
+            "registration-test-nonce",
+        );
+        other["node_id"] = serde_json::json!("node-2");
+        other["evm_signature"] =
+            serde_json::json!(sign_evm_personal_message(&other_evm_key, &message));
+        other["ed25519_signature"] = serde_json::json!(hex::encode(
+            other_ed_key.sign(message.as_bytes()).to_bytes()
+        ));
+        let other_binding = common::PqKeyBindingV1::sign_with("node-2", chain_id, &other_hybrid)?;
+        assert_eq!(other_binding.pq_pubkey, binding.pq_pubkey);
+        other["pq_pubkey"] = serde_json::json!(other_binding.pq_pubkey);
+        other["pq_binding_signature"] = serde_json::json!(other_binding.compact_signature());
+        assert_eq!(post(other).await?, StatusCode::CONFLICT);
 
         Ok(())
     }

@@ -383,6 +383,11 @@ mod tests {
         } else {
             (pk.to_hex(), None)
         };
+        let pq_binding_signature = pq_pk_opt.as_ref().map(|_| {
+            common::PqKeyBindingV1::sign_with(id, "creg-testnet-1", key)
+                .unwrap()
+                .compact_signature()
+        });
         let mut spec = ChainSpec {
             spec_version: CURRENT_SPEC_VERSION,
             chain_id: "creg-testnet-1".into(),
@@ -442,6 +447,7 @@ mod tests {
                     reputation: 100,
                     status: "active".into(),
                     pq_pubkey: pq_pk_opt,
+                    pq_binding_signature,
                 }],
             },
             services: Services {

@@ -40,6 +40,13 @@ pub struct RegistrationProof {
     pub nonce: String,
     pub evm_signature: String,
     pub ed25519_signature: String,
+    /// ADR-017 ML-DSA-44 public key; see [`RegistrationProof::pq_binding_signature`].
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pq_pubkey: Option<String>,
+    /// Compact `creg-pq-binding-v1` hybrid signature proving possession of
+    /// `pq_pubkey`. Sent together with it (both or neither).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pq_binding_signature: Option<String>,
 }
 
 impl RegistrationProof {
@@ -52,7 +59,21 @@ impl RegistrationProof {
             nonce: self.nonce,
             evm_signature: self.evm_signature,
             ed25519_signature: self.ed25519_signature,
+            pq_pubkey: self.pq_pubkey,
+            pq_binding_signature: self.pq_binding_signature,
         }
+    }
+
+    fn same_identity(&self, other: &Self) -> bool {
+        self.evm_address
+            .trim()
+            .eq_ignore_ascii_case(other.evm_address.trim())
+            && self.node_id.trim() == other.node_id.trim()
+            && self
+                .ed25519_pubkey
+                .trim()
+                .trim_start_matches("0x")
+                .eq_ignore_ascii_case(other.ed25519_pubkey.trim().trim_start_matches("0x"))
     }
 }
 
@@ -132,11 +153,23 @@ pub fn load_all(data_dir: &Path) -> Vec<RegistrationProof> {
 
 /// Persist a registration proof, replacing any prior entry for the same EVM
 /// address (case-insensitive). Atomic write (temp file + rename).
+///
+/// A proof without an ML-DSA-44 binding keeps the binding already journaled
+/// for the same (wallet, node ID, Ed25519 key) identity, so replaying an
+/// older classical proof cannot strip a validator's post-quantum key
+/// (ADR-017). Changing the identity drops the binding, which covers it.
 pub fn persist(data_dir: &Path, proof: &RegistrationProof) -> anyhow::Result<()> {
     let mut all = load_all(data_dir);
     let key = proof.evm_address.trim().to_ascii_lowercase();
+    let mut proof = proof.clone();
+    if proof.pq_pubkey.is_none() && proof.pq_binding_signature.is_none() {
+        if let Some(previous) = all.iter().find(|p| p.same_identity(&proof)) {
+            proof.pq_pubkey = previous.pq_pubkey.clone();
+            proof.pq_binding_signature = previous.pq_binding_signature.clone();
+        }
+    }
     all.retain(|p| p.evm_address.trim().to_ascii_lowercase() != key);
-    all.push(proof.clone());
+    all.push(proof);
 
     let bytes = serde_json::to_vec_pretty(&all)?;
     std::fs::create_dir_all(data_dir).ok();
@@ -160,7 +193,62 @@ mod tests {
             nonce: "1".into(),
             evm_signature: "0xsig".into(),
             ed25519_signature: "0xsig".into(),
+            pq_pubkey: None,
+            pq_binding_signature: None,
         }
+    }
+
+    fn with_pq(mut proof: RegistrationProof, pq: &str) -> RegistrationProof {
+        proof.pq_pubkey = Some(pq.repeat(2624 / pq.len()));
+        proof.pq_binding_signature = Some(pq.repeat(4968 / pq.len()));
+        proof
+    }
+
+    #[test]
+    fn classical_replay_keeps_the_journaled_pq_binding() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let bound = with_pq(proof("0xAbC", "node-1"), "ab");
+        persist(dir.path(), &bound).expect("persist bound");
+
+        // An older classical proof for the same identity keeps the binding.
+        persist(dir.path(), &proof("0xabc", "node-1")).expect("persist replay");
+        let all = load_all(dir.path());
+        assert_eq!(all.len(), 1);
+        assert_eq!(all[0].pq_pubkey, bound.pq_pubkey);
+        assert_eq!(all[0].pq_binding_signature, bound.pq_binding_signature);
+
+        // A new binding replaces the old one.
+        let rebound = with_pq(proof("0xabc", "node-1"), "cd");
+        persist(dir.path(), &rebound).expect("persist rebound");
+        assert_eq!(load_all(dir.path())[0].pq_pubkey, rebound.pq_pubkey);
+
+        // A different identity for the wallet drops the binding.
+        persist(dir.path(), &proof("0xabc", "node-1-renamed")).expect("persist renamed");
+        let all = load_all(dir.path());
+        assert_eq!(all[0].node_id, "node-1-renamed");
+        assert_eq!(all[0].pq_pubkey, None);
+        assert_eq!(all[0].pq_binding_signature, None);
+    }
+
+    #[test]
+    fn classical_proofs_serialize_without_pq_fields() {
+        let value = serde_json::to_value(proof("0xabc", "node-1").into_gossip()).unwrap();
+        let fields = &value["ValidatorRegistration"];
+        assert!(fields.get("pq_pubkey").is_none());
+        assert!(fields.get("pq_binding_signature").is_none());
+
+        // Journals written before ADR-017 Increment 3 still load.
+        let legacy = serde_json::json!([{
+            "evm_address": "0xabc", "node_id": "node-1", "ed25519_pubkey": "ab",
+            "alias": null, "nonce": "1", "evm_signature": "0x", "ed25519_signature": "0x"
+        }]);
+        let dir = tempfile::tempdir().expect("tempdir");
+        std::fs::write(
+            dir.path().join(REGISTRATIONS_FILE),
+            serde_json::to_vec(&legacy).unwrap(),
+        )
+        .unwrap();
+        assert_eq!(load_all(dir.path()).len(), 1);
     }
 
     #[test]

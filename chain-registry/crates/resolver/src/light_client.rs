@@ -1791,6 +1791,10 @@ mod tests {
                     contribution_count: 0,
                     pq_pubkey: Some(pq_hex.clone()),
                 });
+                let pq_binding_signature =
+                    common::PqKeyBindingV1::sign_with(id.clone(), "creg-stage4c-test", &hybrid)
+                        .expect("sign PQ key binding")
+                        .compact_signature();
                 spec_entries.push(ValidatorSpecEntry {
                     id,
                     alias: format!("val-{i}"),
@@ -1800,6 +1804,7 @@ mod tests {
                     reputation: 100,
                     status: "active".into(),
                     pq_pubkey: Some(pq_hex),
+                    pq_binding_signature: Some(pq_binding_signature),
                 });
                 ed_seeds.push(ed_seed);
                 hybrid_keys.push(hybrid);
